@@ -1,16 +1,34 @@
 'use client'
 
-import { useState } from 'react'
 import {
-  Plus,
-  Sparkles,
+  ArrowLeft,
   ChevronsUpDown,
-  Flame,
-  Coins,
   Circle,
+  Coins,
+  Flame,
+  Plus,
+  X,
 } from 'lucide-react'
+import { ThinkingLogo } from '@/components/thinking-logo'
+import { PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
 import { navItems, rooms } from '@/lib/data'
 import { cn } from '@/lib/utils'
+
+type SidebarProps = {
+  active: string
+  activeRoom: string
+  plan: NexusPlan
+  nexusPoints: number
+  profileName: string
+  mobileOpen: boolean
+  onCloseMobile: () => void
+  onNavigate: (section: string) => void
+  onSelectRoom: (room: string) => void
+  onCreateRoom: () => void
+  onUpgrade: () => void
+  onProfile: () => void
+  onBackToWebsite: () => void
+}
 
 function Avatar({
   initials,
@@ -24,7 +42,7 @@ function Avatar({
   return (
     <span
       className={cn(
-        'inline-flex items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-semibold text-white ring-2 ring-background/40',
+        'inline-flex items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-semibold text-white ring-2 ring-slate-950/60',
         color,
         className,
       )}
@@ -34,69 +52,114 @@ function Avatar({
   )
 }
 
-export function AppSidebar() {
-  const [active, setActive] = useState('Documents')
-
+export function AppSidebar({
+  active,
+  activeRoom,
+  plan,
+  nexusPoints,
+  profileName,
+  mobileOpen,
+  onCloseMobile,
+  onNavigate,
+  onSelectRoom,
+  onCreateRoom,
+  onUpgrade,
+  onProfile,
+  onBackToWebsite,
+}: SidebarProps) {
+  const initials = profileName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AN'
   return (
-    <aside className="glass-strong z-20 flex h-screen w-[260px] shrink-0 flex-col rounded-none border-y-0 border-l-0">
-      {/* Logo */}
+    <aside
+      aria-label="Workspace navigation"
+      className={cn(
+        'fixed inset-y-0 left-0 z-50 flex w-[286px] shrink-0 flex-col border-r border-white/8 bg-[oklch(0.09_0.02_45_/_96%)] shadow-2xl backdrop-blur-2xl transition-transform duration-300 lg:static lg:z-20 lg:translate-x-0',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+      )}
+    >
       <div className="flex items-center gap-3 px-5 py-5">
-        <div className="glow-blue-sm flex size-10 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-violet-500">
-          <Sparkles className="size-5 text-white" />
-        </div>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold tracking-tight">AirNexus</p>
-          <p className="text-xs text-muted-foreground">Workspace OS</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('Dashboard')}
+          aria-label="Go to AirGPT dashboard"
+          className="flex items-center gap-3 rounded-2xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/60"
+        >
+          <ThinkingLogo isThinking={false} className="size-11" priority />
+          <span className="leading-tight">
+            <span className="block text-sm font-semibold tracking-tight text-white">AirGPT</span>
+            <span className="block text-xs text-white/55">Workspace OS</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onCloseMobile}
+          aria-label="Close navigation"
+          className="interactive-icon ml-auto lg:hidden"
+        >
+          <X className="size-4" />
+        </button>
       </div>
 
-      {/* Current Plan & Upgrade */}
+      <div className="px-4 pb-3">
+        <button
+          type="button"
+          onClick={onBackToWebsite}
+          className="flex w-full items-center gap-2 rounded-xl border border-white/8 bg-white/[0.035] px-3 py-2 text-xs text-white/60 transition hover:border-orange-400/25 hover:bg-orange-500/10 hover:text-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50"
+        >
+          <ArrowLeft className="size-3.5" />
+          Back to Air Nexus website
+        </button>
+      </div>
       <div className="px-4 pb-4">
-        <div className="message-highlight rounded-2xl border border-[oklch(0.7_0.16_250_/_35%)] p-4">
-          <div className="mb-3 space-y-2">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-              Current Plan
-            </p>
-            <p className="text-sm font-semibold text-foreground">Plus</p>
-            <p className="text-[10px] text-muted-foreground">
-              $5/month · Unlimited workspaces
-            </p>
+        <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-4">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/45">
+            Current plan
+          </p>
+          <div className="mt-2 flex items-center justify-between">
+            <p className="text-base font-semibold text-white">{plan}</p>
+            {plan === 'Premium' && (
+              <span className="rounded-full bg-amber-300/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                Priority
+              </span>
+            )}
           </div>
-          <button className="glow-blue-md w-full rounded-lg bg-gradient-to-r from-blue-500/40 to-cyan-400/30 px-3 py-2.5 text-xs font-bold text-[oklch(0.88_0.16_250)] transition-all hover:from-blue-500/50 hover:to-cyan-400/40 active:scale-95">
-            Upgrade to Premium
+          <p className="mt-1 text-[10px] text-white/45">
+            {PLAN_DETAILS[plan].price} · {PLAN_DETAILS[plan].summary}
+          </p>
+          <button
+            type="button"
+            onClick={onUpgrade}
+            className="mt-4 w-full rounded-xl bg-gradient-to-r from-orange-500/70 to-orange-400/55 px-3 py-2.5 text-xs font-bold text-white shadow-lg shadow-orange-500/10 transition hover:brightness-110 active:scale-[0.98]"
+          >
+            {plan === 'Free' ? 'Upgrade plan' : 'Manage plan'}
           </button>
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="scrollbar-thin mt-2 flex-1 overflow-y-auto px-3">
-        <p className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+      <nav className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        <p className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-white/45">
           Workspace
         </p>
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-1">
           {navItems.map((item) => {
             const Icon = item.icon
             const isActive = active === item.label
             return (
               <li key={item.label}>
                 <button
-                  onClick={() => setActive(item.label)}
+                  type="button"
+                  aria-current={isActive ? 'page' : undefined}
+                  onClick={() => onNavigate(item.label)}
                   className={cn(
-                    'group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors',
+                    'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50',
                     isActive
-                      ? 'glass text-foreground'
-                      : 'text-muted-foreground hover:bg-white/5 hover:text-foreground',
+                      ? 'bg-white/10 text-white shadow-inner shadow-white/5'
+                      : 'text-white/58 hover:bg-white/[0.055] hover:text-white',
                   )}
                 >
-                  <Icon
-                    className={cn(
-                      'size-[18px]',
-                      isActive && 'text-[oklch(0.78_0.15_240)]',
-                    )}
-                  />
+                  <Icon className="size-[18px] shrink-0" />
                   <span className="flex-1 text-left">{item.label}</span>
                   {item.badge && (
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold">
+                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px]">
                       {item.badge}
                     </span>
                   )}
@@ -106,93 +169,101 @@ export function AppSidebar() {
           })}
         </ul>
 
-        {/* Active rooms */}
-        <div className="mt-5 flex items-center justify-between px-2 pb-2">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Active Rooms
+        <div className="mt-6 flex items-center justify-between px-2 pb-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-white/45">
+            Active rooms
           </p>
-          <button className="flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground">
+          <button
+            type="button"
+            onClick={onCreateRoom}
+            aria-label="Create collaboration room"
+            className="interactive-icon size-7"
+          >
             <Plus className="size-3.5" />
           </button>
         </div>
-        <ul className="flex flex-col gap-2 pb-4">
-          {rooms.map((room) => (
-            <li key={room.name}>
-              <button className="glass-subtle w-full rounded-2xl p-3 text-left transition-colors hover:bg-white/5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-[13px] font-medium">
-                    {room.name}
-                  </span>
-                  {room.unread && (
-                    <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-blue-500 text-[9px] font-bold text-white">
-                      {room.unread}
-                    </span>
+
+        <ul className="flex flex-col gap-2">
+          {rooms.map((room) => {
+            const selected = activeRoom === room.name && active === 'Collaboration Rooms'
+            return (
+              <li key={room.name}>
+                <button
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onSelectRoom(room.name)}
+                  className={cn(
+                    'w-full rounded-2xl border p-3 text-left transition',
+                    selected
+                      ? 'border-orange-400/30 bg-orange-500/10'
+                      : 'border-transparent bg-white/[0.035] hover:bg-white/[0.07]',
                   )}
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <div className="flex -space-x-2">
-                    {room.members.map((m, i) => (
-                      <Avatar
-                        key={i}
-                        initials={m.initials}
-                        color={m.color}
-                        className="size-5"
-                      />
-                    ))}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-[13px] font-medium text-white">{room.name}</span>
+                    {room.unread && (
+                      <span className="flex size-4 items-center justify-center rounded-full bg-orange-500 text-[9px] font-bold text-white">
+                        {room.unread}
+                      </span>
+                    )}
                   </div>
-                  <span className="flex items-center gap-1 text-[10px] text-emerald-400">
-                    <Circle className="size-2 fill-emerald-400" />
-                    {room.online} online
-                  </span>
-                </div>
-                {room.tag && (
-                  <span
-                    className={cn(
-                      'mt-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-semibold',
-                      room.tag === 'Urgent'
-                        ? 'bg-rose-500/15 text-rose-300'
-                        : 'bg-violet-500/15 text-violet-300',
-                    )}
-                  >
-                    {room.tag === 'AI Suggested' && (
-                      <Sparkles className="size-2.5" />
-                    )}
-                    {room.tag}
-                  </span>
-                )}
-                <p className="mt-2 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
-                  {room.summary}
-                </p>
-              </button>
-            </li>
-          ))}
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex -space-x-2">
+                      {room.members.map((member) => (
+                        <Avatar
+                          key={member.initials}
+                          initials={member.initials}
+                          color={member.color}
+                          className="size-5"
+                        />
+                      ))}
+                    </div>
+                    <span className="flex items-center gap-1 text-[10px] text-emerald-400">
+                      <Circle className="size-2 fill-emerald-400" />
+                      {room.online} online
+                    </span>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-[10px] leading-relaxed text-white/45">
+                    {room.summary}
+                  </p>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       </nav>
 
-      {/* Storage + profile */}
-      <div className="space-y-3 px-4 pb-4 pt-2">
-        <div className="glass-subtle rounded-2xl p-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">Storage</span>
-            <span className="font-medium">68.4 / 100 GB</span>
+      <div className="space-y-3 border-t border-white/6 px-4 pb-4 pt-3">
+        <div className="rounded-2xl bg-white/[0.04] p-3">
+          <div className="flex items-center justify-between text-xs text-white/55">
+            <span>Storage</span>
+            <span>68.4 / 100 GB</span>
           </div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-            <div className="h-full w-[68%] rounded-full bg-gradient-to-r from-cyan-400 to-blue-500" />
+          <div
+            className="mt-2 h-1.5 w-full rounded-full bg-white/10"
+            role="progressbar"
+            aria-label="Storage used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={68}
+          >
+            <div className="h-full w-[68%] rounded-full bg-gradient-to-r from-orange-400 to-orange-500" />
           </div>
         </div>
 
-        <button className="glass flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors hover:bg-white/5">
-          <Avatar
-            initials="PS"
-            color="from-blue-400 to-violet-500"
-            className="size-9"
-          />
-          <div className="min-w-0 flex-1 leading-tight">
-            <p className="truncate text-sm font-medium">Parth Sharma</p>
-            <div className="mt-0.5 flex items-center gap-2 text-[10px]">
+        <button
+          type="button"
+          onClick={onProfile}
+          aria-label="Open profile and settings"
+          className="flex w-full items-center gap-3 rounded-2xl bg-white/[0.045] p-3 text-left transition hover:bg-white/[0.08]"
+        >
+          <Avatar initials={initials} color="from-orange-400 to-amber-500" className="size-9" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">{profileName}</p>
+            <div className="mt-1 flex items-center gap-2 text-[10px]">
               <span className="flex items-center gap-1 text-amber-300">
                 <Coins className="size-3" />
-                3,940
+                {nexusPoints.toLocaleString()}
               </span>
               <span className="flex items-center gap-1 text-orange-300">
                 <Flame className="size-3" />
@@ -200,7 +271,7 @@ export function AppSidebar() {
               </span>
             </div>
           </div>
-          <ChevronsUpDown className="size-4 text-muted-foreground" />
+          <ChevronsUpDown className="size-4 text-white/35" />
         </button>
       </div>
     </aside>

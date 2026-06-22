@@ -1,13 +1,5 @@
-import { AppSidebar } from '@/components/app-sidebar'
-import { Workspace } from '@/components/workspace'
-import { ContextPanel } from '@/components/context-panel'
+import { NexusPointSite } from '@/components/nexus-point-site'
 
 export default function Page() {
-  return (
-    <div className="flex h-screen w-full overflow-hidden">
-      <AppSidebar />
-      <Workspace />
-      <ContextPanel />
-    </div>
-  )
+  return <NexusPointSite page="home" />
 }

@@ -7,10 +7,12 @@ import {
   BookOpen,
   CheckSquare,
   Calendar,
+  Calculator,
   BarChart3,
   Trophy,
   Bell,
   Plug,
+  Store,
   Settings,
 } from 'lucide-react'
 
@@ -29,10 +31,12 @@ export const navItems: NavItem[] = [
   { label: 'Panic Mode', icon: BookOpen },
   { label: 'Tasks', icon: CheckSquare, badge: '12' },
   { label: 'Calendar', icon: Calendar },
+  { label: 'Calculators', icon: Calculator },
   { label: 'Analytics', icon: BarChart3 },
   { label: 'Leaderboard', icon: Trophy },
   { label: 'Notifications', icon: Bell, badge: '3' },
   { label: 'Integrations', icon: Plug },
+  { label: 'Marketplace', icon: Store },
   { label: 'Settings', icon: Settings },
 ]
 
@@ -49,8 +53,8 @@ export const rooms: Room[] = [
   {
     name: 'Product Launch Q4',
     members: [
-      { initials: 'EM', color: 'from-cyan-400 to-blue-500' },
-      { initials: 'JK', color: 'from-blue-400 to-indigo-500' },
+      { initials: 'EM', color: 'from-orange-400 to-orange-500' },
+      { initials: 'JK', color: 'from-orange-400 to-amber-500' },
       { initials: 'AT', color: 'from-emerald-400 to-teal-500' },
     ],
     online: 4,
@@ -61,7 +65,7 @@ export const rooms: Room[] = [
   {
     name: 'Design System',
     members: [
-      { initials: 'RP', color: 'from-violet-400 to-purple-500' },
+      { initials: 'RP', color: 'from-amber-400 to-purple-500' },
       { initials: 'SK', color: 'from-pink-400 to-rose-500' },
     ],
     online: 2,
@@ -72,7 +76,7 @@ export const rooms: Room[] = [
     name: 'Growth & GTM',
     members: [
       { initials: 'MN', color: 'from-amber-400 to-orange-500' },
-      { initials: 'EM', color: 'from-cyan-400 to-blue-500' },
+      { initials: 'EM', color: 'from-orange-400 to-orange-500' },
     ],
     online: 1,
     unread: 2,
@@ -81,6 +85,7 @@ export const rooms: Room[] = [
 ]
 
 export type ChatMessage = {
+  id?: string
   author: string
   initials: string
   color: string
@@ -94,7 +99,7 @@ export const chatMessages: ChatMessage[] = [
   {
     author: 'Elena M.',
     initials: 'EM',
-    color: 'from-cyan-400 to-blue-500',
+    color: 'from-orange-400 to-orange-500',
     time: '10:42',
     text: 'Pushed the latest narrative draft to the brief — would love eyes on section 2.',
     highlighted: true,
@@ -102,7 +107,7 @@ export const chatMessages: ChatMessage[] = [
   {
     author: 'Julian K.',
     initials: 'JK',
-    color: 'from-blue-400 to-indigo-500',
+    color: 'from-orange-400 to-amber-500',
     time: '10:44',
     text: 'On it. Also: should we sync the keynote demo with marketing assets this week?',
   },
@@ -135,14 +140,14 @@ export const milestones: Milestone[] = [
   {
     workstream: 'Enterprise Design Partners',
     owner: 'Elena M.',
-    ownerColor: 'from-cyan-400 to-blue-500',
+    ownerColor: 'from-orange-400 to-orange-500',
     milestone: '5 signed LOIs',
     status: 'On track',
   },
   {
     workstream: 'Developer Activation',
     owner: 'Julian K.',
-    ownerColor: 'from-blue-400 to-indigo-500',
+    ownerColor: 'from-orange-400 to-amber-500',
     milestone: 'Self-serve onboarding',
     status: 'At risk',
   },
@@ -178,15 +183,15 @@ export const leaderboard: LeaderUser[] = [
     rank: 2,
     name: 'Elena M.',
     initials: 'EM',
-    color: 'from-cyan-400 to-blue-500',
+    color: 'from-orange-400 to-orange-500',
     points: 4310,
     streak: 33,
   },
   {
     rank: 3,
-    name: 'Parth Sharma',
-    initials: 'PS',
-    color: 'from-blue-400 to-violet-500',
+    name: 'Parth Nair',
+    initials: 'PN',
+    color: 'from-orange-400 to-amber-500',
     points: 3940,
     streak: 27,
     you: true,
@@ -195,7 +200,7 @@ export const leaderboard: LeaderUser[] = [
     rank: 4,
     name: 'Julian K.',
     initials: 'JK',
-    color: 'from-blue-400 to-indigo-500',
+    color: 'from-orange-400 to-amber-500',
     points: 3610,
     streak: 19,
   },

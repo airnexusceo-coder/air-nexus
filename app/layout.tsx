@@ -1,18 +1,13 @@
 import { Analytics } from '@vercel/analytics/next'
+import { GeistMono } from 'geist/font/mono'
+import { GeistSans } from 'geist/font/sans'
 import type { Metadata, Viewport } from 'next'
-import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-})
-
 export const metadata: Metadata = {
-  title: 'AirNexus — Workspace OS',
+  title: 'Air Nexus — Intelligence Without Limits',
   description:
-    'AirNexus is a next-generation AI workspace for learning, collaboration, and productivity — with the Nexus Points reward economy.',
+    'Air Nexus is a next-generation AI platform powered by AirGPT for learning, creation, research, and productive work.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -35,7 +30,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   colorScheme: 'dark',
-  themeColor: '#0b0e1a',
+  themeColor: '#050505',
 }
 
 export default function RootLayout({
@@ -46,7 +41,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${geistSans.variable} ${geistMono.variable}`}
+      className={`dark ${GeistSans.variable} ${GeistMono.variable}`}
     >
       <body className="font-sans antialiased">
         {children}

@@ -8,8 +8,13 @@ __v0_jsx-dev-runtime.ts
 
 # Environment variables
 .env*.local
+.certs/
+.tools/
+*.pem
 
 # Common ignores
 node_modules
 .next/
 .DS_Store
+.test-build/
+*.tsbuildinfo

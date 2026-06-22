@@ -3,18 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "setup:https": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-local-https.ps1",
+    "dev": "next dev --hostname localhost --port 3000 --experimental-https --experimental-https-key .certs/localhost-key.pem --experimental-https-cert .certs/localhost.pem",
+    "dev:http": "next dev",
+    "dev:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-local-dev.ps1",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:atar": "tsc --noEmit false --outDir .test-build --module commonjs --target ES2020 --esModuleInterop --skipLibCheck tests/atar-calculator.test.ts lib/calculator-results.ts lib/atar/atar-scaling-data.ts && node .test-build/tests/atar-calculator.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
     "@vercel/analytics": "1.6.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "geist": "^1.7.2",
     "lucide-react": "^1.16.0",
+    "mammoth": "^1.12.0",
     "next": "16.2.6",
+    "openai": "^6.44.0",
+    "pdf-parse": "^2.4.5",
     "react": "^19",
     "react-dom": "^19",
     "shadcn": "^4.8.0",
@@ -26,6 +35,8 @@
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "typescript": "5.7.3"

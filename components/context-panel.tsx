@@ -1,26 +1,95 @@
 'use client'
 
-import { useState } from 'react'
 import {
-  Sparkles,
-  MessageSquare,
-  MessageCircle,
-  ListTodo,
-  Activity,
-  Trophy,
-  Search,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from 'react'
+import {
   AtSign,
-  Paperclip,
-  Smile,
-  Send,
-  FileText,
+  Check,
   Download,
-  Coins,
-  Flame,
-  ChevronRight,
+  FileText,
+  ListTodo,
+  LockKeyhole,
+  MessageCircle,
+  MessageSquare,
+  Mic,
+  Paperclip,
+  Search,
+  Send,
+  Smile,
+  Sparkles,
+  X,
 } from 'lucide-react'
-import { chatMessages, leaderboard, rewardTiers } from '@/lib/data'
+import { ThinkingLogo } from '@/components/thinking-logo'
+import { AiMarkdown } from '@/components/ai-markdown'
+import { SpeakButton } from '@/components/speak-button'
+import { sanitizeResponse } from '@/lib/ai/sanitize-response'
+import { apiUrl } from '@/lib/api-client'
+import { isSpeechCancellation, speakWithOrpheus } from '@/lib/voice/orpheus'
+import { useVoiceInput } from '@/lib/voice/use-voice-input'
+import { chatMessages, type ChatMessage } from '@/lib/data'
+import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
+
+type PanelTab = 'ai' | 'chat' | 'comments' | 'tasks'
+
+type ContextPanelProps = {
+  activeRoom: string
+  mobileOpen: boolean
+  onCloseMobile: () => void
+  notify: (message: string, tone?: NoticeTone) => void
+  isPlus: boolean
+  autoSpeak: boolean
+  onRequestUpgrade: (feature: string, requiredPlan: 'Plus' | 'Premium') => void
+}
+
+const tabs = [
+  { id: 'ai', label: 'AI', icon: Sparkles },
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
+  { id: 'comments', label: 'Comments', icon: MessageCircle },
+  { id: 'tasks', label: 'Tasks', icon: ListTodo },
+] as const
+
+const colorMap: Record<string, string> = {
+  'from-emerald-400 to-green-500': 'bg-gradient-to-br from-emerald-400 to-green-500',
+  'from-orange-500 to-amber-500': 'bg-gradient-to-br from-orange-500 to-amber-500',
+  'from-red-500 to-orange-500': 'bg-gradient-to-br from-red-500 to-orange-500',
+  'from-orange-400 to-orange-500': 'bg-gradient-to-br from-orange-400 to-orange-500',
+  'from-orange-400 to-amber-500': 'bg-gradient-to-br from-orange-400 to-amber-500',
+  'from-amber-400 to-orange-500': 'bg-gradient-to-br from-amber-400 to-orange-500',
+  'from-emerald-400 to-teal-500': 'bg-gradient-to-br from-emerald-400 to-teal-500',
+}
+
+const comments = [
+  {
+    id: 1,
+    author: 'Julian K.',
+    initials: 'JK',
+    color: 'from-orange-400 to-amber-500',
+    text: 'Should the $42M figure be net or gross ARR? Worth a footnote.',
+    anchor: 'AI Summary',
+  },
+  {
+    id: 2,
+    author: 'Maya N.',
+    initials: 'MN',
+    color: 'from-amber-400 to-orange-500',
+    text: 'Love the three-motion framing. Can we add a slide reference?',
+    anchor: 'Launch milestones',
+  },
+]
+
+function messageId(prefix: string) {
+  return prefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+}
+
+function messageTime() {
+  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
 
 function Avatar({
   initials,
@@ -32,90 +101,377 @@ function Avatar({
   className?: string
 }) {
   return (
-    <span
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-[10px] font-semibold text-white ring-2 ring-background/50',
-        color,
-        className,
-      )}
-    >
+    <span className={cn('inline-flex shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-slate-950/50', colorMap[color] ?? 'bg-slate-500', className)}>
       {initials}
     </span>
   )
 }
 
-const tabs = [
-  { id: 'ai', label: 'AI', icon: Sparkles },
-  { id: 'chat', label: 'Chat', icon: MessageSquare },
-  { id: 'comments', label: 'Comments', icon: MessageCircle },
-  { id: 'tasks', label: 'Tasks', icon: ListTodo },
-  { id: 'activity', label: 'Activity', icon: Activity },
-  { id: 'rank', label: 'Rank', icon: Trophy },
-]
+export function ContextPanel({
+  activeRoom,
+  mobileOpen,
+  onCloseMobile,
+  notify,
+  isPlus,
+  autoSpeak,
+  onRequestUpgrade,
+}: ContextPanelProps) {
+  const [tab, setTab] = useState<PanelTab>('chat')
+  const [collabMessages, setCollabMessages] = useState<ChatMessage[]>(chatMessages)
+  const [aiMessages, setAiMessages] = useState<ChatMessage[]>([])
+  const [draft, setDraft] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [attachments, setAttachments] = useState<string[]>([])
+  const [taskItems, setTaskItems] = useState([
+    { id: 1, text: 'Confirm 5 enterprise LOIs', owner: 'EM', done: false },
+    { id: 2, text: 'Publish migration guide', owner: 'JK', done: false },
+    { id: 3, text: 'Keynote storyboard frame', owner: 'AT', done: true },
+  ])
 
-export function ContextPanel() {
-  const [tab, setTab] = useState('chat')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const { isListening, toggleListening } = useVoiceInput({
+    onTranscript: (transcript) => {
+      setDraft((current) => (current ? current + ' ' : '') + transcript)
+    },
+    onError: (message) => notify(message, 'warning'),
+  })
+  const chatMode = tab === 'ai' || tab === 'chat'
+  const activeMessages = tab === 'ai' ? aiMessages : collabMessages
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [activeMessages, loading])
+
+  useEffect(() => {
+    const closePopovers = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMentionOpen(false)
+      setEmojiOpen(false)
+    }
+
+    document.addEventListener('keydown', closePopovers)
+    return () => document.removeEventListener('keydown', closePopovers)
+  }, [])
+
+  const filteredMessages = activeMessages.filter((message) =>
+    (message.author + ' ' + message.text).toLowerCase().includes(query.toLowerCase()),
+  )
+
+  const appendMessage = (mode: 'ai' | 'chat', message: ChatMessage) => {
+    if (mode === 'ai') setAiMessages((current) => [...current, message])
+    else setCollabMessages((current) => [...current, message])
+  }
+
+  const sendMessage = async () => {
+    if (!chatMode || loading) return
+    const text = draft.trim()
+    if (!text && attachments.length === 0) return
+
+    const mode = tab
+    const content =
+      (text || 'Please review the attached file.') +
+      (attachments.length ? '\nAttached: ' + attachments.join(', ') : '')
+
+    appendMessage(mode, {
+      id: messageId('context-user'),
+      author: 'You',
+      initials: 'Y',
+      color: 'from-emerald-400 to-green-500',
+      time: messageTime(),
+      text: content,
+      self: true,
+    })
+    setDraft('')
+    setAttachments([])
+    setLoading(true)
+
+    try {
+      const response = await fetch(apiUrl(mode === 'ai' ? '/api/chat' : '/api/collab'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: content, isPlus }),
+      })
+      const data = (await response.json()) as { reply?: string; error?: string }
+      if (!response.ok || !data.reply) throw new Error(data.error || 'No response')
+      const safeReply = sanitizeResponse(data.reply)
+      appendMessage(mode, {
+        id: messageId('context-reply'),
+        author: mode === 'ai' ? 'AirGPT' : 'Collaborator',
+        initials: mode === 'ai' ? 'AI' : 'CO',
+        color: mode === 'ai' ? 'from-orange-500 to-amber-500' : 'from-orange-400 to-amber-500',
+        time: messageTime(),
+        text: safeReply,
+      })
+      if (mode === 'ai' && autoSpeak && isPlus) {
+        void speakWithOrpheus(safeReply).catch((error: unknown) => {
+          if (!isSpeechCancellation(error)) notify(error instanceof Error ? error.message : 'Speech playback failed.', 'warning')
+        })
+      }
+    } catch {
+      appendMessage(mode, {
+        id: messageId('context-reply'),
+        author: mode === 'ai' ? 'AirGPT' : 'Collaborator',
+        initials: mode === 'ai' ? 'AI' : 'CO',
+        color: mode === 'ai' ? 'from-orange-500 to-amber-500' : 'from-orange-400 to-amber-500',
+        time: messageTime(),
+        text:
+          mode === 'ai'
+            ? 'I can help turn this brief into a clear next action. The onboarding owner is the highest-priority gap.'
+            : 'Got it — I’ve added that to the launch room context.',
+      })
+      notify('Using a local context-panel reply', 'warning')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      void sendMessage()
+    }
+  }
+
+  const attachFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const names = Array.from(event.target.files ?? []).map((file) => file.name)
+    if (names.length) {
+      setAttachments((current) => [...current, ...names])
+      notify(names.length + ' attachment' + (names.length > 1 ? 's' : '') + ' added', 'success')
+    }
+    event.target.value = ''
+  }
+
+  const insertMention = (name: string) => {
+    setDraft((current) => current + '@' + name + ' ')
+    setMentionOpen(false)
+    composerRef.current?.focus()
+  }
+
+  const insertEmoji = (emoji: string) => {
+    setDraft((current) => current + emoji)
+    setEmojiOpen(false)
+    composerRef.current?.focus()
+  }
 
   return (
-    <aside className="glass-strong z-20 hidden h-screen w-[320px] shrink-0 flex-col rounded-none border-y-0 border-r-0 lg:flex">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-5">
-        <h2 className="text-sm font-semibold">Context</h2>
-        <button className="text-muted-foreground transition-colors hover:text-foreground">
-          <Search className="size-4" />
+    <aside
+      aria-label="Context panel"
+      className={cn(
+        'glass-strong fixed inset-y-0 right-0 z-50 flex w-[340px] shrink-0 flex-col rounded-none border-y-0 border-r-0 transition-transform duration-300 xl:static xl:z-20 xl:translate-x-0',
+        mobileOpen ? 'translate-x-0' : 'translate-x-full',
+      )}
+    >
+      <div className="flex items-center gap-2 px-5 py-4">
+        {searchOpen ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3">
+            <Search className="size-4 text-muted-foreground" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search context"
+              className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none"
+            />
+          </div>
+        ) : (
+          <h2 className="flex-1 text-sm font-semibold">Context</h2>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            setSearchOpen((open) => !open)
+            if (searchOpen) setQuery('')
+          }}
+          aria-label={searchOpen ? 'Close context search' : 'Search context'}
+          aria-pressed={searchOpen}
+          className="interactive-icon"
+        >
+          {searchOpen ? <X className="size-4" /> : <Search className="size-4" />}
+        </button>
+        <button type="button" onClick={onCloseMobile} aria-label="Close context panel" className="interactive-icon xl:hidden">
+          <X className="size-4" />
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="scrollbar-thin flex gap-1 overflow-x-auto px-3 pb-3">
-        {tabs.map((t) => {
-          const Icon = t.icon
-          const isActive = tab === t.id
+      <div role="tablist" aria-label="Context views" className="scrollbar-thin flex gap-1 overflow-x-auto px-3 pb-3">
+        {tabs.map((item) => {
+          const Icon = item.icon
+          const active = tab === item.id
           return (
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+              key={item.id}
+              type="button"
+              aria-selected={active}
+              role="tab"
+              onClick={() => {
+                setTab(item.id)
+                setMentionOpen(false)
+                setEmojiOpen(false)
+              }}
               className={cn(
-                'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
-                isActive
-                  ? 'glass text-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
+                'flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition',
+                active ? 'bg-white/10 text-white shadow-inner' : 'text-muted-foreground hover:bg-white/5 hover:text-white',
               )}
             >
               <Icon className="size-3.5" />
-              {t.label}
+              {item.label}
             </button>
           )
         })}
       </div>
 
-      <div className="scrollbar-thin flex-1 overflow-y-auto px-4 pb-4">
-        {tab === 'chat' && <ChatView />}
-        {tab === 'ai' && <AiView />}
-        {tab === 'rank' && <RankView />}
-        {tab === 'comments' && <CommentsView />}
-        {tab === 'tasks' && <TasksView />}
-        {tab === 'activity' && <ActivityView />}
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+        {tab === 'chat' && (
+          <ChatView
+            room={activeRoom}
+            messages={filteredMessages}
+            loading={loading}
+            messagesEndRef={messagesEndRef}
+            onDownload={() => {
+              downloadPanelFile()
+              notify('narrative-v3.pdf downloaded', 'success')
+            }}
+          />
+        )}
+        {tab === 'ai' && (
+          <AiView
+            messages={filteredMessages}
+            loading={loading}
+            messagesEndRef={messagesEndRef}
+            onSpeechError={(message) => notify(message, 'warning')}
+            canUseVoice={isPlus}
+            onVoiceUpgrade={() => onRequestUpgrade('Text-to-Speech', 'Plus')}
+            onSuggestion={(prompt) => {
+              setDraft(prompt)
+              composerRef.current?.focus()
+            }}
+          />
+        )}
+        {tab === 'comments' && (
+          <CommentsView
+            query={query}
+            onReply={(author) => {
+              setTab('chat')
+              setDraft('@' + author.split(' ')[0] + ' ')
+              window.setTimeout(() => composerRef.current?.focus(), 0)
+            }}
+            onResolve={(id) => notify('Comment ' + id + ' resolved', 'success')}
+          />
+        )}
+        {tab === 'tasks' && (
+          <TasksView
+            tasks={taskItems}
+            onToggle={(id) =>
+              setTaskItems((current) =>
+                current.map((task) => task.id === id ? { ...task, done: !task.done } : task),
+              )
+            }
+          />
+        )}
       </div>
+      {chatMode && (
+        <div className="relative shrink-0 px-4 pb-4">
+          {attachments.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {attachments.map((file) => (
+                <span key={file} className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px]">
+                  <FileText className="size-3 text-orange-300" />
+                  <span className="max-w-32 truncate">{file}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((current) => current.filter((name) => name !== file))}
+                    aria-label={'Remove ' + file}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
-      {/* Composer (chat only) */}
-      {tab === 'chat' && (
-        <div className="px-4 pb-4">
-          <div className="glass-input flex items-center gap-3 rounded-2xl px-5 py-3.5">
-            <button className="text-muted-foreground transition-all hover:text-[oklch(0.75_0.18_250)] hover:scale-110">
-              <AtSign className="size-4.5" />
+          {mentionOpen && (
+            <div className="menu-popover bottom-16 left-4 w-48">
+              {['Elena', 'Julian', 'Aarav', 'Maya'].map((name) => (
+                <button key={name} type="button" onClick={() => insertMention(name)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/8">
+                  @{name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {emojiOpen && (
+            <div className="menu-popover bottom-16 right-12 flex w-44 flex-wrap gap-1 p-2">
+              {['👍', '✨', '🚀', '✅', '💡', '🎯', '👏', '🔥'].map((emoji) => (
+                <button key={emoji} type="button" onClick={() => insertEmoji(emoji)} aria-label={'Insert ' + emoji} className="rounded-lg p-2 text-lg hover:bg-white/8">
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="glass-input flex items-center gap-2 rounded-2xl px-3 py-3">
+            <button
+              type="button"
+              onClick={() => {
+                setMentionOpen((open) => !open)
+                setEmojiOpen(false)
+              }}
+              aria-label="Mention collaborator"
+              aria-expanded={mentionOpen}
+              className="interactive-icon size-8"
+            >
+              <AtSign className="size-4" />
             </button>
-            <button className="text-muted-foreground transition-all hover:text-[oklch(0.75_0.18_250)] hover:scale-110">
-              <Paperclip className="size-4.5" />
+            <input ref={fileInputRef} type="file" multiple onChange={attachFiles} className="sr-only" tabIndex={-1} />
+            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach files" className="interactive-icon size-8">
+              <Paperclip className="size-4" />
             </button>
             <input
-              placeholder="Message #product-launch"
-              className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
+              ref={composerRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              disabled={loading}
+              placeholder={tab === 'ai' ? 'Ask AirGPT' : 'Message #' + activeRoom.toLowerCase().replaceAll(' ', '-')}
+              aria-label={tab === 'ai' ? 'AI message' : 'Room message'}
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
             />
-            <button className="text-muted-foreground transition-all hover:text-[oklch(0.75_0.18_250)] hover:scale-110">
-              <Smile className="size-4.5" />
+            <button
+              type="button"
+              onClick={() => isPlus ? toggleListening() : onRequestUpgrade('Voice Chat', 'Plus')}
+              aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+              aria-pressed={isListening}
+              className={cn('interactive-icon size-8', isListening && 'w-auto gap-1.5 bg-rose-500/20 px-2 text-rose-200')}
+            >
+              <Mic className="size-4" />
+              {isListening && <span className="text-[10px] font-medium">Listening...</span>}
             </button>
-            <button className="glow-blue-md flex size-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 via-blue-400 to-cyan-400 text-white transition-all hover:scale-120 active:scale-95 shadow-lg font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setEmojiOpen((open) => !open)
+                setMentionOpen(false)
+              }}
+              aria-label="Choose emoji"
+              aria-expanded={emojiOpen}
+              className="interactive-icon size-8"
+            >
+              <Smile className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void sendMessage()}
+              disabled={loading || (!draft.trim() && attachments.length === 0)}
+              aria-label="Send context message"
+              className="send-button size-9"
+            >
               <Send className="size-4" />
             </button>
           </div>
@@ -125,293 +481,235 @@ export function ContextPanel() {
   )
 }
 
-function ChatView() {
+function ChatView({
+  room,
+  messages,
+  loading,
+  messagesEndRef,
+  onDownload,
+}: {
+  room: string
+  messages: ChatMessage[]
+  loading: boolean
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
+  onDownload: () => void
+}) {
   return (
     <div className="space-y-4">
       <div className="glass-subtle flex items-center gap-3 rounded-2xl p-3">
-        <div className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500/40 to-blue-500/40 text-sm font-semibold">
-          #
-        </div>
-        <div className="leading-tight">
-          <p className="text-sm font-medium">Product Launch Q4</p>
+        <span className="flex size-9 items-center justify-center rounded-xl bg-amber-500/20 font-semibold">#</span>
+        <div className="min-w-0 leading-tight">
+          <p className="truncate text-sm font-medium">{room}</p>
           <p className="text-xs text-emerald-400">4 online · 12 members</p>
         </div>
       </div>
-
-      <p className="text-center text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
-        Today
-      </p>
-
-      {chatMessages.map((m, i) => (
-        <div
-          key={i}
-          className={cn('flex gap-2.5', m.self && 'flex-row-reverse')}
-        >
-          <Avatar initials={m.initials} color={m.color} className="size-7" />
-          <div className={cn('max-w-[80%]', m.self && 'items-end text-right')}>
-            <div
-              className={cn(
-                'flex items-center gap-2',
-                m.self && 'flex-row-reverse',
-              )}
-            >
-              <span className="text-xs font-medium">{m.author}</span>
-              <span className="text-[10px] text-muted-foreground">
-                {m.time}
-              </span>
-            </div>
-            <div
-              className={cn(
-                'mt-1 rounded-2xl px-5 py-3 text-sm leading-relaxed font-semibold',
-                m.self
-                  ? 'message-self glow-blue-md text-white'
-                  : 'message-highlight backdrop-blur-sm',
-              )}
-            >
-              {m.text}
-            </div>
-            {m.highlighted && (
-              <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-[oklch(0.8_0.14_250)]">
-                <Sparkles className="size-2.5" />
-                AI flagged important
-              </span>
-            )}
-          </div>
-        </div>
+      <p className="text-center text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Today</p>
+      {messages.map((message, index) => (
+        <MessageBubble key={message.id ?? message.author + '-' + index} message={message} />
       ))}
-
+      {loading && <LoadingBubble author="Collaborator" initials="CO" />}
       <div className="glass-subtle flex items-center gap-3 rounded-2xl p-3">
-        <div className="flex size-9 items-center justify-center rounded-xl bg-blue-500/15">
-          <FileText className="size-4 text-blue-300" />
-        </div>
+        <span className="flex size-9 items-center justify-center rounded-xl bg-orange-500/15">
+          <FileText className="size-4 text-orange-300" />
+        </span>
         <div className="min-w-0 flex-1 leading-tight">
           <p className="truncate text-sm font-medium">narrative-v3.pdf</p>
-          <p className="text-xs text-muted-foreground">
-            Shared by Elena · 2.4 MB
-          </p>
+          <p className="text-xs text-muted-foreground">Shared by Elena · 2.4 MB</p>
         </div>
-        <button className="text-muted-foreground hover:text-foreground">
+        <button type="button" onClick={onDownload} aria-label="Download narrative-v3.pdf" className="interactive-icon size-8">
           <Download className="size-4" />
         </button>
       </div>
+      <div ref={messagesEndRef} />
     </div>
   )
 }
 
-function AiView() {
+function AiView({
+  messages,
+  loading,
+  messagesEndRef,
+  onSpeechError,
+  canUseVoice,
+  onVoiceUpgrade,
+  onSuggestion,
+}: {
+  messages: ChatMessage[]
+  loading: boolean
+  messagesEndRef: React.RefObject<HTMLDivElement | null>
+  onSpeechError: (message: string) => void
+  canUseVoice: boolean
+  onVoiceUpgrade: () => void
+  onSuggestion: (prompt: string) => void
+}) {
   const suggestions = [
     'Summarize this document into 5 key points',
     'Extract action items and assign owners',
-    'Draft a launch announcement from the brief',
-    'Identify risks in the developer workstream',
+    'Draft a launch announcement',
+    'Identify risks in developer activation',
   ]
   return (
     <div className="space-y-4">
       <div className="glass flex gap-3 rounded-2xl p-4">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-violet-500">
-          <Sparkles className="size-4 text-white" />
-        </div>
-        <p className="text-sm leading-relaxed font-medium text-foreground">
-          I&apos;ve analyzed this brief. The keynote workstream is on track, but
-          developer activation is{' '}
-          <span className="font-bold text-amber-300">at risk</span> — the onboarding
-          milestone has no owner confirmed.
+        <ThinkingLogo isThinking={false} className="size-8" />
+        <p className="text-sm leading-relaxed text-slate-200">
+          I’ve analyzed the brief. Developer activation is at risk because the onboarding milestone has no confirmed owner.
         </p>
       </div>
-      <p className="px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        Suggested next steps
-      </p>
+      <p className="px-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Suggested next steps</p>
       <div className="space-y-2">
-        {suggestions.map((s) => (
-          <button
-            key={s}
-            className="glass-subtle flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/5"
-          >
-            <Sparkles className="size-3.5 shrink-0 text-[oklch(0.8_0.14_250)]" />
-            <span className="flex-1">{s}</span>
-            <ChevronRight className="size-3.5 text-muted-foreground" />
+        {suggestions.map((suggestion) => (
+          <button key={suggestion} type="button" onClick={() => onSuggestion(suggestion)} className="glass-subtle flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/6">
+            <Sparkles className="size-3.5 shrink-0 text-orange-300" />
+            {suggestion}
           </button>
         ))}
       </div>
+      {messages.length > 0 && (
+        <div className="space-y-3 border-t border-white/8 pt-4">
+          {messages.map((message, index) => (
+            <MessageBubble key={message.id ?? message.author + '-' + index} message={message} onSpeechError={onSpeechError} canUseVoice={canUseVoice} onVoiceUpgrade={onVoiceUpgrade} />
+          ))}
+        </div>
+      )}
+      {loading && <LoadingBubble author="AirGPT" initials="AI" isAi />}
+      <div ref={messagesEndRef} />
     </div>
   )
 }
-
-function RankView() {
-  const you = leaderboard.find((u) => u.you)!
-  const nextTier = rewardTiers.find((t) => t.points > 940) ?? rewardTiers[2]
-  return (
-    <div className="space-y-4">
-      <div className="glass rounded-2xl p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Your rank this week</span>
-          <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-semibold text-blue-300">
-            AI Strategist
-          </span>
-        </div>
-        <div className="mt-2 flex items-baseline gap-2">
-          <span className="text-3xl font-bold">#3</span>
-          <span className="flex items-center gap-1 text-sm text-amber-300">
-            <Coins className="size-3.5" />
-            {you.points.toLocaleString()}
-          </span>
-          <span className="flex items-center gap-1 text-sm text-orange-300">
-            <Flame className="size-3.5" />
-            {you.streak}d
-          </span>
-        </div>
-        <div className="mt-3">
-          <div className="flex justify-between text-[11px] text-muted-foreground">
-            <span>Next reward: {nextTier.label}</span>
-            <span>940 / {nextTier.points}</span>
-          </div>
-          <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-500"
-              style={{ width: `${(940 / nextTier.points) * 100}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      <p className="px-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-        Leaderboard
-      </p>
-      <div className="space-y-2">
-        {leaderboard.map((u) => (
-          <div
-            key={u.rank}
-            className={cn(
-              'flex items-center gap-3 rounded-xl px-3 py-2.5',
-              u.you ? 'glass-glow' : 'glass-subtle',
-            )}
-          >
-            <span
-              className={cn(
-                'w-4 text-center text-sm font-bold',
-                u.rank === 1
-                  ? 'text-amber-300'
-                  : u.rank === 2
-                    ? 'text-slate-300'
-                    : u.rank === 3
-                      ? 'text-orange-300'
-                      : 'text-muted-foreground',
-              )}
-            >
-              {u.rank}
-            </span>
-            <Avatar initials={u.initials} color={u.color} className="size-7" />
-            <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-sm font-medium">{u.name}</p>
-              <p className="flex items-center gap-1 text-[10px] text-orange-300">
-                <Flame className="size-2.5" />
-                {u.streak}d streak
-              </p>
-            </div>
-            <span className="flex items-center gap-1 text-xs font-semibold text-amber-300">
-              <Coins className="size-3" />
-              {u.points.toLocaleString()}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
+function CommentsView({
+  query,
+  onReply,
+  onResolve,
+}: {
+  query: string
+  onReply: (author: string) => void
+  onResolve: (id: number) => void
+}) {
+  const filtered = comments.filter((comment) =>
+    (comment.author + ' ' + comment.text).toLowerCase().includes(query.toLowerCase()),
   )
-}
-
-function CommentsView() {
-  const comments = [
-    {
-      author: 'Julian K.',
-      initials: 'JK',
-      color: 'from-blue-400 to-indigo-500',
-      text: 'Should the $42M figure be net or gross ARR? Worth a footnote.',
-      anchor: 'on "AI Summary"',
-    },
-    {
-      author: 'Maya N.',
-      initials: 'MN',
-      color: 'from-amber-400 to-orange-500',
-      text: 'Love the three-motion framing. Can we add a slide ref?',
-      anchor: 'on "Launch milestones"',
-    },
-  ]
   return (
     <div className="space-y-3">
-      {comments.map((c, i) => (
-        <div key={i} className="glass-subtle rounded-2xl p-3">
+      {filtered.map((comment) => (
+        <article key={comment.id} className="glass-subtle rounded-2xl p-3">
           <div className="flex items-center gap-2">
-            <Avatar initials={c.initials} color={c.color} className="size-6" />
-            <span className="text-sm font-medium">{c.author}</span>
+            <Avatar initials={comment.initials} color={comment.color} className="size-6" />
+            <span className="text-sm font-medium">{comment.author}</span>
           </div>
-          <p className="mt-1 text-[11px] text-[oklch(0.8_0.14_250)]">
-            {c.anchor}
-          </p>
-          <p className="mt-1.5 text-sm leading-snug text-muted-foreground">
-            {c.text}
-          </p>
-          <button className="mt-2 text-xs font-medium text-muted-foreground hover:text-foreground">
-            Reply
-          </button>
-        </div>
+          <p className="mt-2 text-[10px] font-medium text-orange-300">On “{comment.anchor}”</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{comment.text}</p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => onReply(comment.author)} className="rounded-lg bg-white/6 px-2.5 py-1.5 text-xs hover:bg-white/10">
+              Reply
+            </button>
+            <button type="button" onClick={() => onResolve(comment.id)} className="rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-400/10">
+              Resolve
+            </button>
+          </div>
+        </article>
       ))}
+      {filtered.length === 0 && <EmptyState label="No comments match your search." />}
     </div>
   )
 }
 
-function TasksView() {
-  const tasks = [
-    { t: 'Confirm 5 enterprise LOIs', who: 'EM', color: 'from-cyan-400 to-blue-500', due: 'Today' },
-    { t: 'Publish migration guide', who: 'JK', color: 'from-blue-400 to-indigo-500', due: 'Wed' },
-    { t: 'Keynote storyboard frame', who: 'AT', color: 'from-emerald-400 to-teal-500', due: 'Fri' },
-  ]
+function TasksView({
+  tasks,
+  onToggle,
+}: {
+  tasks: Array<{ id: number; text: string; owner: string; done: boolean }>
+  onToggle: (id: number) => void
+}) {
   return (
-    <div className="space-y-2">
-      {tasks.map((task, i) => (
-        <div
-          key={i}
-          className="glass-subtle flex items-center gap-3 rounded-xl px-3 py-3"
-        >
-          <span className="size-4 shrink-0 rounded-md border border-white/20" />
-          <span className="flex-1 text-sm">{task.t}</span>
-          <Avatar initials={task.who} color={task.color} className="size-6" />
-          <span className="rounded-md bg-white/10 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {task.due}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ActivityView() {
-  const feed = [
-    { who: 'Elena M.', action: 'edited section 2', time: '2m', points: '+3' },
-    { who: 'AI Moderator', action: 'summarized 14 messages', time: '8m', points: '' },
-    { who: 'Julian K.', action: 'left a comment', time: '15m', points: '+1' },
-    { who: 'You', action: 'completed a task', time: '22m', points: '+1' },
-    { who: 'Aarav T.', action: 'shared narrative-v3.pdf', time: '1h', points: '+2' },
-  ]
-  return (
-    <div className="space-y-1">
-      {feed.map((f, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-3 rounded-xl px-2 py-2.5 text-sm"
-        >
-          <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-[oklch(0.78_0.15_240)]" />
-          <p className="flex-1 leading-snug">
-            <span className="font-medium">{f.who}</span>{' '}
-            <span className="text-muted-foreground">{f.action}</span>
-          </p>
-          {f.points && (
-            <span className="text-xs font-semibold text-amber-300">
-              {f.points}
+    <ul className="space-y-2">
+      {tasks.map((task) => (
+        <li key={task.id}>
+          <button
+            type="button"
+            aria-pressed={task.done}
+            onClick={() => onToggle(task.id)}
+            className="glass-subtle flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-white/6"
+          >
+            <span className={cn('flex size-4 items-center justify-center rounded border', task.done ? 'border-transparent bg-orange-500' : 'border-white/20')}>
+              {task.done && <Check className="size-3" />}
             </span>
-          )}
-          <span className="text-[10px] text-muted-foreground">{f.time}</span>
-        </div>
+            <span className={cn('flex-1 text-sm', task.done && 'text-muted-foreground line-through')}>{task.text}</span>
+            <Avatar initials={task.owner} color="from-orange-400 to-orange-500" className="size-6" />
+          </button>
+        </li>
       ))}
+    </ul>
+  )
+}
+
+function MessageBubble({ message, onSpeechError, canUseVoice = false, onVoiceUpgrade }: { message: ChatMessage; onSpeechError?: (message: string) => void; canUseVoice?: boolean; onVoiceUpgrade?: () => void }) {
+  return (
+    <article className={cn('flex gap-2.5', message.self && 'flex-row-reverse')}>
+      <Avatar initials={message.initials} color={message.color} className="size-7" />
+      <div className={cn('max-w-[82%]', message.self && 'text-right')}>
+        <div className={cn('flex items-center gap-2', message.self && 'flex-row-reverse')}>
+          <span className="text-xs font-medium">{message.author}</span>
+          <span className="text-[10px] text-muted-foreground">{message.time}</span>
+        </div>
+        <div className={cn('mt-1 whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-left text-sm leading-relaxed', message.self ? 'message-self rounded-tr-md text-white' : 'message-highlight rounded-tl-md')}>
+          {message.self ? message.text : <AiMarkdown>{message.text}</AiMarkdown>}
+          {message.author === 'AirGPT' && onSpeechError && (
+            <div className="mt-2 flex justify-end">
+              {canUseVoice ? <SpeakButton text={sanitizeResponse(message.text)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>}
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function LoadingBubble({
+  author,
+  initials,
+  isAi = false,
+}: {
+  author: string
+  initials: string
+  isAi?: boolean
+}) {
+  return (
+    <div className="flex gap-2.5">
+      {isAi ? (
+        <ThinkingLogo isThinking className="size-7" />
+      ) : (
+        <Avatar initials={initials} color="from-orange-500 to-amber-500" className="size-7" />
+      )}
+      <div>
+        <span className="text-xs font-medium">{author}</span>
+        <div className="message-highlight mt-1 rounded-2xl rounded-tl-md px-4 py-2.5 text-sm text-muted-foreground">
+          {isAi ? 'Thinking…' : 'typing…'}
+        </div>
+      </div>
     </div>
   )
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-muted-foreground">
+      {label}
+    </div>
+  )
+}
+
+function downloadPanelFile() {
+  const content = [
+    'AirGPT Narrative v3',
+    '',
+    'AirGPT 3.0 launch narrative',
+    'Enterprise design partners, developer activation, and the November keynote.',
+  ].join('\n')
+  const url = URL.createObjectURL(new Blob([content], { type: 'application/pdf' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'narrative-v3.pdf'
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
