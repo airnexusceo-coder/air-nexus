@@ -29,6 +29,22 @@ type LocalUserProfile = {
   avatar: string | null
 }
 
+type SchoolConnectionCheck = {
+  browser: {
+    origin: string
+    secureContext: boolean
+    microphoneApi: boolean
+    speechRecognitionApi: boolean
+  }
+  diagnostics?: {
+    checks?: {
+      groq?: { ok: boolean; status?: number; message: string }
+    }
+    guidance?: string
+  }
+  error?: string
+}
+
 type StoredUserProfile = LocalUserProfile & {
   currentPlan: NexusPlan
   nexusPoints: number
@@ -60,7 +76,9 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [plan, setPlan] = useState<NexusPlan>('Free')
   const [selectedPlan, setSelectedPlan] = useState<NexusPlan>('Plus')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
+  const [contextCollapsed, setContextCollapsed] = useState(false)
   const [notices, setNotices] = useState<Array<{ id: number; message: string; tone: NoticeTone }>>([])
   const [inviteEmail, setInviteEmail] = useState('')
   const [profileName, setProfileName] = useState(authUser.name)
@@ -78,6 +96,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [lastDailyLogin, setLastDailyLogin] = useState<string | null>(null)
   const [rewardsHydrated, setRewardsHydrated] = useState(false)
   const [profileHydrated, setProfileHydrated] = useState(false)
+  const [connectionCheck, setConnectionCheck] = useState<SchoolConnectionCheck | null>(null)
+  const [connectionChecking, setConnectionChecking] = useState(false)
 
 
   useEffect(() => {
@@ -197,6 +217,16 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     if (activeSection === 'AI Chat') setActiveSection('Documents')
   }
 
+  const openSidebarPanel = () => {
+    setSidebarCollapsed(false)
+    setSidebarOpen(true)
+  }
+
+  const openContextPanel = () => {
+    setContextCollapsed(false)
+    setContextOpen(true)
+  }
+
   const copyShareLink = async () => {
     try {
       await navigator.clipboard.writeText('https://nexuspoint.local/share/q4-product-launch')
@@ -262,6 +292,36 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const signOut = () => {
     onSignOut()
   }
+
+  const runSchoolConnectionCheck = async () => {
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: unknown
+      webkitSpeechRecognition?: unknown
+    }
+
+    const browser = {
+      origin: window.location.origin,
+      secureContext: window.isSecureContext,
+      microphoneApi: Boolean(navigator.mediaDevices?.getUserMedia),
+      speechRecognitionApi: Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition),
+    }
+
+    setConnectionChecking(true)
+    setConnectionCheck({ browser })
+
+    try {
+      const response = await fetch('/api/diagnostics', { cache: 'no-store' })
+      const diagnostics = (await response.json()) as SchoolConnectionCheck['diagnostics']
+      setConnectionCheck({ browser, diagnostics })
+      const groqOk = diagnostics?.checks?.groq?.ok
+      notify(groqOk ? 'School connection check passed' : 'School connection check found a blocker', groqOk ? 'success' : 'warning')
+    } catch {
+      setConnectionCheck({ browser, error: 'The diagnostics route could not be reached. Local API requests are being blocked.' })
+      notify('The school connection check could not reach the local API', 'warning')
+    } finally {
+      setConnectionChecking(false)
+    }
+  }
   const claimStreakReward = () => {
     if (streakRewardClaimed) return
     setStreakRewardClaimed(true)
@@ -299,7 +359,9 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         nexusPoints={nexusPoints}
         profileName={profileName}
         mobileOpen={sidebarOpen}
+        desktopCollapsed={sidebarCollapsed}
         onCloseMobile={() => setSidebarOpen(false)}
+        onToggleDesktopCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onNavigate={navigate}
         onSelectRoom={(room) => {
           setActiveRoom(room)
@@ -323,8 +385,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         mainChatOpen={mainChatOpen}
         onOpenMainChat={openMainChat}
         onCloseMainChat={closeMainChat}
-        onOpenSidebar={() => setSidebarOpen(true)}
-        onOpenContext={() => setContextOpen(true)}
+        onOpenSidebar={openSidebarPanel}
+        onOpenContext={openContextPanel}
         onNavigate={navigate}
         onOpenDialog={setDialog}
         notify={notify}
@@ -347,7 +409,9 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       <ContextPanel
         activeRoom={activeRoom}
         mobileOpen={contextOpen}
+        desktopCollapsed={contextCollapsed}
         onCloseMobile={() => setContextOpen(false)}
+        onToggleDesktopCollapse={() => setContextCollapsed((collapsed) => !collapsed)}
         notify={notify}
         isPlus={plan !== 'Free'}
         autoSpeak={autoSpeak}
@@ -474,6 +538,30 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
           <SettingToggle icon={ShieldCheck} label="Focus mode" checked={focusMode} onChange={setFocusMode} />
           <SettingToggle icon={Volume2} label="Speak AI responses automatically" checked={plan !== 'Free' && autoSpeak} onChange={(checked) => plan === 'Free' ? requestUpgrade('Text-to-Speech', 'Plus') : setAutoSpeak(checked)} />
         </div>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-white">School connection check</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Tests HTTPS, microphone support, local API access, and Groq connectivity without exposing your API key.</p>
+            </div>
+            <button type="button" disabled={connectionChecking} onClick={() => void runSchoolConnectionCheck()} className="secondary-action shrink-0 disabled:cursor-wait disabled:opacity-60">
+              {connectionChecking ? 'Checking...' : 'Run check'}
+            </button>
+          </div>
+          {connectionCheck && (
+            <div className="mt-4 space-y-2">
+              <ConnectionRow ok={connectionCheck.browser.secureContext} label="Secure page" detail={connectionCheck.browser.secureContext ? connectionCheck.browser.origin : 'Open the HTTPS local address, not HTTP.'} />
+              <ConnectionRow ok={connectionCheck.browser.microphoneApi} label="Microphone API" detail={connectionCheck.browser.microphoneApi ? 'Browser microphone API is available.' : 'This browser or school policy is hiding microphone access.'} />
+              <ConnectionRow ok={connectionCheck.browser.speechRecognitionApi} label="Voice-to-text API" detail={connectionCheck.browser.speechRecognitionApi ? 'Speech recognition is available.' : 'Use Chrome/Edge or check if school policy blocks speech recognition.'} />
+              {connectionCheck.diagnostics?.checks?.groq ? (
+                <ConnectionRow ok={connectionCheck.diagnostics.checks.groq.ok} label="Groq AI provider" detail={connectionCheck.diagnostics.checks.groq.message} />
+              ) : (
+                <ConnectionRow ok={false} label="Local API" detail={connectionCheck.error ?? 'Waiting for diagnostics...'} />
+              )}
+              {connectionCheck.diagnostics?.guidance && <p className="rounded-xl border border-orange-300/15 bg-orange-400/[0.06] p-3 text-xs leading-5 text-orange-100">{connectionCheck.diagnostics.guidance}</p>}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -552,6 +640,18 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function ConnectionRow({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-white/8 bg-black/20 p-3">
+      <span className={cn('mt-0.5 size-2.5 shrink-0 rounded-full', ok ? 'bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,.55)]' : 'bg-amber-300 shadow-[0_0_14px_rgba(252,211,77,.45)]')} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs font-semibold text-slate-200">{label}</span>
+        <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">{detail}</span>
+      </span>
     </div>
   )
 }

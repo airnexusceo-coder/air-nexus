@@ -10,9 +10,14 @@ import {
 import {
   AtSign,
   Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
   Download,
   FileText,
   ListTodo,
+  LoaderCircle,
   LockKeyhole,
   MessageCircle,
   MessageSquare,
@@ -34,13 +39,22 @@ import { useVoiceInput } from '@/lib/voice/use-voice-input'
 import { chatMessages, type ChatMessage } from '@/lib/data'
 import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
+import {
+  DOCUMENT_ACCEPT,
+  MAX_DOCUMENTS_PER_MESSAGE,
+  pendingDocument,
+  readDocument,
+  type DocumentAttachment,
+} from '@/lib/documents/client'
 
 type PanelTab = 'ai' | 'chat' | 'comments' | 'tasks'
 
 type ContextPanelProps = {
   activeRoom: string
   mobileOpen: boolean
+  desktopCollapsed: boolean
   onCloseMobile: () => void
+  onToggleDesktopCollapse: () => void
   notify: (message: string, tone?: NoticeTone) => void
   isPlus: boolean
   autoSpeak: boolean
@@ -110,7 +124,9 @@ function Avatar({
 export function ContextPanel({
   activeRoom,
   mobileOpen,
+  desktopCollapsed,
   onCloseMobile,
+  onToggleDesktopCollapse,
   notify,
   isPlus,
   autoSpeak,
@@ -125,7 +141,7 @@ export function ContextPanel({
   const [query, setQuery] = useState('')
   const [mentionOpen, setMentionOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
-  const [attachments, setAttachments] = useState<string[]>([])
+  const [attachments, setAttachments] = useState<DocumentAttachment[]>([])
   const [taskItems, setTaskItems] = useState([
     { id: 1, text: 'Confirm 5 enterprise LOIs', owner: 'EM', done: false },
     { id: 2, text: 'Publish migration guide', owner: 'JK', done: false },
@@ -173,11 +189,20 @@ export function ContextPanel({
     if (!chatMode || loading) return
     const text = draft.trim()
     if (!text && attachments.length === 0) return
+    if (attachments.some((file) => file.status === 'processing')) {
+      notify('Wait for AirGPT to finish reading the document.', 'info')
+      return
+    }
+    const readableAttachments = attachments.filter((file) => file.status === 'ready')
+    if (!text && readableAttachments.length === 0) {
+      notify('Remove the unreadable attachment or choose another document.', 'warning')
+      return
+    }
 
     const mode = tab
     const content =
-      (text || 'Please review the attached file.') +
-      (attachments.length ? '\nAttached: ' + attachments.join(', ') : '')
+      (text || 'Please review the attached document.') +
+      (readableAttachments.length ? '\nAttached: ' + readableAttachments.map((file) => file.name).join(', ') : '')
 
     appendMessage(mode, {
       id: messageId('context-user'),
@@ -196,7 +221,11 @@ export function ContextPanel({
       const response = await fetch(apiUrl(mode === 'ai' ? '/api/chat' : '/api/collab'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, isPlus }),
+        body: JSON.stringify({
+          message: text || 'Please review and summarize the attached documents.',
+          isPlus,
+          documents: readableAttachments.map((file) => ({ name: file.name, text: file.text })),
+        }),
       })
       const data = (await response.json()) as { reply?: string; error?: string }
       if (!response.ok || !data.reply) throw new Error(data.error || 'No response')
@@ -240,12 +269,30 @@ export function ContextPanel({
   }
 
   const attachFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const names = Array.from(event.target.files ?? []).map((file) => file.name)
-    if (names.length) {
-      setAttachments((current) => [...current, ...names])
-      notify(names.length + ' attachment' + (names.length > 1 ? 's' : '') + ' added', 'success')
-    }
+    const remaining = Math.max(0, MAX_DOCUMENTS_PER_MESSAGE - attachments.length)
+    const files = Array.from(event.target.files ?? []).slice(0, remaining)
     event.target.value = ''
+    if (remaining === 0) {
+      notify('Attach up to five documents per message.', 'warning')
+      return
+    }
+    if (files.length === 0) return
+
+    const pending = files.map((file) => ({ file, attachment: pendingDocument(file, messageId('context-file')) }))
+    setAttachments((current) => [...current, ...pending.map(({ attachment }) => attachment)])
+    notify('AirGPT is reading ' + files.length + ' document' + (files.length > 1 ? 's' : '') + '…', 'info')
+    for (const { file, attachment } of pending) {
+      void readDocument(file, attachment.id)
+        .then((ready) => {
+          setAttachments((current) => current.map((item) => item.id === ready.id ? ready : item))
+          notify(file.name + ' is ready', 'success')
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'AirGPT could not read this document.'
+          setAttachments((current) => current.map((item) => item.id === attachment.id ? { ...item, status: 'error', error: message } : item))
+          notify(message, 'warning')
+        })
+    }
   }
 
   const insertMention = (name: string) => {
@@ -261,13 +308,55 @@ export function ContextPanel({
   }
 
   return (
-    <aside
-      aria-label="Context panel"
-      className={cn(
-        'glass-strong fixed inset-y-0 right-0 z-50 flex w-[340px] shrink-0 flex-col rounded-none border-y-0 border-r-0 transition-transform duration-300 xl:static xl:z-20 xl:translate-x-0',
-        mobileOpen ? 'translate-x-0' : 'translate-x-full',
+    <>
+      {desktopCollapsed && (
+        <aside
+          aria-label="Collapsed context panel"
+          className="glass-strong hidden w-14 shrink-0 flex-col items-center gap-2 rounded-none border-y-0 border-r-0 px-2 py-4 xl:flex"
+        >
+          <button
+            type="button"
+            onClick={onToggleDesktopCollapse}
+            aria-label="Expand context panel"
+            title="Expand context panel"
+            className="interactive-icon size-10"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <div className="my-1 h-px w-8 bg-white/10" />
+          {tabs.map((item) => {
+            const Icon = item.icon
+            const active = tab === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setTab(item.id)
+                  setMentionOpen(false)
+                  setEmojiOpen(false)
+                  onToggleDesktopCollapse()
+                }}
+                aria-label={'Open ' + item.label}
+                aria-pressed={active}
+                title={item.label}
+                className={cn('interactive-icon size-10', active && 'bg-white/10 text-white')}
+              >
+                <Icon className="size-4" />
+              </button>
+            )
+          })}
+        </aside>
       )}
-    >
+
+      <aside
+        aria-label="Context panel"
+        className={cn(
+          'glass-strong fixed inset-y-0 right-0 z-50 flex w-[340px] shrink-0 flex-col rounded-none border-y-0 border-r-0 transition-transform duration-300',
+          desktopCollapsed ? 'xl:hidden' : 'xl:static xl:z-20 xl:translate-x-0',
+          mobileOpen ? 'translate-x-0' : 'translate-x-full',
+        )}
+      >
       <div className="flex items-center gap-2 px-5 py-4">
         {searchOpen ? (
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3">
@@ -294,6 +383,15 @@ export function ContextPanel({
           className="interactive-icon"
         >
           {searchOpen ? <X className="size-4" /> : <Search className="size-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={onToggleDesktopCollapse}
+          aria-label="Collapse context panel"
+          title="Collapse context panel"
+          className="interactive-icon hidden xl:flex"
+        >
+          <ChevronRight className="size-4" />
         </button>
         <button type="button" onClick={onCloseMobile} aria-label="Close context panel" className="interactive-icon xl:hidden">
           <X className="size-4" />
@@ -381,13 +479,16 @@ export function ContextPanel({
           {attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {attachments.map((file) => (
-                <span key={file} className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px]">
-                  <FileText className="size-3 text-orange-300" />
-                  <span className="max-w-32 truncate">{file}</span>
+                <span key={file.id} className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px]" title={file.error}>
+                  {file.status === 'processing' ? <LoaderCircle className="size-3 animate-spin text-orange-300" /> : file.status === 'error' ? <CircleAlert className="size-3 text-rose-300" /> : <CheckCircle2 className="size-3 text-emerald-300" />}
+                  <span className="max-w-32 truncate">{file.name}</span>
+                  <span className={file.status === 'error' ? 'text-rose-300' : file.status === 'ready' ? 'text-emerald-300' : 'text-orange-200'}>
+                    {file.status === 'processing' ? 'Reading…' : file.status === 'error' ? 'Unreadable' : 'Ready'}
+                  </span>
                   <button
                     type="button"
-                    onClick={() => setAttachments((current) => current.filter((name) => name !== file))}
-                    aria-label={'Remove ' + file}
+                    onClick={() => setAttachments((current) => current.filter((item) => item.id !== file.id))}
+                    aria-label={'Remove ' + file.name}
                   >
                     <X className="size-3" />
                   </button>
@@ -429,7 +530,7 @@ export function ContextPanel({
             >
               <AtSign className="size-4" />
             </button>
-            <input ref={fileInputRef} type="file" multiple onChange={attachFiles} className="sr-only" tabIndex={-1} />
+            <input ref={fileInputRef} type="file" accept={DOCUMENT_ACCEPT} multiple onChange={attachFiles} className="sr-only" tabIndex={-1} />
             <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach files" className="interactive-icon size-8">
               <Paperclip className="size-4" />
             </button>
@@ -468,7 +569,7 @@ export function ContextPanel({
             <button
               type="button"
               onClick={() => void sendMessage()}
-              disabled={loading || (!draft.trim() && attachments.length === 0)}
+              disabled={loading || attachments.some((file) => file.status === 'processing') || (!draft.trim() && !attachments.some((file) => file.status === 'ready'))}
               aria-label="Send context message"
               className="send-button size-9"
             >
@@ -477,7 +578,8 @@ export function ContextPanel({
           </div>
         </div>
       )}
-    </aside>
+      </aside>
+    </>
   )
 }
 

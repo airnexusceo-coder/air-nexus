@@ -15,7 +15,14 @@ const MAX_MESSAGE_LENGTH = 12_000
 type ChatRequestBody = {
   message?: unknown
   isPlus?: unknown
+  documents?: unknown
 }
+
+type ChatDocument = { name: string; text: string }
+
+const MAX_DOCUMENTS = 5
+const MAX_DOCUMENT_CHARACTERS = 40_000
+const MAX_TOTAL_DOCUMENT_CHARACTERS = 80_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -44,6 +51,23 @@ function getMessageFromBody(body: ChatRequestBody | null) {
   return message
 }
 
+function getDocumentsFromBody(body: ChatRequestBody | null): ChatDocument[] | null {
+  if (body?.documents === undefined) return []
+  if (!Array.isArray(body.documents) || body.documents.length > MAX_DOCUMENTS) return null
+
+  let totalCharacters = 0
+  const documents: ChatDocument[] = []
+  for (const value of body.documents) {
+    if (!isRecord(value) || typeof value.name !== 'string' || typeof value.text !== 'string') return null
+    const name = value.name.trim().slice(0, 180)
+    const text = value.text.trim()
+    if (!name || !text || text.length > MAX_DOCUMENT_CHARACTERS) return null
+    totalCharacters += text.length
+    if (totalCharacters > MAX_TOTAL_DOCUMENT_CHARACTERS) return null
+    documents.push({ name, text })
+  }
+  return documents
+}
 function createTimeoutSignal() {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => {
@@ -56,10 +80,18 @@ function createTimeoutSignal() {
 export async function POST(req: Request) {
   const body = await readRequestBody(req)
   const message = getMessageFromBody(body)
+  const documents = getDocumentsFromBody(body)
 
   if (!message) {
     return NextResponse.json(
       { error: 'Message is required' },
+      { status: 400 },
+    )
+  }
+
+  if (!documents) {
+    return NextResponse.json(
+      { error: 'Invalid document context. Attach up to five readable documents.' },
       { status: 400 },
     )
   }
@@ -76,6 +108,7 @@ export async function POST(req: Request) {
   try {
     const result = await createTutorReply({
       message,
+      documents,
       tier: body?.isPlus === true ? 'plus' : 'free',
       signal: controller.signal,
     })

@@ -5,6 +5,8 @@ const LOCAL_HTTPS_ORIGINS = new Set([
   'https://127.0.0.1:3000',
 ])
 
+const LOCAL_LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+
 function allowedOrigins() {
   const origins = new Set<string>()
   const configuredUrl = process.env.API_URL
@@ -24,6 +26,19 @@ function allowedOrigins() {
   return origins
 }
 
+function isAllowedDevelopmentOrigin(origin: string) {
+  if (process.env.NODE_ENV !== 'development') return false
+
+  try {
+    const url = new URL(origin)
+    const requiresHttps = process.env.LOCAL_HTTPS === 'true'
+    if (requiresHttps && url.protocol !== 'https:') return false
+    if (!requiresHttps && !['http:', 'https:'].includes(url.protocol)) return false
+    return LOCAL_LOOPBACK_HOSTS.has(url.hostname)
+  } catch {
+    return false
+  }
+}
 function addCorsHeaders(response: NextResponse, origin: string) {
   response.headers.set('Access-Control-Allow-Origin', origin)
   response.headers.set('Access-Control-Allow-Credentials', 'true')
@@ -35,7 +50,7 @@ function addCorsHeaders(response: NextResponse, origin: string) {
 
 export function proxy(request: NextRequest) {
   const origin = request.headers.get('origin')
-  const originAllowed = !origin || allowedOrigins().has(origin)
+  const originAllowed = !origin || allowedOrigins().has(origin) || isAllowedDevelopmentOrigin(origin)
 
   if (origin && !originAllowed) {
     return NextResponse.json({ error: 'Origin is not allowed' }, { status: 403 })

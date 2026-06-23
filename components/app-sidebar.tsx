@@ -2,6 +2,8 @@
 
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   ChevronsUpDown,
   Circle,
   Coins,
@@ -21,7 +23,9 @@ type SidebarProps = {
   nexusPoints: number
   profileName: string
   mobileOpen: boolean
+  desktopCollapsed: boolean
   onCloseMobile: () => void
+  onToggleDesktopCollapse: () => void
   onNavigate: (section: string) => void
   onSelectRoom: (room: string) => void
   onCreateRoom: () => void
@@ -59,7 +63,9 @@ export function AppSidebar({
   nexusPoints,
   profileName,
   mobileOpen,
+  desktopCollapsed,
   onCloseMobile,
+  onToggleDesktopCollapse,
   onNavigate,
   onSelectRoom,
   onCreateRoom,
@@ -68,14 +74,78 @@ export function AppSidebar({
   onBackToWebsite,
 }: SidebarProps) {
   const initials = profileName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'AN'
+  const collapsedNav = navItems.slice(0, 12)
   return (
-    <aside
-      aria-label="Workspace navigation"
-      className={cn(
-        'fixed inset-y-0 left-0 z-50 flex w-[286px] shrink-0 flex-col border-r border-white/8 bg-[oklch(0.09_0.02_45_/_96%)] shadow-2xl backdrop-blur-2xl transition-transform duration-300 lg:static lg:z-20 lg:translate-x-0',
-        mobileOpen ? 'translate-x-0' : '-translate-x-full',
+    <>
+      {desktopCollapsed && (
+        <aside
+          aria-label="Collapsed workspace navigation"
+          className="hidden w-16 shrink-0 flex-col items-center border-r border-white/8 bg-[oklch(0.09_0.02_45_/_96%)] px-2 py-4 shadow-2xl backdrop-blur-2xl lg:flex"
+        >
+          <button
+            type="button"
+            onClick={onToggleDesktopCollapse}
+            aria-label="Expand navigation"
+            title="Expand navigation"
+            className="interactive-icon size-11"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('Dashboard')}
+            aria-label="Go to AirGPT dashboard"
+            title="AirGPT dashboard"
+            className="mt-3 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/60"
+          >
+            <ThinkingLogo isThinking={false} className="size-10" priority />
+          </button>
+          <div className="my-4 h-px w-9 bg-white/10" />
+          <nav className="scrollbar-thin flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto" aria-label="Collapsed workspace sections">
+            {collapsedNav.map((item) => {
+              const Icon = item.icon
+              const isActive = active === item.label
+              return (
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={() => onNavigate(item.label)}
+                  aria-label={item.label}
+                  aria-current={isActive ? 'page' : undefined}
+                  title={item.label}
+                  className={cn(
+                    'relative flex size-10 items-center justify-center rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50',
+                    isActive ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/[0.055] hover:text-white',
+                  )}
+                >
+                  <Icon className="size-[18px]" />
+                  {item.badge && <span className="absolute right-1 top-1 size-2 rounded-full bg-orange-400" />}
+                </button>
+              )
+            })}
+          </nav>
+          <div className="mt-3 flex flex-col items-center gap-2 border-t border-white/8 pt-3">
+            <button type="button" onClick={onBackToWebsite} aria-label="Back to Air Nexus website" title="Back to Air Nexus" className="interactive-icon size-10">
+              <ArrowLeft className="size-4" />
+            </button>
+            <button type="button" onClick={onUpgrade} aria-label="Upgrade or manage plan" title={plan === 'Free' ? 'Upgrade plan' : 'Manage plan'} className="interactive-icon size-10 text-orange-200">
+              <Coins className="size-4" />
+            </button>
+            <button type="button" onClick={onProfile} aria-label="Open profile and settings" title={profileName} className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50">
+              <Avatar initials={initials} color="from-orange-400 to-amber-500" className="size-10" />
+            </button>
+          </div>
+        </aside>
       )}
-    >
+
+      <aside
+        aria-label="Workspace navigation"
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 flex w-[286px] shrink-0 flex-col border-r border-white/8 bg-[oklch(0.09_0.02_45_/_96%)] shadow-2xl backdrop-blur-2xl transition-transform duration-300',
+          desktopCollapsed ? 'lg:hidden' : 'lg:static lg:z-20 lg:translate-x-0',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
       <div className="flex items-center gap-3 px-5 py-5">
         <button
           type="button"
@@ -89,14 +159,25 @@ export function AppSidebar({
             <span className="block text-xs text-white/55">Workspace OS</span>
           </span>
         </button>
-        <button
-          type="button"
-          onClick={onCloseMobile}
-          aria-label="Close navigation"
-          className="interactive-icon ml-auto lg:hidden"
-        >
-          <X className="size-4" />
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleDesktopCollapse}
+            aria-label="Collapse navigation"
+            title="Collapse navigation"
+            className="interactive-icon hidden lg:flex"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onCloseMobile}
+            aria-label="Close navigation"
+            className="interactive-icon lg:hidden"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
       </div>
 
       <div className="px-4 pb-3">
@@ -275,5 +356,6 @@ export function AppSidebar({
         </button>
       </div>
     </aside>
+    </>
   )
 }

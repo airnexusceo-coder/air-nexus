@@ -57,6 +57,17 @@ The Calculators page includes:
 VCE scaling estimates live in `lib/atar/atar-scaling-data.ts`. Add a new year-versioned table there when official data is available; the calculator logic and UI do not need to change. Current values are explicitly marked as illustrative placeholders, not official VTAC data.
 
 Grade and ATAR results can be saved to the on-device calculator history. To manually test plan gates, open Marketplace, activate or redeem a plan, then revisit Calculators. Clear the site data for `https://localhost:3000` to reset all demo account and reward state.
+
+## School network troubleshooting
+
+If AirGPT works at home but fails at school, open AirGPT, go to Profile & workspace settings, and run **School connection check**. It tests the local HTTPS page, microphone APIs, local API routes, and whether the server can reach Groq.
+
+Common school blockers:
+
+- Managed Chrome/Edge policy can block microphone permission even on HTTPS. The app can detect this, but only the browser/site settings or school IT policy can allow it.
+- School DNS/firewalls can block `api.groq.com`. Chat and Orpheus TTS are server-side, so if the local dev server is running on the school network and Groq is blocked, those AI calls will fail. Use a network that allows Groq, deploy the backend/server outside the school network, or ask IT to allowlist `api.groq.com`.
+- If you run on a different local port because 3000 is busy, keep using the HTTPS address shown by Next.js. Development CORS allows trusted loopback HTTPS origins on any port.
+
 ## Quality checks
 
 ```powershell

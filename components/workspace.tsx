@@ -19,14 +19,17 @@ import {
   Calculator,
   Check,
   CheckCircle2,
+  CircleAlert,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Download,
-  FileText,
   Gauge,
   History,
   Italic,
   Link2,
+  LoaderCircle,
   LockKeyhole,
   ListChecks,
   Menu,
@@ -64,6 +67,13 @@ import type { NexusTransaction } from '@/lib/nexus-points'
 import { milestones } from '@/lib/data'
 import type { AppDialog, NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
+import {
+  DOCUMENT_ACCEPT,
+  MAX_DOCUMENTS_PER_MESSAGE,
+  pendingDocument,
+  readDocument,
+  type DocumentAttachment,
+} from '@/lib/documents/client'
 
 type WorkspaceProps = {
   activeSection: string
@@ -98,11 +108,15 @@ type MainMessage = {
   time: string
 }
 
-type LocalAttachment = {
+type ChatThread = {
   id: string
-  name: string
-  size: string
+  title: string
+  messages: MainMessage[]
+  createdAt: string
+  updatedAt: string
 }
+
+type LocalAttachment = DocumentAttachment
 
 const collaborators = [
   { initials: 'EM', color: 'from-orange-400 to-orange-500', name: 'Elena M.' },
@@ -134,18 +148,83 @@ const initialMessages: MainMessage[] = [
   },
 ]
 
+const CHAT_HISTORY_STORAGE_KEY = 'airgpt-chat-history'
+const MAX_CHAT_HISTORY_ITEMS = 30
+
+function copyInitialMessages() {
+  return initialMessages.map((message) => ({ ...message }))
+}
+
+function createChatTitle(messages: MainMessage[]) {
+  const firstUserMessage = messages.find((message) => message.role === 'user')?.content ?? ''
+  const withoutAttachments = firstUserMessage.replace(/\n\nAttachments:[\s\S]*$/i, '')
+  const cleaned = withoutAttachments
+    .replace(/[`*_>#\[\]()]/g, ' ')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const words = cleaned.split(' ').filter(Boolean).slice(0, 5)
+  return words.length ? words.join(' ') : 'New chat'
+}
+
+function isMainMessage(value: unknown): value is MainMessage {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const message = value as Partial<MainMessage>
+  return typeof message.id === 'string' && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string' && typeof message.time === 'string'
+}
+
+function parseChatHistory(value: string | null): ChatThread[] {
+  if (!value) return []
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((item): ChatThread[] => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) return []
+      const thread = item as Partial<ChatThread>
+      if (typeof thread.id !== 'string' || typeof thread.title !== 'string' || !Array.isArray(thread.messages)) return []
+      const messages = thread.messages.filter(isMainMessage)
+      if (messages.length === 0) return []
+      return [{
+        id: thread.id,
+        title: thread.title || createChatTitle(messages),
+        messages,
+        createdAt: typeof thread.createdAt === 'string' ? thread.createdAt : new Date().toISOString(),
+        updatedAt: typeof thread.updatedAt === 'string' ? thread.updatedAt : new Date().toISOString(),
+      }]
+    }).slice(0, MAX_CHAT_HISTORY_ITEMS)
+  } catch {
+    return []
+  }
+}
+
+function createChatThread(id = createId('chat'), messages = copyInitialMessages()): ChatThread {
+  const now = new Date().toISOString()
+  return {
+    id,
+    title: createChatTitle(messages),
+    messages,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function formatThreadDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Recently'
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  if (date.toDateString() === today.toDateString()) return 'Today'
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
 function createId(prefix: string) {
   return prefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2)
 }
 
 function formatTime() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
 function downloadText(filename: string, content: string, type = 'text/markdown') {
@@ -182,7 +261,11 @@ export function Workspace({
   onEarnNexusPoints,
 }: WorkspaceProps) {
   const [draft, setDraft] = useState('')
-  const [messages, setMessages] = useState<MainMessage[]>(initialMessages)
+  const [messages, setMessages] = useState<MainMessage[]>(() => copyInitialMessages())
+  const [activeChatId, setActiveChatId] = useState(() => createId('chat'))
+  const [chatHistory, setChatHistory] = useState<ChatThread[]>([])
+  const [chatHistoryHydrated, setChatHistoryHydrated] = useState(false)
+  const [chatHistoryCollapsed, setChatHistoryCollapsed] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -218,6 +301,48 @@ export function Workspace({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isSending])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const stored = parseChatHistory(window.localStorage.getItem(CHAT_HISTORY_STORAGE_KEY))
+      if (stored.length > 0) {
+        setChatHistory(stored)
+        setActiveChatId(stored[0].id)
+        setMessages(stored[0].messages)
+      } else {
+        const starterThread = createChatThread(activeChatId, messages)
+        setChatHistory([starterThread])
+      }
+      setChatHistoryHydrated(true)
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+    // Run only once: this restores the most recent local chat history.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!chatHistoryHydrated) return
+    const timeoutId = window.setTimeout(() => {
+      const now = new Date().toISOString()
+      setChatHistory((current) => {
+        const existing = current.find((thread) => thread.id === activeChatId)
+        const nextThread: ChatThread = {
+          id: activeChatId,
+          title: createChatTitle(messages),
+          messages,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        }
+        return [nextThread, ...current.filter((thread) => thread.id !== activeChatId)].slice(0, MAX_CHAT_HISTORY_ITEMS)
+      })
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [activeChatId, chatHistoryHydrated, messages])
+
+  useEffect(() => {
+    if (!chatHistoryHydrated) return
+    window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(chatHistory))
+  }, [chatHistory, chatHistoryHydrated])
 
   useEffect(() => {
     const closeTransientUi = (event: globalThis.KeyboardEvent) => {
@@ -257,15 +382,44 @@ export function Workspace({
     notify('Document formatting updated', 'success')
   }
 
+  const startNewChat = () => {
+    const nextId = createId('chat')
+    setActiveChatId(nextId)
+    setMessages(copyInitialMessages())
+    setDraft('')
+    setAttachments([])
+    setToolsOpen(false)
+    notify('Started a fresh AI conversation', 'success')
+  }
+
+  const selectChatThread = (thread: ChatThread) => {
+    setActiveChatId(thread.id)
+    setMessages(thread.messages)
+    setDraft('')
+    setAttachments([])
+    setToolsOpen(false)
+    notify('Opened ' + thread.title, 'info')
+  }
+
   const sendMessage = async () => {
     const content = draft.trim()
     if ((!content && attachments.length === 0) || isSending) return
 
+    if (attachments.some((file) => file.status === 'processing')) {
+      notify('Wait for AirGPT to finish reading the document.', 'info')
+      return
+    }
+    const readableAttachments = attachments.filter((file) => file.status === 'ready')
+    if (!content && readableAttachments.length === 0) {
+      notify('Remove the unreadable attachment or choose another document.', 'warning')
+      return
+    }
+
     const attachmentText =
-      attachments.length > 0
-        ? '\n\nAttachments: ' + attachments.map((file) => file.name).join(', ')
+      readableAttachments.length > 0
+        ? '\n\nAttachments: ' + readableAttachments.map((file) => file.name).join(', ')
         : ''
-    const userContent = (content || 'Please review the attached files.') + attachmentText
+    const userContent = (content || 'Please review the attached documents.') + attachmentText
     const userMessage: MainMessage = {
       id: createId('user'),
       role: 'user',
@@ -282,7 +436,11 @@ export function Workspace({
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userContent, isPlus: plan !== 'Free' }),
+        body: JSON.stringify({
+          message: content || 'Please review and summarize the attached documents.',
+          isPlus: plan !== 'Free',
+          documents: readableAttachments.map((file) => ({ name: file.name, text: file.text })),
+        }),
       })
       const data = (await response.json()) as { reply?: string; error?: string }
       if (!response.ok || !data.reply) throw new Error(data.error || 'AI service unavailable')
@@ -327,19 +485,31 @@ export function Workspace({
   }
 
   const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
-    setAttachments((current) => [
-      ...current,
-      ...files.map((file) => ({
-        id: createId('file'),
-        name: file.name,
-        size: formatFileSize(file.size),
-      })),
-    ])
-    if (files.length > 0) {
-      notify(files.length + ' file' + (files.length > 1 ? 's' : '') + ' attached', 'success')
-    }
+    const remaining = Math.max(0, MAX_DOCUMENTS_PER_MESSAGE - attachments.length)
+    const files = Array.from(event.target.files ?? []).slice(0, remaining)
     event.target.value = ''
+    if (remaining === 0) {
+      notify('Attach up to five documents per message.', 'warning')
+      return
+    }
+    if (files.length === 0) return
+
+    const pending = files.map((file) => ({ file, attachment: pendingDocument(file, createId('file')) }))
+    setAttachments((current) => [...current, ...pending.map(({ attachment }) => attachment)])
+    notify('AirGPT is reading ' + files.length + ' document' + (files.length > 1 ? 's' : '') + '…', 'info')
+
+    for (const { file, attachment } of pending) {
+      void readDocument(file, attachment.id)
+        .then((ready) => {
+          setAttachments((current) => current.map((item) => item.id === ready.id ? ready : item))
+          notify(file.name + ' is ready', 'success')
+        })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : 'AirGPT could not read this document.'
+          setAttachments((current) => current.map((item) => item.id === attachment.id ? { ...item, status: 'error', error: message } : item))
+          notify(message, 'warning')
+        })
+    }
   }
 
 
@@ -436,6 +606,9 @@ export function Workspace({
         <FullPageChat
           draft={draft}
           messages={messages}
+          chatHistory={chatHistory}
+          activeChatId={activeChatId}
+          chatHistoryCollapsed={chatHistoryCollapsed}
           attachments={attachments}
           isSending={isSending}
           isListening={isListening}
@@ -458,12 +631,9 @@ export function Workspace({
           canUseVoice={plan !== 'Free'}
           onVoiceUpgrade={() => onRequestUpgrade('Text-to-Speech', 'Plus')}
           onSpeechError={(message) => notify(message, 'warning')}
-          onNewChat={() => {
-            setMessages(initialMessages)
-            setDraft('')
-            setAttachments([])
-            notify('Started a fresh AI conversation', 'success')
-          }}
+          onNewChat={startNewChat}
+          onSelectChat={selectChatThread}
+          onToggleChatHistory={() => setChatHistoryCollapsed((collapsed) => !collapsed)}
         />
       ) : (
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
@@ -818,7 +988,7 @@ function CompactAiComposer({
           aria-label="Main AI prompt"
           className="max-h-32 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm font-medium outline-none placeholder:text-muted-foreground"
         />
-        <input ref={fileInputRef} type="file" multiple onChange={onFilesAdded} className="sr-only" tabIndex={-1} />
+        <input ref={fileInputRef} type="file" accept={DOCUMENT_ACCEPT} multiple onChange={onFilesAdded} className="sr-only" tabIndex={-1} />
         <button type="button" onClick={onAttach} aria-label="Attach files" className="interactive-icon">
           <Paperclip className="size-5" />
         </button>
@@ -843,7 +1013,7 @@ function CompactAiComposer({
         <button
           type="button"
           onClick={onSend}
-          disabled={!draft.trim() && attachments.length === 0}
+          disabled={attachments.some((file) => file.status === 'processing') || (!draft.trim() && !attachments.some((file) => file.status === 'ready'))}
           aria-label="Send AI prompt"
           className="send-button"
         >
@@ -861,6 +1031,9 @@ function CompactAiComposer({
 function FullPageChat({
   draft,
   messages,
+  chatHistory,
+  activeChatId,
+  chatHistoryCollapsed,
   attachments,
   isSending,
   isListening,
@@ -882,9 +1055,14 @@ function FullPageChat({
   onVoiceUpgrade,
   onSpeechError,
   onNewChat,
+  onSelectChat,
+  onToggleChatHistory,
 }: {
   draft: string
   messages: MainMessage[]
+  chatHistory: ChatThread[]
+  activeChatId: string
+  chatHistoryCollapsed: boolean
   attachments: LocalAttachment[]
   isSending: boolean
   isListening: boolean
@@ -906,6 +1084,8 @@ function FullPageChat({
   onVoiceUpgrade: () => void
   onSpeechError: (message: string) => void
   onNewChat: () => void
+  onSelectChat: (thread: ChatThread) => void
+  onToggleChatHistory: () => void
 }) {
   return (
     <section className="animate-chat-enter flex min-h-0 flex-1 flex-col" aria-label="AirGPT full-page chat">
@@ -923,94 +1103,228 @@ function FullPageChat({
         </button>
       </div>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-8">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-          {messages.map((message) => (
-            <article key={message.id} className={cn('flex gap-3', message.role === 'user' && 'justify-end')}>
-              {message.role === 'assistant' && (
-                <ThinkingLogo isThinking={false} className="size-9" />
-              )}
-              <div
-                className={cn(
-                  'max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 shadow-xl',
-                  message.role === 'user'
-                    ? 'message-self rounded-br-lg text-white'
-                    : 'glass rounded-bl-lg text-slate-200',
-                )}
-              >
-                {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <p className="text-[10px] opacity-50">{message.time}</p>
-                  {message.role === 'assistant' && (canUseVoice ? <SpeakButton text={sanitizeResponse(message.content)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>)}
-                </div>
-              </div>
-            </article>
-          ))}
-          {isSending && (
-            <article className="flex gap-3">
-              <ThinkingLogo isThinking={isSending} className="size-9" />
-              <div className="glass rounded-3xl rounded-bl-lg px-5 py-4 text-sm text-muted-foreground">
-                Thinking…
-              </div>
-            </article>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
+      <ChatHistoryStrip threads={chatHistory} activeChatId={activeChatId} onSelectChat={onSelectChat} />
 
-      <div className="shrink-0 px-3 pb-4 sm:px-6 sm:pb-6">
-        <div className="relative mx-auto w-full max-w-3xl">
-          <AttachmentChips attachments={attachments} onRemove={onRemoveAttachment} />
-          <div className="glass-input glass-glow flex items-end gap-2 rounded-[2rem] px-3 py-3 sm:px-4">
-            <input ref={fileInputRef} type="file" multiple onChange={onFilesAdded} className="sr-only" tabIndex={-1} />
-            <button type="button" onClick={onAttach} aria-label="Attach files" className="interactive-icon mb-0.5">
-              <Paperclip className="size-5" />
-            </button>
-            <textarea
-              ref={composerRef}
-              value={draft}
-              rows={1}
-              onChange={(event) => onDraftChange(event.target.value)}
-              onKeyDown={onComposerKeyDown}
-              placeholder="Message AirGPT"
-              aria-label="Chat message"
-              className="max-h-40 min-h-8 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground"
-            />
-            <div className="relative hidden sm:block">
-              <button type="button" onClick={onToggleTools} aria-label="Open AI tools" aria-expanded={toolsOpen} className="interactive-icon mb-0.5">
-                <Wand2 className="size-5" />
-              </button>
-              {toolsOpen && <ToolsMenu onChoose={onChooseTool} alignBottom />}
+      <div className="min-h-0 flex flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-8">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+              {messages.map((message) => (
+                <article key={message.id} className={cn('flex gap-3', message.role === 'user' && 'justify-end')}>
+                  {message.role === 'assistant' && (
+                    <ThinkingLogo isThinking={false} className="size-9" />
+                  )}
+                  <div
+                    className={cn(
+                      'max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 shadow-xl',
+                      message.role === 'user'
+                        ? 'message-self rounded-br-lg text-white'
+                        : 'glass rounded-bl-lg text-slate-200',
+                    )}
+                  >
+                    {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <p className="text-[10px] opacity-50">{message.time}</p>
+                      {message.role === 'assistant' && (canUseVoice ? <SpeakButton text={sanitizeResponse(message.content)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>)}
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {isSending && (
+                <article className="flex gap-3">
+                  <ThinkingLogo isThinking={isSending} className="size-9" />
+                  <div className="glass rounded-3xl rounded-bl-lg px-5 py-4 text-sm text-muted-foreground">
+                    Thinking…
+                  </div>
+                </article>
+              )}
+              <div ref={messagesEndRef} />
             </div>
-            <button
-              type="button"
-              onClick={onToggleMicrophone}
-              aria-label={isListening ? 'Stop voice dictation' : 'Start voice dictation'}
-              aria-pressed={isListening}
-              className={cn('interactive-icon mb-0.5', isListening && 'w-auto gap-1.5 bg-rose-500/20 px-2 text-rose-200')}
-            >
-              <Mic className="size-5" />
-              {isListening && <span className="text-xs font-medium">Listening...</span>}
-            </button>
-            <button
-              type="button"
-              onClick={onSend}
-              disabled={isSending || (!draft.trim() && attachments.length === 0)}
-              aria-label="Send message"
-              className="send-button"
-            >
-              <ArrowUp className="size-5" />
-            </button>
           </div>
-          <p className="mt-2 text-center text-[10px] text-muted-foreground">
-            Enter to send · Shift+Enter for a new line
-          </p>
+
+          <div className="shrink-0 px-3 pb-4 sm:px-6 sm:pb-6">
+            <div className="relative mx-auto w-full max-w-3xl">
+              <AttachmentChips attachments={attachments} onRemove={onRemoveAttachment} />
+              <div className="glass-input glass-glow flex items-end gap-2 rounded-[2rem] px-3 py-3 sm:px-4">
+                <input ref={fileInputRef} type="file" accept={DOCUMENT_ACCEPT} multiple onChange={onFilesAdded} className="sr-only" tabIndex={-1} />
+                <button type="button" onClick={onAttach} aria-label="Attach files" className="interactive-icon mb-0.5">
+                  <Paperclip className="size-5" />
+                </button>
+                <textarea
+                  ref={composerRef}
+                  value={draft}
+                  rows={1}
+                  onChange={(event) => onDraftChange(event.target.value)}
+                  onKeyDown={onComposerKeyDown}
+                  placeholder="Message AirGPT"
+                  aria-label="Chat message"
+                  className="max-h-40 min-h-8 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+                />
+                <div className="relative hidden sm:block">
+                  <button type="button" onClick={onToggleTools} aria-label="Open AI tools" aria-expanded={toolsOpen} className="interactive-icon mb-0.5">
+                    <Wand2 className="size-5" />
+                  </button>
+                  {toolsOpen && <ToolsMenu onChoose={onChooseTool} alignBottom />}
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggleMicrophone}
+                  aria-label={isListening ? 'Stop voice dictation' : 'Start voice dictation'}
+                  aria-pressed={isListening}
+                  className={cn('interactive-icon mb-0.5', isListening && 'w-auto gap-1.5 bg-rose-500/20 px-2 text-rose-200')}
+                >
+                  <Mic className="size-5" />
+                  {isListening && <span className="text-xs font-medium">Listening...</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={onSend}
+                  disabled={isSending || attachments.some((file) => file.status === 'processing') || (!draft.trim() && !attachments.some((file) => file.status === 'ready'))}
+                  aria-label="Send message"
+                  className="send-button"
+                >
+                  <ArrowUp className="size-5" />
+                </button>
+              </div>
+              <p className="mt-2 text-center text-[10px] text-muted-foreground">
+                Enter to send · Shift+Enter for a new line
+              </p>
+            </div>
+          </div>
         </div>
+
+        <ChatHistoryRail threads={chatHistory} activeChatId={activeChatId} collapsed={chatHistoryCollapsed} onToggleCollapsed={onToggleChatHistory} onNewChat={onNewChat} onSelectChat={onSelectChat} />
       </div>
     </section>
   )
 }
+function getThreadPreview(thread: ChatThread) {
+  const message = thread.messages.find((item) => item.role === 'user') ?? thread.messages.find((item) => item.role === 'assistant')
+  return (message?.content ?? 'Start a new AirGPT conversation')
+    .replace(/\n\nAttachments:[\s\S]*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 86)
+}
 
+function ChatHistoryStrip({
+  threads,
+  activeChatId,
+  onSelectChat,
+}: {
+  threads: ChatThread[]
+  activeChatId: string
+  onSelectChat: (thread: ChatThread) => void
+}) {
+  if (threads.length === 0) return null
+  return (
+    <div className="scrollbar-thin flex shrink-0 gap-2 overflow-x-auto border-b border-white/6 px-4 py-2 xl:hidden" aria-label="Recent chat history">
+      {threads.map((thread) => (
+        <button
+          key={thread.id}
+          type="button"
+          onClick={() => onSelectChat(thread)}
+          aria-current={thread.id === activeChatId ? 'page' : undefined}
+          className={cn(
+            'max-w-48 shrink-0 rounded-xl border px-3 py-2 text-left text-xs transition',
+            thread.id === activeChatId
+              ? 'border-orange-300/35 bg-orange-500/15 text-orange-100'
+              : 'border-white/8 bg-white/[0.035] text-slate-400 hover:bg-white/8 hover:text-white',
+          )}
+        >
+          <span className="block truncate font-semibold">{thread.title}</span>
+          <span className="mt-0.5 block text-[10px] text-slate-500">{formatThreadDate(thread.updatedAt)}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function ChatHistoryRail({
+  threads,
+  activeChatId,
+  collapsed,
+  onToggleCollapsed,
+  onNewChat,
+  onSelectChat,
+}: {
+  threads: ChatThread[]
+  activeChatId: string
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  onNewChat: () => void
+  onSelectChat: (thread: ChatThread) => void
+}) {
+  if (collapsed) {
+    return (
+      <aside className="hidden w-14 shrink-0 flex-col items-center gap-2 border-l border-white/8 bg-black/20 px-2 py-4 xl:flex" aria-label="Collapsed chat history">
+        <button type="button" onClick={onToggleCollapsed} aria-label="Expand chat history" title="Expand chat history" className="interactive-icon size-10">
+          <ChevronLeft className="size-4" />
+        </button>
+        <div className="my-1 h-px w-8 bg-white/10" />
+        <button type="button" onClick={() => { onNewChat(); onToggleCollapsed() }} aria-label="New chat" title="New chat" className="interactive-icon size-10">
+          <Plus className="size-4" />
+        </button>
+        <div className="flex flex-1 items-center justify-center">
+          <span className="-rotate-90 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">History</span>
+        </div>
+      </aside>
+    )
+  }
+
+  return (
+    <aside className="hidden w-72 shrink-0 flex-col border-l border-white/8 bg-black/20 xl:flex" aria-label="Chat history">
+      <div className="flex items-center justify-between border-b border-white/8 px-4 py-4">
+        <div className="flex items-center gap-2">
+          <History className="size-4 text-orange-300" />
+          <h2 className="text-sm font-semibold">Chat history</h2>
+        </div>
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={onNewChat} aria-label="Start new chat" className="interactive-icon size-8">
+            <Plus className="size-4" />
+          </button>
+          <button type="button" onClick={onToggleCollapsed} aria-label="Collapse chat history" title="Collapse chat history" className="interactive-icon size-8">
+            <ChevronRight className="size-4" />
+          </button>
+        </div>
+      </div>
+      <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        {threads.length === 0 ? (
+          <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4 text-xs leading-5 text-slate-500">
+            Your AirGPT conversations will appear here after you send a message.
+          </div>
+        ) : threads.map((thread) => {
+          const active = thread.id === activeChatId
+          return (
+            <button
+              key={thread.id}
+              type="button"
+              onClick={() => onSelectChat(thread)}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'group w-full rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50',
+                active
+                  ? 'border-orange-300/35 bg-orange-500/15 shadow-[0_0_28px_-18px_#ff6a00]'
+                  : 'border-white/8 bg-white/[0.035] hover:border-orange-300/20 hover:bg-orange-500/10',
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <span className={cn('mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl border', active ? 'border-orange-300/30 bg-orange-500/20 text-orange-100' : 'border-white/8 bg-white/5 text-slate-400 group-hover:text-orange-200')}>
+                  <MessageSquare className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-slate-100">{thread.title}</span>
+                  <span className="mt-1 block truncate text-[11px] text-slate-500">{getThreadPreview(thread)}</span>
+                  <span className="mt-2 block text-[10px] font-medium uppercase tracking-wider text-slate-600">{formatThreadDate(thread.updatedAt)}</span>
+                </span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </aside>
+  )
+}
 function ToolsMenu({
   onChoose,
   alignBottom = false,
@@ -1047,9 +1361,12 @@ function AttachmentChips({
     <div className="mb-2 flex flex-wrap gap-2 px-2">
       {attachments.map((file) => (
         <span key={file.id} className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs">
-          <FileText className="size-3.5 text-orange-300" />
+          {file.status === 'processing' ? <LoaderCircle className="size-3.5 animate-spin text-orange-300" /> : file.status === 'error' ? <CircleAlert className="size-3.5 text-rose-300" /> : <CheckCircle2 className="size-3.5 text-emerald-300" />}
           <span>{file.name}</span>
           <span className="text-muted-foreground">{file.size}</span>
+          <span className={cn('text-[10px]', file.status === 'error' ? 'text-rose-300' : file.status === 'ready' ? 'text-emerald-300' : 'text-orange-200')} title={file.error}>
+            {file.status === 'processing' ? 'Reading…' : file.status === 'error' ? 'Unreadable' : file.truncated ? 'Ready · shortened' : 'Ready'}
+          </span>
           <button type="button" onClick={() => onRemove(file.id)} aria-label={'Remove ' + file.name} className="rounded-full p-0.5 hover:bg-white/10">
             <X className="size-3" />
           </button>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import mammoth from 'mammoth'
 import { PDFParse } from 'pdf-parse'
+import { getData as getPdfWorkerData } from 'pdf-parse/worker'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -18,6 +19,7 @@ function normalizeText(value: string) {
 }
 
 async function extractPdf(buffer: Buffer) {
+  PDFParse.setWorker(getPdfWorkerData())
   const parser = new PDFParse({ data: buffer })
   try {
     return (await parser.getText()).text
