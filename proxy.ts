@@ -39,6 +39,15 @@ function isAllowedDevelopmentOrigin(origin: string) {
     return false
   }
 }
+
+function isSameOriginRequest(request: NextRequest, origin: string) {
+  try {
+    return new URL(origin).origin === request.nextUrl.origin
+  } catch {
+    return false
+  }
+}
+
 function addCorsHeaders(response: NextResponse, origin: string) {
   response.headers.set('Access-Control-Allow-Origin', origin)
   response.headers.set('Access-Control-Allow-Credentials', 'true')
@@ -50,7 +59,10 @@ function addCorsHeaders(response: NextResponse, origin: string) {
 
 export function proxy(request: NextRequest) {
   const origin = request.headers.get('origin')
-  const originAllowed = !origin || allowedOrigins().has(origin) || isAllowedDevelopmentOrigin(origin)
+  const originAllowed = !origin ||
+    isSameOriginRequest(request, origin) ||
+    allowedOrigins().has(origin) ||
+    isAllowedDevelopmentOrigin(origin)
 
   if (origin && !originAllowed) {
     return NextResponse.json({ error: 'Origin is not allowed' }, { status: 403 })
