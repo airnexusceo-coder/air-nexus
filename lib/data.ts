@@ -5,6 +5,8 @@ import {
   FileText,
   Users,
   BookOpen,
+  ClipboardList,
+  Compass,
   CheckSquare,
   Calendar,
   Calculator,
@@ -14,6 +16,9 @@ import {
   Plug,
   Store,
   Settings,
+  GraduationCap,
+  Layers3,
+  Sparkles,
 } from 'lucide-react'
 
 export type NavItem = {
@@ -25,6 +30,11 @@ export type NavItem = {
 
 export const navItems: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard },
+  { label: 'Daily Dashboard', icon: Sparkles },
+  { label: 'Study Coach', icon: Compass },
+  { label: 'AI Tutor', icon: GraduationCap },
+  { label: 'Flashcards', icon: Layers3 },
+  { label: 'Assignment Workspace', icon: ClipboardList },
   { label: 'AI Chat', icon: MessageSquareText },
   { label: 'Documents', icon: FileText, active: true },
   { label: 'Collaboration Rooms', icon: Users, badge: '4' },

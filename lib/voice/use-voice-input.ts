@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { apiUrl, fetchWithRetry } from '@/lib/api-client'
 
 type SpeechRecognitionEventLike = {
   results: ArrayLike<{ 0: { transcript: string } }>
@@ -32,6 +33,9 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions) {
   const [isListening, setIsListening] = useState(false)
   const [isRequesting, setIsRequesting] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const recordingTimeoutRef = useRef<number | null>(null)
   const transcriptRef = useRef(onTranscript)
   const errorRef = useRef(onError)
 
@@ -40,7 +44,54 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions) {
     errorRef.current = onError
   }, [onError, onTranscript])
 
-  useEffect(() => () => recognitionRef.current?.stop(), [])
+  useEffect(() => () => {
+    recognitionRef.current?.stop()
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    if (recordingTimeoutRef.current !== null) window.clearTimeout(recordingTimeoutRef.current)
+  }, [])
+
+  const startWhisperRecording = async () => {
+    if (!window.MediaRecorder) {
+      errorRef.current('Voice input is not supported in this browser.')
+      return
+    }
+    setIsRequesting(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      const recorder = new MediaRecorder(stream)
+      const chunks: BlobPart[] = []
+      recorderRef.current = recorder
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
+      recorder.onstop = async () => {
+        setIsListening(false)
+        stream.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+        recorderRef.current = null
+        if (recordingTimeoutRef.current !== null) window.clearTimeout(recordingTimeoutRef.current)
+        const audio = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
+        const body = new FormData()
+        body.set('file', audio, 'voice-input.webm')
+        try {
+          const response = await fetchWithRetry(apiUrl('/api/transcribe'), { method: 'POST', body })
+          const result = await response.json() as { text?: string; error?: string }
+          if (!response.ok || !result.text) throw new Error(result.error || 'Voice transcription failed.')
+          transcriptRef.current(result.text)
+        } catch (error) {
+          errorRef.current(error instanceof Error ? error.message : 'Voice transcription failed.')
+        } finally {
+          setIsRequesting(false)
+        }
+      }
+      recorder.start()
+      setIsListening(true)
+      recordingTimeoutRef.current = window.setTimeout(() => { if (recorder.state === 'recording') recorder.stop() }, 30_000)
+    } catch {
+      setIsRequesting(false)
+      errorRef.current('Microphone access could not be started.')
+    }
+  }
 
   const requestMicrophoneAccess = async () => {
     if (!window.isSecureContext) {
@@ -77,7 +128,8 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions) {
   const toggleListening = async () => {
     if (isRequesting) return
     if (isListening) {
-      recognitionRef.current?.stop()
+      if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+      else recognitionRef.current?.stop()
       return
     }
 
@@ -88,7 +140,7 @@ export function useVoiceInput({ onTranscript, onError }: UseVoiceInputOptions) {
     const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition
 
     if (!Recognition) {
-      errorRef.current('Voice input is not supported in this browser.')
+      await startWhisperRecording()
       return
     }
     if (!(await requestMicrophoneAccess())) return

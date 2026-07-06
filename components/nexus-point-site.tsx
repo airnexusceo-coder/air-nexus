@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
@@ -34,10 +35,14 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { AirGPTApp } from '@/components/airnexus-app'
 import { PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
 import { clearAuthSession, createUserSession, getAuthSession, saveAuthSession, type AuthSession } from '@/lib/auth/session'
 import { cn } from '@/lib/utils'
+
+const AirGPTApp = dynamic(
+  () => import('@/components/airnexus-app').then((module) => module.AirGPTApp),
+  { loading: () => <AppLoadingScreen label="Opening your workspace…" /> },
+)
 
 export type MarketingPage = 'home' | 'products' | 'pricing' | 'resources' | 'company' | 'login' | 'signup' | 'airgpt' | 'tool'
 
@@ -90,6 +95,10 @@ export function NexusPointSite({ page, toolSlug }: { page: MarketingPage; toolSl
       <MarketingFooter />
     </div>
   )
+}
+
+function AppLoadingScreen({ label }: { label: string }) {
+  return <div className="flex min-h-screen items-center justify-center bg-black text-sm text-zinc-400"><span className="size-5 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" /><span className="ml-3">{label}</span></div>
 }
 
 function AirGPTGate() {

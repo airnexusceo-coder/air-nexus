@@ -1,5 +1,6 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import {
   useEffect,
   useRef,
@@ -23,11 +24,16 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Command,
+  ClipboardList,
+  Compass,
   Code2,
   Download,
   Gauge,
+  GraduationCap,
   History,
   Italic,
+  Layers3,
   Link2,
   LoaderCircle,
   LockKeyhole,
@@ -38,10 +44,13 @@ import {
   MoreHorizontal,
   Paperclip,
   PanelRightOpen,
+  Pin,
   Plug,
   Plus,
+  Search,
   Share2,
   Sparkles,
+  Star,
   Store,
   TimerReset,
   Trophy,
@@ -53,15 +62,12 @@ import {
 } from 'lucide-react'
 import { ThinkingLogo } from '@/components/thinking-logo'
 import { AiMarkdown } from '@/components/ai-markdown'
-import { CalculatorsPage } from '@/components/calculators-page'
-import { DashboardPage } from '@/components/dashboard-page'
 import { SpeakButton } from '@/components/speak-button'
-import { WorkspacePages } from '@/components/workspace-pages'
-import { MarketplacePage } from '@/components/marketplace-page'
 import { sanitizeResponse } from '@/lib/ai/sanitize-response'
-import { apiUrl } from '@/lib/api-client'
+import { apiUrl, fetchWithRetry } from '@/lib/api-client'
 import { isSpeechCancellation, speakWithOrpheus } from '@/lib/voice/orpheus'
 import { useVoiceInput } from '@/lib/voice/use-voice-input'
+import { publicModelName } from '@/lib/ai/model-router'
 import type { NexusPlan } from '@/lib/plans'
 import type { NexusTransaction } from '@/lib/nexus-points'
 import { milestones } from '@/lib/data'
@@ -75,6 +81,19 @@ import {
   type DocumentAttachment,
 } from '@/lib/documents/client'
 
+function SectionLoading() {
+  return <div className="grid gap-4" role="status" aria-label="Loading workspace section"><div className="premium-skeleton h-28 rounded-3xl" /><div className="grid gap-4 md:grid-cols-2"><div className="premium-skeleton h-64 rounded-3xl" /><div className="premium-skeleton h-64 rounded-3xl" /></div></div>
+}
+
+const AiStudyCoachPage = dynamic(() => import('@/components/ai-study-coach-page').then((module) => module.AiStudyCoachPage), { loading: SectionLoading })
+const AiTutorPage = dynamic(() => import('@/components/ai-tutor-page').then((module) => module.AiTutorPage), { loading: SectionLoading })
+const AssignmentWorkspacePage = dynamic(() => import('@/components/assignment-workspace-page').then((module) => module.AssignmentWorkspacePage), { loading: SectionLoading })
+const CalculatorsPage = dynamic(() => import('@/components/calculators-page').then((module) => module.CalculatorsPage), { loading: SectionLoading })
+const DashboardPage = dynamic(() => import('@/components/dashboard-page').then((module) => module.DashboardPage), { loading: SectionLoading })
+const IntelligentDashboardPage = dynamic(() => import('@/components/intelligent-dashboard-page').then((module) => module.IntelligentDashboardPage), { loading: SectionLoading })
+const MarketplacePage = dynamic(() => import('@/components/marketplace-page').then((module) => module.MarketplacePage), { loading: SectionLoading })
+const WorkspacePages = dynamic(() => import('@/components/workspace-pages').then((module) => module.WorkspacePages), { loading: SectionLoading })
+
 type WorkspaceProps = {
   activeSection: string
   mainChatOpen: boolean
@@ -85,6 +104,7 @@ type WorkspaceProps = {
   onNavigate: (section: string) => void
   onOpenDialog: (dialog: AppDialog) => void
   notify: (message: string, tone?: NoticeTone) => void
+  profileName: string
   plan: NexusPlan
   nexusPoints: number
   planExpiry: string | null
@@ -106,6 +126,8 @@ type MainMessage = {
   role: 'user' | 'assistant'
   content: string
   time: string
+  tools?: string[]
+  model?: string
 }
 
 type ChatThread = {
@@ -114,6 +136,8 @@ type ChatThread = {
   messages: MainMessage[]
   createdAt: string
   updatedAt: string
+  pinned: boolean
+  favorite: boolean
 }
 
 type LocalAttachment = DocumentAttachment
@@ -126,10 +150,20 @@ const collaborators = [
 ]
 
 const aiTools = [
-  { id: 'write', label: 'Write with AI', prompt: 'Draft a concise launch announcement from this strategy brief.' },
-  { id: 'summarize', label: 'Summarize', prompt: 'Summarize this document into five clear points.' },
-  { id: 'research', label: 'Research', prompt: 'Research the key risks for this product launch plan.' },
-  { id: 'brainstorm', label: 'Brainstorm', prompt: 'Brainstorm creative launch ideas for AirGPT 3.0.' },
+  { id: 'flashcards', label: 'Flashcard Generator', prompt: 'Turn the attached documents or material I provide into grounded active-recall flashcards.' },
+  { id: 'quiz', label: 'Quiz Generator', prompt: 'Create a short quiz from the attached documents or topic, then wait for my answers.' },
+  { id: 'exam-plan', label: 'Exam Planner', prompt: 'Create an exam revision plan from my exam date, topics, and available time.' },
+  { id: 'notes', label: 'Notes', prompt: 'Turn my material into clear, structured study notes.' },
+  { id: 'calculator', label: 'Calculator', prompt: 'Calculate this accurately and show the key working: ' },
+  { id: 'study-plan', label: 'Study Planner', prompt: 'Create a realistic study plan from my priorities and available time.' },
+  { id: 'grade', label: 'Grade Calculator', prompt: 'Calculate my current grade from these assessment scores and weights: ' },
+  { id: 'document-summary', label: 'Summarise documents', prompt: 'Summarise the attached documents, preserving the main argument, evidence, and conclusions. Identify each source by file name.' },
+  { id: 'document-explain', label: 'Explain documents', prompt: 'Explain the attached documents in student-friendly steps. Define unfamiliar terms and use slide or section references when available.' },
+  { id: 'document-question', label: 'Ask documents', prompt: 'Answer this question using only the attached documents, and identify which file supports each part: ' },
+  { id: 'document-highlights', label: 'Highlight key points', prompt: 'Highlight the most important points in the attached documents and explain why each matters.' },
+  { id: 'document-difficulty', label: 'Find difficult concepts', prompt: 'Identify the most difficult concepts in the attached documents, explain why they are challenging, and teach them simply.' },
+  { id: 'document-compare', label: 'Compare documents', prompt: 'Compare the attached documents. Show agreements, differences, unique evidence, and any contradictions, using file names.' },
+  { id: 'diagram', label: 'Diagram Generator', prompt: 'Create a clear learning diagram for this topic: ' },
 ]
 
 const statusStyles: Record<string, string> = {
@@ -171,7 +205,7 @@ function createChatTitle(messages: MainMessage[]) {
 function isMainMessage(value: unknown): value is MainMessage {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const message = value as Partial<MainMessage>
-  return typeof message.id === 'string' && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string' && typeof message.time === 'string'
+  return typeof message.id === 'string' && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string' && typeof message.time === 'string' && (message.tools === undefined || (Array.isArray(message.tools) && message.tools.every((tool) => typeof tool === 'string'))) && (message.model === undefined || typeof message.model === 'string')
 }
 
 function parseChatHistory(value: string | null): ChatThread[] {
@@ -191,8 +225,10 @@ function parseChatHistory(value: string | null): ChatThread[] {
         messages,
         createdAt: typeof thread.createdAt === 'string' ? thread.createdAt : new Date().toISOString(),
         updatedAt: typeof thread.updatedAt === 'string' ? thread.updatedAt : new Date().toISOString(),
+        pinned: thread.pinned === true,
+        favorite: thread.favorite === true,
       }]
-    }).slice(0, MAX_CHAT_HISTORY_ITEMS)
+    }).sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.favorite) - Number(a.favorite) || b.updatedAt.localeCompare(a.updatedAt)).slice(0, MAX_CHAT_HISTORY_ITEMS)
   } catch {
     return []
   }
@@ -206,7 +242,13 @@ function createChatThread(id = createId('chat'), messages = copyInitialMessages(
     messages,
     createdAt: now,
     updatedAt: now,
+    pinned: false,
+    favorite: false,
   }
+}
+
+function sortChatThreads(threads: ChatThread[]) {
+  return [...threads].sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.favorite) - Number(a.favorite) || b.updatedAt.localeCompare(a.updatedAt))
 }
 
 function formatThreadDate(value: string) {
@@ -245,6 +287,7 @@ export function Workspace({
   onNavigate,
   onOpenDialog,
   notify,
+  profileName,
   plan,
   nexusPoints,
   planExpiry,
@@ -266,6 +309,7 @@ export function Workspace({
   const [chatHistory, setChatHistory] = useState<ChatThread[]>([])
   const [chatHistoryHydrated, setChatHistoryHydrated] = useState(false)
   const [chatHistoryCollapsed, setChatHistoryCollapsed] = useState(false)
+  const [chatSearchQuery, setChatSearchQuery] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [toolsOpen, setToolsOpen] = useState(false)
@@ -282,6 +326,7 @@ export function Workspace({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatSearchInputRef = useRef<HTMLInputElement>(null)
   const savedSelectionRef = useRef<Range | null>(null)
 
   const { isListening, toggleListening: toggleMicrophone } = useVoiceInput({
@@ -332,8 +377,10 @@ export function Workspace({
           messages,
           createdAt: existing?.createdAt ?? now,
           updatedAt: now,
+          pinned: existing?.pinned ?? false,
+          favorite: existing?.favorite ?? false,
         }
-        return [nextThread, ...current.filter((thread) => thread.id !== activeChatId)].slice(0, MAX_CHAT_HISTORY_ITEMS)
+        return sortChatThreads([nextThread, ...current.filter((thread) => thread.id !== activeChatId)]).slice(0, MAX_CHAT_HISTORY_ITEMS)
       })
     }, 0)
     return () => window.clearTimeout(timeoutId)
@@ -383,6 +430,10 @@ export function Workspace({
   }
 
   const startNewChat = () => {
+    if (isSending) {
+      notify('Wait for the current response to finish before starting another chat.', 'info')
+      return
+    }
     const nextId = createId('chat')
     setActiveChatId(nextId)
     setMessages(copyInitialMessages())
@@ -393,6 +444,10 @@ export function Workspace({
   }
 
   const selectChatThread = (thread: ChatThread) => {
+    if (isSending) {
+      notify('Wait for the current response to finish before switching conversations.', 'info')
+      return
+    }
     setActiveChatId(thread.id)
     setMessages(thread.messages)
     setDraft('')
@@ -400,6 +455,47 @@ export function Workspace({
     setToolsOpen(false)
     notify('Opened ' + thread.title, 'info')
   }
+
+  const toggleChatPreference = (id: string, preference: 'pinned' | 'favorite') => {
+    const thread = chatHistory.find((item) => item.id === id)
+    if (!thread) return
+    const nextValue = !thread[preference]
+    setChatHistory((current) => sortChatThreads(current.map((item) => item.id === id ? { ...item, [preference]: nextValue } : item)))
+    notify(`${nextValue ? preference === 'pinned' ? 'Pinned' : 'Favourited' : preference === 'pinned' ? 'Unpinned' : 'Removed favourite from'} ${thread.title}`, 'success')
+  }
+
+  useEffect(() => {
+    const handleChatShortcuts = (event: globalThis.KeyboardEvent) => {
+      if (!mainChatOpen) return
+      const target = event.target as HTMLElement | null
+      const isEditable = target?.matches('input, textarea, [contenteditable="true"]') ?? false
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setChatHistoryCollapsed(false)
+        window.setTimeout(() => chatSearchInputRef.current?.focus(), 0)
+        return
+      }
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault()
+        if (isSending) return
+        const nextId = createId('chat')
+        setActiveChatId(nextId)
+        setMessages(copyInitialMessages())
+        setDraft('')
+        setAttachments([])
+        setToolsOpen(false)
+        composerRef.current?.focus()
+        notify('Started a fresh AI conversation', 'success')
+        return
+      }
+      if (event.key === '/' && !isEditable) {
+        event.preventDefault()
+        composerRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleChatShortcuts)
+    return () => document.removeEventListener('keydown', handleChatShortcuts)
+  }, [isSending, mainChatOpen, notify])
 
   const sendMessage = async () => {
     const content = draft.trim()
@@ -426,51 +522,68 @@ export function Workspace({
       content: userContent,
       time: formatTime(),
     }
+    const assistantId = createId('assistant')
+    const assistantMessage: MainMessage = { id: assistantId, role: 'assistant', content: '', time: formatTime() }
 
-    setMessages((current) => [...current, userMessage])
+    setMessages((current) => [...current, userMessage, assistantMessage])
     setDraft('')
     setAttachments([])
     setIsSending(true)
 
     try {
-      const response = await fetch(apiUrl('/api/chat'), {
+      const response = await fetchWithRetry(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content || 'Please review and summarize the attached documents.',
+          history: messages
+            .filter((message) => message.id !== 'welcome')
+            .slice(-16)
+            .map(({ role, content: historyContent }) => ({ role, content: historyContent })),
+          mode: 'auto',
+          action: 'teach',
+          purpose: readableAttachments.length > 0 ? 'document-analysis' : 'conversation',
           isPlus: plan !== 'Free',
           documents: readableAttachments.map((file) => ({ name: file.name, text: file.text })),
+          stream: true,
         }),
       })
-      const data = (await response.json()) as { reply?: string; error?: string }
-      if (!response.ok || !data.reply) throw new Error(data.error || 'AI service unavailable')
-      const safeReply = sanitizeResponse(data.reply)
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId('assistant'),
-          role: 'assistant',
-          content: safeReply,
-          time: formatTime(),
-        },
-      ])
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(data.error || 'AI service unavailable')
+      }
+      const usedTools = (response.headers.get('X-AirNexus-Tools') ?? '').split('|').filter(Boolean).flatMap((value) => {
+        try { return [decodeURIComponent(value)] } catch { return [] }
+      })
+      const selectedModel = response.headers.get('X-AirNexus-Model') ?? undefined
+      setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, tools: usedTools, model: selectedModel } : message))
+      if (usedTools.length > 0) {
+        notify(`${usedTools.join(' + ')} selected`, 'info')
+      }
+      if (!response.body) throw new Error('AI response streaming is unavailable')
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let streamedReply = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        streamedReply += decoder.decode(value, { stream: true })
+        const partialReply = sanitizeResponse(streamedReply)
+        setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: partialReply } : message))
+      }
+      streamedReply += decoder.decode()
+      const safeReply = sanitizeResponse(streamedReply)
+      if (!safeReply) throw new Error('AI returned an empty response')
+      setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: safeReply } : message))
       if (autoSpeak && plan !== 'Free') {
         void speakWithOrpheus(safeReply).catch((error: unknown) => {
           if (!isSpeechCancellation(error)) notify(error instanceof Error ? error.message : 'Speech playback failed.', 'warning')
         })
       }
-    } catch {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId('assistant'),
-          role: 'assistant',
-          content:
-            'Here’s a practical next step: turn the launch brief into three owner-led workstreams, confirm the at-risk onboarding milestone this week, and publish one shared scorecard for the November 12 keynote.',
-          time: formatTime(),
-        },
-      ])
-      notify('Using the local demo response while the AI service is unavailable', 'warning')
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'AI service unavailable'
+      setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: `I could not reach the AI tutor: ${errorMessage}. Please try again in a moment.` } : message))
+      notify(errorMessage, 'warning')
     } finally {
       setIsSending(false)
     }
@@ -547,7 +660,9 @@ export function Workspace({
         onOpenSidebar={onOpenSidebar}
         onOpenContext={onOpenContext}
         onNavigate={onNavigate}
+        onContinueStudy={onOpenMainChat}
         notify={notify}
+        profileName={profileName}
         plan={plan}
         nexusPoints={nexusPoints}
         planExpiry={planExpiry}
@@ -609,6 +724,9 @@ export function Workspace({
           chatHistory={chatHistory}
           activeChatId={activeChatId}
           chatHistoryCollapsed={chatHistoryCollapsed}
+          chatHistoryHydrated={chatHistoryHydrated}
+          chatSearchQuery={chatSearchQuery}
+          chatSearchInputRef={chatSearchInputRef}
           attachments={attachments}
           isSending={isSending}
           isListening={isListening}
@@ -633,6 +751,9 @@ export function Workspace({
           onSpeechError={(message) => notify(message, 'warning')}
           onNewChat={startNewChat}
           onSelectChat={selectChatThread}
+          onSearchChat={setChatSearchQuery}
+          onTogglePinned={(id) => toggleChatPreference(id, 'pinned')}
+          onToggleFavorite={(id) => toggleChatPreference(id, 'favorite')}
           onToggleChatHistory={() => setChatHistoryCollapsed((collapsed) => !collapsed)}
         />
       ) : (
@@ -1034,6 +1155,9 @@ function FullPageChat({
   chatHistory,
   activeChatId,
   chatHistoryCollapsed,
+  chatHistoryHydrated,
+  chatSearchQuery,
+  chatSearchInputRef,
   attachments,
   isSending,
   isListening,
@@ -1056,6 +1180,9 @@ function FullPageChat({
   onSpeechError,
   onNewChat,
   onSelectChat,
+  onSearchChat,
+  onTogglePinned,
+  onToggleFavorite,
   onToggleChatHistory,
 }: {
   draft: string
@@ -1063,6 +1190,9 @@ function FullPageChat({
   chatHistory: ChatThread[]
   activeChatId: string
   chatHistoryCollapsed: boolean
+  chatHistoryHydrated: boolean
+  chatSearchQuery: string
+  chatSearchInputRef: React.RefObject<HTMLInputElement | null>
   attachments: LocalAttachment[]
   isSending: boolean
   isListening: boolean
@@ -1085,52 +1215,61 @@ function FullPageChat({
   onSpeechError: (message: string) => void
   onNewChat: () => void
   onSelectChat: (thread: ChatThread) => void
+  onSearchChat: (query: string) => void
+  onTogglePinned: (id: string) => void
+  onToggleFavorite: (id: string) => void
   onToggleChatHistory: () => void
 }) {
+  const activeThread = chatHistory.find((thread) => thread.id === activeChatId)
+  const lastMessage = messages[messages.length - 1]
   return (
-    <section className="animate-chat-enter flex min-h-0 flex-1 flex-col" aria-label="AirGPT full-page chat">
-      <div className="flex shrink-0 items-center justify-between border-b border-white/6 px-4 py-3 sm:px-6">
-        <button type="button" onClick={onBack} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground hover:bg-white/7 hover:text-white">
+    <section className="animate-chat-enter premium-chat-shell flex min-h-0 flex-1 flex-col" aria-label="AirGPT full-page chat">
+      <div className="glass-subtle flex shrink-0 items-center justify-between gap-3 border-x-0 border-t-0 px-3 py-3 sm:px-5">
+        <button type="button" onClick={onBack} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-white/7 hover:text-white">
           <ArrowLeft className="size-4" />
-          Back to document
+          <span className="hidden sm:inline">Workspace</span>
         </button>
-        <div className="hidden items-center gap-2 text-sm font-semibold sm:flex">
-          <ThinkingLogo isThinking={false} className="size-8" />
-          AirGPT
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ThinkingLogo isThinking={isSending} className="size-8 shrink-0" />
+          <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{activeThread?.title ?? 'New chat'}</p><p className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className={cn('size-1.5 rounded-full', isSending ? 'animate-pulse bg-orange-300' : 'bg-emerald-400')} />{isSending ? 'AirGPT is responding' : 'AirGPT ready'}</p></div>
         </div>
-        <button type="button" onClick={onNewChat} className="rounded-xl px-3 py-2 text-sm text-orange-200 hover:bg-orange-300/10">
-          New chat
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button type="button" onClick={() => { onToggleChatHistory(); window.setTimeout(() => chatSearchInputRef.current?.focus(), 0) }} aria-label="Search conversations" className="interactive-icon sm:hidden"><Search className="size-4" /></button>
+          <span className="hidden items-center gap-1 rounded-lg border border-white/8 bg-white/[0.035] px-2 py-1 text-[10px] text-slate-500 lg:inline-flex"><Command className="size-3" />K search</span>
+          <button type="button" onClick={onNewChat} className="primary-action min-h-8 px-3 py-1.5 text-xs"><Plus className="size-3.5" /><span className="hidden sm:inline">New chat</span></button>
+        </div>
       </div>
 
-      <ChatHistoryStrip threads={chatHistory} activeChatId={activeChatId} onSelectChat={onSelectChat} />
+      <ChatHistoryStrip threads={chatHistory} activeChatId={activeChatId} searchQuery={chatSearchQuery} onSearchChat={onSearchChat} onSelectChat={onSelectChat} />
 
       <div className="min-h-0 flex flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-8">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-              {messages.map((message) => (
-                <article key={message.id} className={cn('flex gap-3', message.role === 'user' && 'justify-end')}>
+          <div className="scrollbar-thin min-h-0 flex-1 scroll-smooth overflow-y-auto px-3 py-7 sm:px-6 sm:py-10">
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-7">
+              {messages.map((message) => {
+                const streaming = isSending && message.role === 'assistant' && message.id === lastMessage?.id
+                return <article key={message.id} className={cn('premium-message flex gap-3', message.role === 'user' && 'justify-end')}>
                   {message.role === 'assistant' && (
-                    <ThinkingLogo isThinking={false} className="size-9" />
+                    <ThinkingLogo isThinking={streaming} className="mt-1 size-9 shrink-0" />
                   )}
                   <div
                     className={cn(
-                      'max-w-[85%] rounded-3xl px-5 py-4 text-sm leading-7 shadow-xl',
+                      'max-w-[88%] rounded-[1.65rem] px-5 py-4 text-sm leading-7 shadow-xl sm:max-w-[82%]',
                       message.role === 'user'
                         ? 'message-self rounded-br-lg text-white'
-                        : 'glass rounded-bl-lg text-slate-200',
+                        : 'glass premium-assistant-message rounded-bl-lg text-slate-200',
                     )}
                   >
-                    {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                    {message.role === 'assistant' ? message.content ? <><AiMarkdown>{message.content}</AiMarkdown>{streaming && <span aria-hidden="true" className="streaming-caret" />}</> : <TypingIndicator /> : <p className="whitespace-pre-wrap">{message.content}</p>}
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <p className="text-[10px] opacity-50">{message.time}</p>
-                      {message.role === 'assistant' && (canUseVoice ? <SpeakButton text={sanitizeResponse(message.content)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>)}
+                    {message.role === 'assistant' && message.tools && message.tools.length > 0 && <div className="mb-3 flex flex-wrap gap-1.5">{message.tools.map((tool) => <span key={tool} className="tool-activity-chip"><Wand2 className="size-3" />{tool}</span>)}</div>}
+                      <p className="text-[10px] opacity-45">{message.model ? `${publicModelName(message.model)} · ` : ''}{streaming ? 'Streaming' : message.time}</p>
+                      {message.role === 'assistant' && message.content && !streaming && (canUseVoice ? <SpeakButton text={sanitizeResponse(message.content)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>)}
                     </div>
                   </div>
                 </article>
-              ))}
-              {isSending && (
+              })}
+              {isSending && lastMessage?.role !== 'assistant' && (
                 <article className="flex gap-3">
                   <ThinkingLogo isThinking={isSending} className="size-9" />
                   <div className="glass rounded-3xl rounded-bl-lg px-5 py-4 text-sm text-muted-foreground">
@@ -1193,10 +1332,14 @@ function FullPageChat({
           </div>
         </div>
 
-        <ChatHistoryRail threads={chatHistory} activeChatId={activeChatId} collapsed={chatHistoryCollapsed} onToggleCollapsed={onToggleChatHistory} onNewChat={onNewChat} onSelectChat={onSelectChat} />
+        <ChatHistoryRail threads={chatHistory} activeChatId={activeChatId} collapsed={chatHistoryCollapsed} hydrated={chatHistoryHydrated} searchQuery={chatSearchQuery} searchInputRef={chatSearchInputRef} onSearchChat={onSearchChat} onToggleCollapsed={onToggleChatHistory} onNewChat={onNewChat} onSelectChat={onSelectChat} onTogglePinned={onTogglePinned} onToggleFavorite={onToggleFavorite} />
       </div>
     </section>
   )
+}
+
+function TypingIndicator() {
+  return <span role="status" aria-label="AirGPT is typing" className="typing-indicator"><span /><span /><span /></span>
 }
 function getThreadPreview(thread: ChatThread) {
   const message = thread.messages.find((item) => item.role === 'user') ?? thread.messages.find((item) => item.role === 'assistant')
@@ -1207,19 +1350,31 @@ function getThreadPreview(thread: ChatThread) {
     .slice(0, 86)
 }
 
+function filterChatThreads(threads: ChatThread[], query: string) {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return threads
+  return threads.filter((thread) => thread.title.toLowerCase().includes(normalized) || thread.messages.some((message) => message.content.toLowerCase().includes(normalized)))
+}
+
 function ChatHistoryStrip({
   threads,
   activeChatId,
+  searchQuery,
+  onSearchChat,
   onSelectChat,
 }: {
   threads: ChatThread[]
   activeChatId: string
+  searchQuery: string
+  onSearchChat: (query: string) => void
   onSelectChat: (thread: ChatThread) => void
 }) {
   if (threads.length === 0) return null
+  const visibleThreads = filterChatThreads(threads, searchQuery)
   return (
-    <div className="scrollbar-thin flex shrink-0 gap-2 overflow-x-auto border-b border-white/6 px-4 py-2 xl:hidden" aria-label="Recent chat history">
-      {threads.map((thread) => (
+    <div className="scrollbar-thin flex shrink-0 gap-2 overflow-x-auto border-b border-white/6 px-3 py-2.5 xl:hidden" aria-label="Recent chat history">
+      <label className="glass-subtle sticky left-0 z-10 flex min-w-44 shrink-0 items-center gap-2 rounded-xl px-3"><Search className="size-3.5 text-slate-500" /><input aria-label="Search conversations" value={searchQuery} onChange={(event) => onSearchChat(event.target.value)} placeholder="Search chats" className="min-w-0 flex-1 bg-transparent py-2 text-xs text-white outline-none placeholder:text-slate-600" /></label>
+      {visibleThreads.map((thread) => (
         <button
           key={thread.id}
           type="button"
@@ -1232,7 +1387,7 @@ function ChatHistoryStrip({
               : 'border-white/8 bg-white/[0.035] text-slate-400 hover:bg-white/8 hover:text-white',
           )}
         >
-          <span className="block truncate font-semibold">{thread.title}</span>
+          <span className="flex items-center gap-1 truncate font-semibold">{thread.pinned && <Pin className="size-3 shrink-0 fill-current" />}{thread.favorite && <Star className="size-3 shrink-0 fill-current" />}<span className="truncate">{thread.title}</span></span>
           <span className="mt-0.5 block text-[10px] text-slate-500">{formatThreadDate(thread.updatedAt)}</span>
         </button>
       ))}
@@ -1244,20 +1399,33 @@ function ChatHistoryRail({
   threads,
   activeChatId,
   collapsed,
+  hydrated,
+  searchQuery,
+  searchInputRef,
+  onSearchChat,
   onToggleCollapsed,
   onNewChat,
   onSelectChat,
+  onTogglePinned,
+  onToggleFavorite,
 }: {
   threads: ChatThread[]
   activeChatId: string
   collapsed: boolean
+  hydrated: boolean
+  searchQuery: string
+  searchInputRef: React.RefObject<HTMLInputElement | null>
+  onSearchChat: (query: string) => void
   onToggleCollapsed: () => void
   onNewChat: () => void
   onSelectChat: (thread: ChatThread) => void
+  onTogglePinned: (id: string) => void
+  onToggleFavorite: (id: string) => void
 }) {
+  const activeThread = threads.find((thread) => thread.id === activeChatId)
   if (collapsed) {
     return (
-      <aside className="hidden w-14 shrink-0 flex-col items-center gap-2 border-l border-white/8 bg-black/20 px-2 py-4 xl:flex" aria-label="Collapsed chat history">
+      <aside className="glass-subtle hidden w-14 shrink-0 flex-col items-center gap-2 border-y-0 border-r-0 px-2 py-4 xl:flex" aria-label="Collapsed chat history">
         <button type="button" onClick={onToggleCollapsed} aria-label="Expand chat history" title="Expand chat history" className="interactive-icon size-10">
           <ChevronLeft className="size-4" />
         </button>
@@ -1272,14 +1440,17 @@ function ChatHistoryRail({
     )
   }
 
+  const visibleThreads = filterChatThreads(threads, searchQuery)
   return (
-    <aside className="hidden w-72 shrink-0 flex-col border-l border-white/8 bg-black/20 xl:flex" aria-label="Chat history">
-      <div className="flex items-center justify-between border-b border-white/8 px-4 py-4">
+    <aside className="glass-subtle hidden w-80 shrink-0 flex-col border-y-0 border-r-0 xl:flex" aria-label="Chat history">
+      <div className="flex items-center justify-between border-b border-white/8 px-4 pb-3 pt-4">
         <div className="flex items-center gap-2">
           <History className="size-4 text-orange-300" />
-          <h2 className="text-sm font-semibold">Chat history</h2>
+          <div><h2 className="text-sm font-semibold">Conversations</h2><p className="text-[10px] text-slate-600">{threads.length} saved locally</p></div>
         </div>
         <div className="flex items-center gap-1">
+          <button type="button" onClick={() => activeThread && onTogglePinned(activeThread.id)} disabled={!activeThread} aria-label={activeThread?.pinned ? 'Unpin current chat' : 'Pin current chat'} aria-pressed={activeThread?.pinned ?? false} className={cn('interactive-icon size-8', activeThread?.pinned && 'bg-orange-400/12 text-orange-200')}><Pin className={cn('size-3.5', activeThread?.pinned && 'fill-current')} /></button>
+          <button type="button" onClick={() => activeThread && onToggleFavorite(activeThread.id)} disabled={!activeThread} aria-label={activeThread?.favorite ? 'Remove current chat from favourites' : 'Favourite current chat'} aria-pressed={activeThread?.favorite ?? false} className={cn('interactive-icon size-8', activeThread?.favorite && 'bg-amber-400/12 text-amber-200')}><Star className={cn('size-3.5', activeThread?.favorite && 'fill-current')} /></button>
           <button type="button" onClick={onNewChat} aria-label="Start new chat" className="interactive-icon size-8">
             <Plus className="size-4" />
           </button>
@@ -1288,12 +1459,13 @@ function ChatHistoryRail({
           </button>
         </div>
       </div>
+      <div className="px-3 pt-3"><label className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/20 px-3 transition focus-within:border-orange-300/30 focus-within:bg-black/30"><Search className="size-4 text-slate-600" /><input ref={searchInputRef} aria-label="Search conversations" value={searchQuery} onChange={(event) => onSearchChat(event.target.value)} placeholder="Search conversations" className="min-w-0 flex-1 bg-transparent py-2.5 text-xs text-white outline-none placeholder:text-slate-600" /><span className="flex items-center gap-0.5 rounded-md border border-white/8 px-1.5 py-0.5 text-[9px] text-slate-600"><Command className="size-2.5" />K</span></label></div>
       <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-        {threads.length === 0 ? (
+        {!hydrated ? [0, 1, 2, 3].map((item) => <div key={item} className="premium-skeleton h-20 rounded-2xl" />) : visibleThreads.length === 0 ? (
           <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4 text-xs leading-5 text-slate-500">
-            Your AirGPT conversations will appear here after you send a message.
+            {searchQuery ? 'No conversations match this search.' : 'Your AirGPT conversations will appear here after you send a message.'}
           </div>
-        ) : threads.map((thread) => {
+        ) : visibleThreads.map((thread) => {
           const active = thread.id === activeChatId
           return (
             <button
@@ -1302,10 +1474,10 @@ function ChatHistoryRail({
               onClick={() => onSelectChat(thread)}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'group w-full rounded-2xl border p-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50',
+                'group w-full rounded-2xl border p-3 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50',
                 active
                   ? 'border-orange-300/35 bg-orange-500/15 shadow-[0_0_28px_-18px_#ff6a00]'
-                  : 'border-white/8 bg-white/[0.035] hover:border-orange-300/20 hover:bg-orange-500/10',
+                  : 'border-white/8 bg-white/[0.028] hover:-translate-y-0.5 hover:border-orange-300/20 hover:bg-orange-500/8',
               )}
             >
               <div className="flex items-start gap-2">
@@ -1313,7 +1485,7 @@ function ChatHistoryRail({
                   <MessageSquare className="size-4" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-slate-100">{thread.title}</span>
+                  <span className="flex items-center gap-1.5 truncate text-sm font-semibold text-slate-100">{thread.pinned && <Pin className="size-3 shrink-0 fill-current text-orange-300" />}{thread.favorite && <Star className="size-3 shrink-0 fill-current text-amber-300" />}<span className="truncate">{thread.title}</span></span>
                   <span className="mt-1 block truncate text-[11px] text-slate-500">{getThreadPreview(thread)}</span>
                   <span className="mt-2 block text-[10px] font-medium uppercase tracking-wider text-slate-600">{formatThreadDate(thread.updatedAt)}</span>
                 </span>
@@ -1333,13 +1505,13 @@ function ToolsMenu({
   alignBottom?: boolean
 }) {
   return (
-    <div className={cn('menu-popover right-0 w-52', alignBottom ? 'bottom-12' : 'top-11')}>
+    <div className={cn('menu-popover scrollbar-thin right-0 max-h-96 w-64 overflow-y-auto', alignBottom ? 'bottom-12' : 'top-11')}>
       {aiTools.map((tool) => (
         <button
           key={tool.id}
           type="button"
           onClick={() => onChoose(tool.prompt)}
-          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/8"
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-slate-200 transition hover:bg-white/8"
         >
           <Sparkles className="size-3.5 text-orange-300" />
           {tool.label}
@@ -1494,7 +1666,9 @@ function SectionWorkspace({
   onOpenSidebar,
   onOpenContext,
   onNavigate,
+  onContinueStudy,
   notify,
+  profileName,
   plan,
   nexusPoints,
   planExpiry,
@@ -1513,7 +1687,9 @@ function SectionWorkspace({
   onOpenSidebar: () => void
   onOpenContext: () => void
   onNavigate: (section: string) => void
+  onContinueStudy: () => void
   notify: (message: string, tone?: NoticeTone) => void
+  profileName: string
   plan: NexusPlan
   nexusPoints: number
   planExpiry: string | null
@@ -1558,6 +1734,11 @@ function SectionWorkspace({
 
   const icon =
     section === 'Dashboard' ? Gauge :
+    section === 'Daily Dashboard' ? Sparkles :
+    section === 'Study Coach' ? Compass :
+    section === 'AI Tutor' ? GraduationCap :
+    section === 'Flashcards' ? Layers3 :
+    section === 'Assignment Workspace' ? ClipboardList :
     section === 'Collaboration Rooms' ? Users :
     section === 'Panic Mode' ? TimerReset :
     section === 'Tasks' ? CheckCircle2 :
@@ -1592,6 +1773,40 @@ function SectionWorkspace({
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
         {section === 'Dashboard' && (
           <DashboardPage plan={plan} streakRewardClaimed={streakRewardClaimed} onClaimStreakReward={onClaimStreakReward} onNavigate={onNavigate} onRequestUpgrade={onRequestUpgrade} />
+        )}
+
+        {section === 'Daily Dashboard' && (
+          <IntelligentDashboardPage
+            profileName={profileName}
+            transactions={transactions}
+            onContinueStudy={onContinueStudy}
+            onNavigate={onNavigate}
+            notify={notify}
+          />
+        )}
+
+        {section === 'Study Coach' && (
+          <AiStudyCoachPage
+            profileName={profileName}
+            transactions={transactions}
+            onNavigate={onNavigate}
+            notify={notify}
+          />
+        )}
+
+        {(section === 'AI Tutor' || section === 'Flashcards') && (
+          <AiTutorPage
+            activeTab={section === 'Flashcards' ? 'flashcards' : 'tutor'}
+            onNavigate={onNavigate}
+            notify={notify}
+          />
+        )}
+
+        {section === 'Assignment Workspace' && (
+          <AssignmentWorkspacePage
+            profileName={profileName}
+            notify={notify}
+          />
         )}
 
         {section === 'Collaboration Rooms' && (
@@ -1673,7 +1888,7 @@ function SectionWorkspace({
           <MarketplacePage currentPlan={plan} nexusPoints={nexusPoints} planExpiry={planExpiry} redeemedRewards={redeemedRewards} transactions={transactions} onSelectFree={onSelectFree} onPayWithCard={onPayWithCard} onPayWithPoints={onPayWithPoints} onRedeem={onRedeemReward} />
         )}
 
-        {!['Dashboard', 'Collaboration Rooms', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators'].includes(section) && (
+        {!['Dashboard', 'Daily Dashboard', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Collaboration Rooms', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">

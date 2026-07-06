@@ -1,7 +1,7 @@
 'use client'
 
 import {
-  BarChart3, BookOpenCheck, Bot, Calculator, CalendarDays, CheckCircle2, Clock3,
+  BarChart3, BookOpenCheck, Bot, Calculator, CalendarDays, CheckCircle2, ClipboardList, Clock3, Compass,
   Flame, GraduationCap, Headphones, Layers3, ListChecks, LockKeyhole,
   MessageSquareText, Mic2, Plug, Sparkles, Store, Trophy, Volume2, WandSparkles,
   type LucideIcon,
@@ -35,19 +35,21 @@ const dailyUsage = [
 
 const features: Feature[] = [
   { name: 'AI Chat', description: 'Ask questions and build study plans.', icon: MessageSquareText, requiredPlan: 'Free', destination: 'AI Chat' },
+  { name: 'AI Study Coach', description: 'Get a proactive daily plan from your real progress.', icon: Compass, requiredPlan: 'Free', destination: 'Study Coach' },
   { name: 'Voice Chat', description: 'Turn spoken questions into prompts.', icon: Mic2, requiredPlan: 'Plus', destination: 'AI Chat' },
   { name: 'Text-to-Speech', description: 'Listen to AI answers with Orpheus.', icon: Volume2, requiredPlan: 'Plus', destination: 'AI Chat' },
   { name: 'Tasks', description: 'Plan assignments and daily actions.', icon: ListChecks, requiredPlan: 'Free', destination: 'Tasks' },
+  { name: 'Assignment Workspace', description: 'Plan, draft, improve, and review one assignment.', icon: ClipboardList, requiredPlan: 'Free', destination: 'Assignment Workspace' },
   { name: 'Calendar', description: 'Track study sessions and deadlines.', icon: CalendarDays, requiredPlan: 'Free', destination: 'Calendar' },
   { name: 'Analytics', description: 'Understand weekly study performance.', icon: BarChart3, requiredPlan: 'Plus', destination: 'Analytics' },
   { name: 'Leaderboard', description: 'Compare school-safe Nexus rankings.', icon: Trophy, requiredPlan: 'Free', destination: 'Leaderboard' },
   { name: 'Marketplace', description: 'Unlock plans, themes, and rewards.', icon: Store, requiredPlan: 'Free', destination: 'Marketplace' },
   { name: 'Integrations', description: 'Connect premium study services.', icon: Plug, requiredPlan: 'Premium', destination: 'Integrations' },
-  { name: 'AI Flashcards', description: 'Create revision cards from notes.', icon: Layers3, requiredPlan: 'Plus', destination: 'AI Chat' },
+  { name: 'AI Flashcards', description: 'Create revision cards from notes.', icon: Layers3, requiredPlan: 'Plus', destination: 'Flashcards' },
   { name: 'AI Summaries', description: 'Condense notes into key ideas.', icon: Sparkles, requiredPlan: 'Plus', destination: 'AI Chat' },
   { name: 'AI Exam Generator', description: 'Generate targeted practice exams.', icon: BookOpenCheck, requiredPlan: 'Premium', destination: 'AI Chat' },
   { name: 'Smart Study Planner', description: 'Build an adaptive study schedule.', icon: WandSparkles, requiredPlan: 'Plus', destination: 'AI Chat' },
-  { name: 'Premium Tutor', description: 'Get guided, personalised tutoring.', icon: GraduationCap, requiredPlan: 'Premium', destination: 'AI Chat' },
+  { name: 'Premium Tutor', description: 'Get guided, personalised tutoring.', icon: GraduationCap, requiredPlan: 'Premium', destination: 'AI Tutor' },
   { name: 'Mock Interviews', description: 'Practise interviews with feedback.', icon: Headphones, requiredPlan: 'Premium', destination: 'AI Chat' },
   { name: 'Advanced Analytics', description: 'Explore deeper learning patterns.', icon: BarChart3, requiredPlan: 'Premium', destination: 'Analytics' },
   { name: 'Premium Integrations', description: 'Unlock the full integration suite.', icon: Plug, requiredPlan: 'Premium', destination: 'Integrations' },

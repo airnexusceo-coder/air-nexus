@@ -1,6 +1,6 @@
-import { apiUrl } from '@/lib/api-client'
+import { apiUrl, fetchWithRetry } from '@/lib/api-client'
 
-export const DOCUMENT_ACCEPT = '.pdf,.docx,.txt,.md,.markdown,.csv,.json,.html,.htm,.xml'
+export const DOCUMENT_ACCEPT = '.pdf,.docx,.pptx,.ppt,.txt,.md,.markdown,.csv,.json,.html,.htm,.xml'
 export const MAX_DOCUMENTS_PER_MESSAGE = 5
 
 export type DocumentAttachment = {
@@ -26,7 +26,7 @@ export function pendingDocument(file: File, id: string): DocumentAttachment {
 export async function readDocument(file: File, id: string): Promise<DocumentAttachment> {
   const formData = new FormData()
   formData.set('file', file)
-  const response = await fetch(apiUrl('/api/documents/extract'), { method: 'POST', body: formData })
+  const response = await fetchWithRetry(apiUrl('/api/documents/extract'), { method: 'POST', body: formData })
   const result = await response.json() as { text?: string; error?: string; truncated?: boolean }
   if (!response.ok || !result.text) throw new Error(result.error ?? `AirGPT could not read ${file.name}.`)
   return {

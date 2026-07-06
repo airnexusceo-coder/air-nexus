@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server'
 import { cleanTextForSpeech } from '@/lib/voice/clean-text-for-speech'
+import { GROQ_MODEL_ROLES } from '@/lib/ai/model-router'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
 const GROQ_SPEECH_URL = 'https://api.groq.com/openai/v1/audio/speech'
-export const GROQ_TTS_MODEL = process.env.GROQ_TTS_MODEL ?? 'canopylabs/orpheus-v1-english'
+export const GROQ_TTS_MODEL = GROQ_MODEL_ROLES.speech
 const DEFAULT_VOICE = process.env.GROQ_TTS_VOICE ?? 'autumn'
 const MAX_TEXT_LENGTH = 5_000
 const MAX_ATTEMPTS = 2

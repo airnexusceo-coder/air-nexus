@@ -310,7 +310,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     setConnectionCheck({ browser })
 
     try {
-      const response = await fetch('/api/diagnostics', { cache: 'no-store' })
+      const response = await fetch('/api/diagnostics')
       const diagnostics = (await response.json()) as SchoolConnectionCheck['diagnostics']
       setConnectionCheck({ browser, diagnostics })
       const groqOk = diagnostics?.checks?.groq?.ok
@@ -390,6 +390,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         onNavigate={navigate}
         onOpenDialog={setDialog}
         notify={notify}
+        profileName={profileName}
         plan={plan}
         nexusPoints={nexusPoints}
         planExpiry={planExpiry}

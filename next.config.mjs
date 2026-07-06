@@ -1,8 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
   serverExternalPackages: ['pdf-parse', '@napi-rs/canvas'],
   images: {
-    unoptimized: true,
+    formats: ['image/webp'],
+    minimumCacheTTL: 86_400,
   },
   async headers() {
     return [

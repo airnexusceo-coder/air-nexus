@@ -27,9 +27,8 @@ export function ThinkingLogo({
         alt=""
         aria-hidden="true"
         fill
-        sizes="32px"
+        sizes="(min-width: 640px) 40px, 32px"
         priority={priority}
-        unoptimized
         draggable={false}
         className={cn(
           'select-none object-contain',

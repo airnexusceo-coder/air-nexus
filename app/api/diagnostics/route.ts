@@ -11,6 +11,9 @@ type ProviderCheck = {
   status?: number
   message: string
 }
+const PROVIDER_CACHE_MS = 30_000
+let providerCache: { expiresAt: number; value: ProviderCheck } | null = null
+
 
 function isNetworkFailure(error: unknown) {
   if (!(error instanceof Error)) return true
@@ -66,8 +69,15 @@ async function checkGroqProvider(): Promise<ProviderCheck> {
   }
 }
 
+async function getCachedProviderCheck() {
+  if (providerCache && providerCache.expiresAt > Date.now()) return providerCache.value
+  const value = await checkGroqProvider()
+  providerCache = { value, expiresAt: Date.now() + PROVIDER_CACHE_MS }
+  return value
+}
+
 export async function GET() {
-  const groq = await checkGroqProvider()
+  const groq = await getCachedProviderCheck()
 
   return NextResponse.json({
     checkedAt: new Date().toISOString(),
@@ -84,5 +94,5 @@ export async function GET() {
     guidance: groq.ok
       ? 'Server-side AI connectivity looks healthy. If microphone still fails, check browser/site permissions or school-managed device policy.'
       : 'If this only fails at school, run the app from a network that allows api.groq.com, deploy the server outside the school network, or ask IT to allow the Groq API domain.',
-  })
+  }, { headers: { 'Cache-Control': 'private, max-age=15, stale-while-revalidate=30' } })
 }
