@@ -592,3 +592,49 @@
   .premium-message, .typing-indicator > span, .streaming-caret, .premium-skeleton::after { animation: none !important; }
   .premium-skeleton::after { display: none; }
 }
+
+/* Native-feeling mobile workspace behavior. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+.mobile-bottom-nav {
+  padding-bottom: max(env(safe-area-inset-bottom), .25rem);
+  box-shadow: 0 -18px 45px -28px rgb(0 0 0 / 90%);
+}
+
+@media (max-width: 1023px) {
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  .scrollbar-thin {
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    display: none;
+  }
+
+  .interactive-icon,
+  .send-button,
+  .mobile-touch {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .premium-chat-shell {
+    contain: layout paint;
+  }
+}

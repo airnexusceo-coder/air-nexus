@@ -1,4 +1,6 @@
-export type AuthProvider = 'google' | 'admin' | 'local'
+import { apiUrl } from '@/lib/api-client'
+
+export type AuthProvider = 'supabase'
 
 export type AuthSession = {
   id: string
@@ -9,46 +11,57 @@ export type AuthSession = {
   signedInAt: string
 }
 
-const PERSISTENT_SESSION_KEY = 'air-nexus-auth-session'
-const TEMPORARY_SESSION_KEY = 'air-nexus-auth-session-temporary'
-
 function isAuthSession(value: unknown): value is AuthSession {
   if (!value || typeof value !== 'object') return false
   const session = value as Partial<AuthSession>
   return typeof session.id === 'string' && typeof session.name === 'string' &&
     typeof session.email === 'string' && (session.role === 'user' || session.role === 'owner') &&
-    (session.provider === 'google' || session.provider === 'admin' || session.provider === 'local') &&
+    session.provider === 'supabase' &&
     typeof session.signedInAt === 'string'
 }
 
-function parseSession(value: string | null) {
-  if (!value) return null
-  try {
-    const parsed: unknown = JSON.parse(value)
-    return isAuthSession(parsed) ? parsed : null
-  } catch {
-    return null
+async function readAuthResponse(response: Response) {
+  const body = await response.json().catch(() => ({})) as { session?: unknown; error?: string; message?: string; pendingVerification?: boolean }
+  if (!response.ok) {
+    throw new Error(body.error ?? body.message ?? 'Authentication failed.')
   }
+  return body
 }
 
-export function getAuthSession() {
+export async function getAuthSession() {
   if (typeof window === 'undefined') return null
-  return parseSession(window.localStorage.getItem(PERSISTENT_SESSION_KEY)) ??
-    parseSession(window.sessionStorage.getItem(TEMPORARY_SESSION_KEY))
+  const response = await fetch(apiUrl('/api/auth/session'), { cache: 'no-store', credentials: 'include' })
+  if (response.status === 401) return null
+  const body = await readAuthResponse(response)
+  return isAuthSession(body.session) ? body.session : null
 }
 
-export function saveAuthSession(session: AuthSession, remember: boolean) {
-  clearAuthSession()
-  const storage = remember ? window.localStorage : window.sessionStorage
-  storage.setItem(remember ? PERSISTENT_SESSION_KEY : TEMPORARY_SESSION_KEY, JSON.stringify(session))
+export async function signInWithPassword(input: { email: string; password: string; remember: boolean }) {
+  const response = await fetch(apiUrl('/api/auth/login'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  })
+  const body = await readAuthResponse(response)
+  if (!isAuthSession(body.session)) throw new Error('The server did not return a valid session.')
+  return body.session
 }
 
-export function clearAuthSession() {
+export async function signUpWithPassword(input: { name: string; email: string; password: string; remember: boolean }) {
+  const response = await fetch(apiUrl('/api/auth/signup'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(input),
+  })
+  const body = await readAuthResponse(response)
+  if (body.pendingVerification) throw new Error(body.message ?? 'Check your email to confirm your account, then sign in.')
+  if (!isAuthSession(body.session)) throw new Error('The server did not return a valid session.')
+  return body.session
+}
+
+export async function clearAuthSession() {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem(PERSISTENT_SESSION_KEY)
-  window.sessionStorage.removeItem(TEMPORARY_SESSION_KEY)
-}
-
-export function createUserSession(input: Omit<AuthSession, 'signedInAt'>): AuthSession {
-  return { ...input, signedInAt: new Date().toISOString() }
+  await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => null)
 }

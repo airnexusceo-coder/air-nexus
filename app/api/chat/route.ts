@@ -12,6 +12,11 @@ import {
   isTutorMode,
   type TutorHistoryMessage,
 } from '@/lib/ai/tutor-types'
+import {
+  autoSummarizeConversationMemory,
+  getPersonalizationMemory,
+} from '@/lib/memory/server'
+import { getServerAuthSession, SupabaseConfigurationError } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -147,6 +152,10 @@ function createSanitizedTextStream(source: ReadableStream<Uint8Array>, onDone: (
         if (!emitted) throw new Error('AI stream returned no message content')
         controller.close()
       } catch (error) {
+    if (error instanceof SupabaseConfigurationError) {
+      console.error('Supabase configuration error:', error.message)
+      return NextResponse.json({ error: 'Supabase authentication is not configured' }, { status: 500 })
+    }
         controller.error(error)
       } finally {
         finish()
@@ -169,10 +178,17 @@ export async function POST(req: Request) {
   if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 })
   if (message.length > MAX_MESSAGE_LENGTH) return NextResponse.json({ error: 'Message is too long' }, { status: 413 })
   if (!documents) return NextResponse.json({ error: 'Invalid document context. Attach up to five readable documents.' }, { status: 400 })
+  const auth = await getServerAuthSession()
+  if (!auth) {
+    return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+  }
+
   if (!history) return NextResponse.json({ error: 'Invalid tutor conversation history.' }, { status: 400 })
   if (body?.mode !== undefined && !isTutorMode(body.mode)) return NextResponse.json({ error: 'Invalid tutor mode.' }, { status: 400 })
   if (body?.action !== undefined && !isTutorAction(body.action)) return NextResponse.json({ error: 'Invalid tutor action.' }, { status: 400 })
   if (body?.purpose !== undefined && !isGroqTextPurpose(body.purpose)) return NextResponse.json({ error: 'Invalid AI model purpose.' }, { status: 400 })
+    const memoryContext = await getPersonalizationMemory(auth, message)
+      .catch((error: unknown) => { console.error('Memory personalization error:', error instanceof Error ? error.message : 'Unknown error'); return '' })
   if (body?.stream !== undefined && typeof body.stream !== 'boolean') return NextResponse.json({ error: 'Invalid stream option.' }, { status: 400 })
 
   const { controller, timeoutId } = createTimeoutSignal()
@@ -182,6 +198,7 @@ export async function POST(req: Request) {
       message,
       documents,
       history,
+      memoryContext,
       mode: isTutorMode(body?.mode) ? body.mode : 'auto' as const,
       action: isTutorAction(body?.action) ? body.action : 'teach' as const,
       purpose: isGroqTextPurpose(body?.purpose) ? body.purpose : documents.length > 0 ? 'document-analysis' as const : 'conversation' as const,
@@ -189,12 +206,14 @@ export async function POST(req: Request) {
       signal: controller.signal,
     }
     if (body?.stream === true) {
+      void autoSummarizeConversationMemory(auth, message).catch((error: unknown) => console.error('Memory summary error:', error instanceof Error ? error.message : 'Unknown error'))
       const result = await createTutorReplyStream(input)
       streamOwnsTimeout = true
       return new Response(createSanitizedTextStream(result.stream, () => clearTimeout(timeoutId)), {
         headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-AirNexus-Model': result.model, 'X-AirNexus-Tools': result.tools.map(encodeURIComponent).join('|') },
       })
     }
+    void autoSummarizeConversationMemory(auth, message).catch((summaryError: unknown) => console.error('Memory summary error:', summaryError instanceof Error ? summaryError.message : 'Unknown error'))
     const result = await createTutorReply({
       ...input,
     })

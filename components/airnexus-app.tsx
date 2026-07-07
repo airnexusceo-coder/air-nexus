@@ -5,6 +5,7 @@ import { Bell, Check, Coins, Copy, Crown, Link2, Mail, Settings, ShieldCheck, Sp
 import { AppSidebar } from '@/components/app-sidebar'
 import { ContextPanel } from '@/components/context-panel'
 import { Workspace } from '@/components/workspace'
+import { MobileBottomNav } from '@/components/mobile-bottom-nav'
 import { Modal } from '@/components/ui/modal'
 import { cn } from '@/lib/utils'
 import { formatPlanExpiry, PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
@@ -19,6 +20,7 @@ import {
   type NexusTransaction,
   type NexusRewardsState,
 } from '@/lib/nexus-points'
+import { getMotivationStats, loadMotivationState, recordMotivationActivity, type MotivationCelebration } from '@/lib/motivation'
 
 export type AppDialog = 'upgrade' | 'upgrade-required' | 'insufficient-points' | 'profile' | 'share' | 'history' | null
 export type NoticeTone = 'success' | 'info' | 'warning'
@@ -98,6 +100,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [profileHydrated, setProfileHydrated] = useState(false)
   const [connectionCheck, setConnectionCheck] = useState<SchoolConnectionCheck | null>(null)
   const [connectionChecking, setConnectionChecking] = useState(false)
+  const [motivationCelebration, setMotivationCelebration] = useState<MotivationCelebration | null>(null)
 
 
   useEffect(() => {
@@ -182,6 +185,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       setNotices((current) => current.filter((notice) => notice.id !== id))
     }, 3200)
   }, [])
+  const recordStudyActivity = useCallback((activity: { id: string; xp: number; description: string; room?: string }) => {
+    const result = recordMotivationActivity(authUser.id, activity)
+    if (!result.celebration) return
+    setMotivationCelebration(result.celebration)
+    window.setTimeout(() => {
+      setMotivationCelebration((current) => current === result.celebration ? null : current)
+    }, 4200)
+  }, [authUser.id])
+
 
   const requestUpgrade = (feature: string, requiredPlan: Exclude<NexusPlan, 'Free'>) => {
     setUpgradeRequirement({ feature, plan: requiredPlan })
@@ -324,6 +336,10 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   }
   const claimStreakReward = () => {
     if (streakRewardClaimed) return
+    if (getMotivationStats(loadMotivationState(authUser.id)).currentStreak < 7) {
+      notify('Complete a 7-day study streak before claiming this reward', 'warning')
+      return
+    }
     setStreakRewardClaimed(true)
     setNexusPoints((points) => points + 150)
     setTransactions((current) => [createTransaction('earned', 150, '7-day learning streak'), ...current])
@@ -336,6 +352,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     setNexusPoints((points) => points + amount)
     setTransactions((current) => [createTransaction('earned', amount, description), ...current])
     notify(`+${amount} Nexus Points · ${description}`, 'success')
+    recordStudyActivity({ id: actionId, xp: Math.max(10, amount), description })
   }
 
   const redeemReward = (reward: { id: string; name: string; cost: number }) => {
@@ -351,7 +368,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   }
 
   return (
-    <div className={cn('relative flex h-dvh w-full overflow-hidden', focusMode && 'focus-mode')}>
+    <div className={cn('relative flex h-[var(--app-height,100dvh)] w-full overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] lg:h-dvh lg:pb-0', focusMode && 'focus-mode')}>
       <AppSidebar
         active={activeSection}
         activeRoom={activeRoom}
@@ -391,6 +408,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         onOpenDialog={setDialog}
         notify={notify}
         profileName={profileName}
+        motivationUserId={authUser.id}
         plan={plan}
         nexusPoints={nexusPoints}
         planExpiry={planExpiry}
@@ -405,6 +423,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         streakRewardClaimed={streakRewardClaimed}
         onClaimStreakReward={claimStreakReward}
         onEarnNexusPoints={earnNexusPoints}
+        onRecordStudyActivity={recordStudyActivity}
       />
 
       <ContextPanel
@@ -417,6 +436,19 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         isPlus={plan !== 'Free'}
         autoSpeak={autoSpeak}
         onRequestUpgrade={requestUpgrade}
+      />
+
+      <MobileBottomNav
+        activeSection={activeSection}
+        chatOpen={mainChatOpen}
+        menuOpen={sidebarOpen}
+        contextOpen={contextOpen}
+        onNavigate={navigate}
+        onOpenChat={openMainChat}
+        onOpenMenu={() => setSidebarOpen(true)}
+        onCloseMenu={() => setSidebarOpen(false)}
+        onOpenContext={() => setContextOpen(true)}
+        onCloseContext={() => setContextOpen(false)}
       />
 
       {(sidebarOpen || contextOpen) && (
@@ -626,6 +658,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
           ))}
         </div>
       </Modal>
+
+      {motivationCelebration && (
+        <div role="status" className="pointer-events-none fixed left-1/2 top-5 z-[125] w-[min(92vw,380px)] -translate-x-1/2">
+          <div className="glass-strong animate-toast-in flex items-center gap-3 rounded-2xl border-orange-300/25 px-4 py-3 shadow-2xl shadow-orange-950/25">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-orange-400/15 text-orange-200"><Sparkles className="size-5" /></span>
+            <div><p className="text-sm font-semibold text-white">{motivationCelebration.title}</p><p className="mt-0.5 text-xs text-slate-400">{motivationCelebration.detail}</p></div>
+          </div>
+        </div>
+      )}
 
       <div aria-live="polite" aria-atomic="true" className="pointer-events-none fixed bottom-5 left-1/2 z-[120] flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-2">
         {notices.map((notice) => (

@@ -36,7 +36,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
-import { clearAuthSession, createUserSession, getAuthSession, saveAuthSession, type AuthSession } from '@/lib/auth/session'
+import { clearAuthSession, getAuthSession, signInWithPassword, signUpWithPassword, type AuthSession } from '@/lib/auth/session'
 import { cn } from '@/lib/utils'
 
 const AirGPTApp = dynamic(
@@ -106,22 +106,29 @@ function AirGPTGate() {
   const [session, setSession] = useState<AuthSession | null | undefined>(undefined)
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      const current = getAuthSession()
-      if (!current) {
-        router.replace('/login')
-        return
-      }
-      setSession(current)
-    }, 0)
-    return () => window.clearTimeout(timeoutId)
+    let cancelled = false
+    void getAuthSession()
+      .then((current) => {
+        if (cancelled) return
+        if (!current) {
+          router.replace('/login')
+          return
+        }
+        setSession(current)
+      })
+      .catch(() => {
+        if (!cancelled) router.replace('/login')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [router])
 
   if (!session) {
     return <div className="flex min-h-screen items-center justify-center bg-black text-sm text-zinc-400"><span className="size-5 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" /><span className="ml-3">Checking your Air Nexus session…</span></div>
   }
 
-  return <div className="airgpt-product"><AirGPTApp authUser={session} onSignOut={() => { clearAuthSession(); router.replace('/login') }} /></div>
+  return <div className="airgpt-product"><AirGPTApp authUser={session} onSignOut={() => { void clearAuthSession().finally(() => router.replace('/login')) }} /></div>
 }
 function MarketingNav({ active }: { active: MarketingPage }) {
   const [open, setOpen] = useState(false)
@@ -180,54 +187,40 @@ function CompanyPage() {
 
 function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const router = useRouter()
-  const [method, setMethod] = useState<'google' | 'admin'>('google')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [remember, setRemember] = useState(true)
-  const [googleName, setGoogleName] = useState('')
-  const [googleEmail, setGoogleEmail] = useState('')
 
   useEffect(() => {
-    if (getAuthSession()) router.replace('/airgpt')
+    let cancelled = false
+    void getAuthSession()
+      .then((current) => {
+        if (!cancelled && current) router.replace('/airgpt')
+      })
+      .catch(() => null)
+    return () => {
+      cancelled = true
+    }
   }, [router])
-
-  const finishSignIn = (session: AuthSession) => {
-    saveAuthSession(session, remember)
-    router.push('/airgpt')
-  }
-
-  const continueWithGoogle = () => {
-    setError('')
-    const name = googleName.trim()
-    const email = googleEmail.trim()
-    if (!name) { setError('Enter the name on your Google account.'); return }
-    if (!/^\S+@\S+\.\S+$/.test(email)) { setError('Enter a valid Google email address.'); return }
-    finishSignIn(createUserSession({ id: `google:${email.toLowerCase()}`, name, email, role: 'user', provider: 'google' }))
-  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError('')
     setLoading(true)
     const data = new FormData(event.currentTarget)
+    const email = String(data.get('email') ?? '').trim()
+    const password = String(data.get('password') ?? '')
     try {
+      if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter a valid email address.')
+      if (!password) throw new Error('Password is required.')
       if (mode === 'signup') {
         const name = String(data.get('name') ?? '').trim()
-        const email = String(data.get('email') ?? '').trim()
         if (!name) throw new Error('Enter your name.')
-        if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter a valid email address.')
-        finishSignIn(createUserSession({ id: `local:${email.toLowerCase()}`, name, email, role: 'user', provider: 'local' }))
-        return
+        await signUpWithPassword({ name, email, password, remember })
+      } else {
+        await signInWithPassword({ email, password, remember })
       }
-
-      const response = await fetch('/api/auth/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: data.get('username'), password: data.get('password') }),
-      })
-      const body = await response.json() as { session?: AuthSession; error?: string }
-      if (!response.ok || !body.session) throw new Error(body.error ?? 'Administrator login failed.')
-      finishSignIn(body.session)
+      router.push('/airgpt')
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Sign-in failed.')
     } finally {
@@ -235,11 +228,10 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     }
   }
 
-  return <section className="relative mx-auto flex min-h-[calc(100vh-160px)] max-w-[1440px] items-center justify-center px-5 py-16"><div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,106,0,.16),transparent_38%)]" /><div className="nexus-card relative w-full max-w-md p-7 sm:p-9"><NexusMark /><p className="mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-orange-400">{mode === 'login' ? 'Secure sign in' : 'Join Air Nexus'}</p><h1 className="mt-2 text-3xl font-semibold">{mode === 'login' ? 'Continue to AirGPT' : 'Create your account'}</h1><p className="mt-2 text-sm leading-6 text-zinc-500">Sign in before opening your dashboard. Nexus Points are only awarded to authenticated accounts.</p>
-    {mode === 'login' && <div className="mt-6 grid grid-cols-2 gap-2 rounded-xl border border-white/8 bg-white/[0.025] p-1" role="tablist" aria-label="Sign-in method"><button type="button" role="tab" aria-selected={method === 'google'} onClick={() => { setMethod('google'); setError('') }} className={cn('rounded-lg px-3 py-2.5 text-xs font-semibold transition', method === 'google' ? 'bg-orange-500 text-white' : 'text-zinc-400 hover:text-white')}>Google</button><button type="button" role="tab" aria-selected={method === 'admin'} onClick={() => { setMethod('admin'); setError('') }} className={cn('rounded-lg px-3 py-2.5 text-xs font-semibold transition', method === 'admin' ? 'bg-orange-500 text-white' : 'text-zinc-400 hover:text-white')}>Administrator</button></div>}
-    {mode === 'login' && method === 'google' ? <div className="mt-6"><label className="block text-xs text-zinc-400">Google account name<input value={googleName} onChange={(event) => setGoogleName(event.target.value)} className="nexus-field mt-2" placeholder="Your full name" autoComplete="name" /></label><label className="mt-5 block text-xs text-zinc-400">Google email<input value={googleEmail} onChange={(event) => setGoogleEmail(event.target.value)} type="email" className="nexus-field mt-2" placeholder="name@gmail.com" autoComplete="email" /></label><button type="button" onClick={continueWithGoogle} className="nexus-cta mt-6 w-full">Continue with Google <ArrowRight className="size-4" /></button><p className="mt-3 text-center text-[10px] leading-4 text-zinc-600">Uses the local Google-profile flow until a Google OAuth client is configured.</p></div> : <form onSubmit={submit} className="mt-6">{mode === 'signup' ? <><label className="block text-xs text-zinc-400">Full name<input name="name" required className="nexus-field mt-2" placeholder="Your name" autoComplete="name" /></label><label className="mt-5 block text-xs text-zinc-400">Email<input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" /></label><label className="mt-5 block text-xs text-zinc-400">Password<input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete="new-password" /></label></> : <><label className="block text-xs text-zinc-400">Administrator username<input name="username" required className="nexus-field mt-2" placeholder="Parth Nair" autoComplete="username" /></label><label className="mt-5 block text-xs text-zinc-400">Password<input name="password" type="password" required className="nexus-field mt-2" placeholder="Administrator password" autoComplete="current-password" /></label></>}
-      <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in…' : mode === 'signup' ? 'Create account' : 'Administrator sign in'}<ArrowRight className="size-4" /></button></form>}
-    <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-orange-500" /><span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep me signed in on this device.</span></span></label>
+  return <section className="relative mx-auto flex min-h-[calc(100vh-160px)] max-w-[1440px] items-center justify-center px-5 py-16"><div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,106,0,.16),transparent_38%)]" /><div className="nexus-card relative w-full max-w-md p-7 sm:p-9"><NexusMark /><p className="mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-orange-400">{mode === 'login' ? 'Secure sign in' : 'Join Air Nexus'}</p><h1 className="mt-2 text-3xl font-semibold">{mode === 'login' ? 'Continue to AirGPT' : 'Create your account'}</h1><p className="mt-2 text-sm leading-6 text-zinc-500">Supabase Auth protects your workspace and memory. AirNexus only uses server-verified account IDs.</p>
+    <form onSubmit={submit} className="mt-6">{mode === 'signup' && <label className="block text-xs text-zinc-400">Full name<input name="name" required className="nexus-field mt-2" placeholder="Your name" autoComplete="name" /></label>}<label className={mode === 'signup' ? 'mt-5 block text-xs text-zinc-400' : 'block text-xs text-zinc-400'}>Email<input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" /></label><label className="mt-5 block text-xs text-zinc-400">Password<input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>
+      <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Sign in'}<ArrowRight className="size-4" /></button></form>
+    <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-orange-500" /><span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep this Supabase session on this device.</span></span></label>
     {error && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
     <p className="mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? "New to Air Nexus? " : 'Already have an account? '}<Link href={mode === 'login' ? '/signup' : '/login'} className="text-orange-400">{mode === 'login' ? 'Sign up' : 'Login'}</Link></p></div></section>
 }

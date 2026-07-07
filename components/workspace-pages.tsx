@@ -17,17 +17,16 @@ import {
   FileInput,
   Flame,
   Gauge,
-  Medal,
   MessageSquareText,
   Plus,
   Search,
   Sparkles,
   Target,
-  Trophy,
   Upload,
   Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { MotivationPage } from '@/components/motivation-page'
 
 type NoticeTone = 'success' | 'info' | 'warning'
 
@@ -36,6 +35,8 @@ type WorkspacePagesProps = {
   onNavigate: (section: string) => void
   notify: (message: string, tone?: NoticeTone) => void
   onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
+  motivationUserId: string
+  profileName: string
 }
 
 type TaskPriority = 'High' | 'Medium' | 'Low'
@@ -77,11 +78,11 @@ const statusStyles: Record<TaskStatus, string> = {
   Done: 'bg-emerald-400/12 text-emerald-200',
 }
 
-export function WorkspacePages({ page, onNavigate, notify, onEarnNexusPoints }: WorkspacePagesProps) {
+export function WorkspacePages({ page, onNavigate, notify, onEarnNexusPoints, motivationUserId, profileName }: WorkspacePagesProps) {
   if (page === 'Tasks') return <TasksPage notify={notify} onEarnNexusPoints={onEarnNexusPoints} />
   if (page === 'Calendar') return <CalendarPage onNavigate={onNavigate} notify={notify} />
   if (page === 'Analytics') return <AnalyticsPage />
-  if (page === 'Leaderboard') return <LeaderboardPage />
+  if (page === 'Leaderboard') return <MotivationPage userId={motivationUserId} profileName={profileName} notify={notify} />
   if (page === 'Notifications') return <NotificationsPage notify={notify} />
   if (page === 'Integrations') return <IntegrationsPage notify={notify} />
   return null
@@ -322,47 +323,6 @@ function AnalyticsPage() {
       <section className="glass rounded-2xl p-5"><h3 className="font-semibold">Subject progress</h3><div className="mt-5 grid gap-x-8 gap-y-5 md:grid-cols-2">{subjects.map((subject) => <div key={subject.name}><div className="mb-2 flex justify-between text-sm"><span>{subject.name}</span><span className="font-medium text-slate-300">{subject.value}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white/7"><div className={cn('h-full rounded-full', subject.color)} style={{ width: subject.value + '%' }} /></div></div>)}</div></section>
     </div>
   )
-}
-
-const leaders = [
-  { name: 'Maya', initials: 'M', points: 4820, badge: 'Focus Master', color: 'from-amber-400 to-orange-500' },
-  { name: 'Elena', initials: 'E', points: 4310, badge: 'Quiz Ace', color: 'from-orange-400 to-orange-500' },
-  { name: 'Parth', initials: 'P', points: 3940, badge: '27 Day Streak', color: 'from-orange-400 to-amber-500', you: true },
-  { name: 'Julian', initials: 'J', points: 3610, badge: 'Task Tamer', color: 'from-amber-400 to-fuchsia-500' },
-  { name: 'Aarav', initials: 'A', points: 3120, badge: 'Early Bird', color: 'from-emerald-400 to-teal-500' },
-  { name: 'Riya', initials: 'R', points: 2890, badge: 'Study Buddy', color: 'from-rose-400 to-pink-500' },
-]
-
-function LeaderboardPage() {
-  const [period, setPeriod] = useState<'Weekly' | 'Monthly' | 'All Time'>('Weekly')
-  const factor = period === 'Weekly' ? 1 : period === 'Monthly' ? 3.7 : 12.4
-  return (
-    <div className="space-y-6">
-      <PageIntro eyebrow="Learn together" title="Leaderboard" description="Celebrate consistency and positive study habits. Only first names are shown." />
-      <div className="glass inline-flex rounded-xl p-1" role="tablist" aria-label="Leaderboard period">{(['Weekly', 'Monthly', 'All Time'] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={period === tab} onClick={() => setPeriod(tab)} className={cn('rounded-lg px-4 py-2 text-xs font-medium transition', period === tab ? 'bg-orange-500/25 text-white shadow-sm' : 'text-slate-400 hover:bg-white/5 hover:text-white')}>{tab}</button>)}</div>
-      <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        <section className="glass overflow-hidden rounded-2xl">
-          <div className="border-b border-white/8 px-5 py-4"><h3 className="font-semibold">Top students</h3><p className="mt-1 text-xs text-slate-500">Nexus points earned through helpful study actions</p></div>
-          <div className="divide-y divide-white/6">{leaders.map((leader, index) => (
-            <div key={leader.name} className={cn('flex items-center gap-3 px-4 py-4 sm:px-5', leader.you && 'bg-orange-400/[0.08]')}>
-              <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold', index === 0 ? 'bg-amber-300/15 text-amber-200' : index === 1 ? 'bg-slate-300/10 text-slate-200' : index === 2 ? 'bg-orange-400/10 text-orange-200' : 'text-slate-500')}>{index + 1}</span>
-              <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-sm font-bold text-white', leader.color)}>{leader.initials}</span>
-              <div className="min-w-0 flex-1"><p className="font-medium">{leader.name}{leader.you && <span className="ml-2 text-xs text-orange-300">You</span>}</p><p className="mt-0.5 truncate text-xs text-slate-500">{leader.badge}</p></div>
-              <div className="text-right"><p className="font-semibold text-amber-200">{Math.round(leader.points * factor).toLocaleString()}</p><p className="text-[10px] text-slate-500">Nexus points</p></div>
-            </div>
-          ))}</div>
-        </section>
-        <div className="space-y-4">
-          <section className="glass rounded-2xl p-5"><div className="flex items-center gap-3"><span className="flex size-11 items-center justify-center rounded-xl bg-amber-400/15 text-amber-200"><Trophy className="size-5" /></span><div><p className="text-xs text-slate-500">Your {period.toLowerCase()} rank</p><p className="text-2xl font-bold">#3</p></div></div><div className="mt-5 h-2 rounded-full bg-white/8"><div className="h-full w-[72%] rounded-full bg-gradient-to-r from-orange-500 to-orange-300" /></div><p className="mt-2 text-xs text-slate-400">370 points to reach #2</p></section>
-          <section className="glass rounded-2xl p-5"><h3 className="font-semibold">Recent achievements</h3><div className="mt-4 space-y-3"><Achievement icon={Flame} title="27 Day Streak" detail="Studied every day" color="text-orange-300 bg-orange-400/10" /><Achievement icon={Medal} title="Quiz Ace" detail="Scored above 90%" color="text-amber-300 bg-amber-400/10" /><Achievement icon={Users} title="Study Buddy" detail="Helped a classmate" color="text-orange-300 bg-orange-400/10" /></div></section>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Achievement({ icon: Icon, title, detail, color }: { icon: typeof Flame; title: string; detail: string; color: string }) {
-  return <div className="flex items-center gap-3"><span className={cn('flex size-9 items-center justify-center rounded-xl', color)}><Icon className="size-4" /></span><div><p className="text-sm font-medium">{title}</p><p className="text-xs text-slate-500">{detail}</p></div></div>
 }
 
 type NotificationItem = { id: number; type: string; title: string; detail: string; time: string; unread: boolean; icon: typeof Bell; color: string }

@@ -19,6 +19,7 @@ import {
   GraduationCap,
   Layers3,
   Sparkles,
+  Brain,
 } from 'lucide-react'
 
 export type NavItem = {
@@ -31,6 +32,7 @@ export type NavItem = {
 export const navItems: NavItem[] = [
   { label: 'Dashboard', icon: LayoutDashboard },
   { label: 'Daily Dashboard', icon: Sparkles },
+  { label: 'AI Memory', icon: Brain },
   { label: 'Study Coach', icon: Compass },
   { label: 'AI Tutor', icon: GraduationCap },
   { label: 'Flashcards', icon: Layers3 },

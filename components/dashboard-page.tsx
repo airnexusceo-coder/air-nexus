@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import {
   BarChart3, BookOpenCheck, Bot, Calculator, CalendarDays, CheckCircle2, ClipboardList, Clock3, Compass,
   Flame, GraduationCap, Headphones, Layers3, ListChecks, LockKeyhole,
@@ -8,9 +9,12 @@ import {
 } from 'lucide-react'
 import type { NexusPlan } from '@/lib/plans'
 import { cn } from '@/lib/utils'
+import { createMotivationState, getMotivationStats, loadMotivationState, MOTIVATION_UPDATED_EVENT, type MotivationState } from '@/lib/motivation'
 
 type DashboardPageProps = {
   plan: NexusPlan
+  motivationUserId: string
+  profileName: string
   streakRewardClaimed: boolean
   onClaimStreakReward: () => void
   onNavigate: (section: string) => void
@@ -64,12 +68,29 @@ const streakRewards = [
   { days: 14, points: 400 }, { days: 30, points: 1000 },
 ]
 
-export function DashboardPage({ plan, streakRewardClaimed, onClaimStreakReward, onNavigate, onRequestUpgrade }: DashboardPageProps) {
+export function DashboardPage({ plan, motivationUserId, profileName, streakRewardClaimed, onClaimStreakReward, onNavigate, onRequestUpgrade }: DashboardPageProps) {
   const totalMinutes = dailyUsage.reduce((total, day) => total + day.minutes, 0)
+  const [motivationState, setMotivationState] = useState<MotivationState>(createMotivationState)
+
+  useEffect(() => {
+    const refresh = (event?: Event) => {
+      if (event instanceof CustomEvent && event.detail?.userId !== motivationUserId) return
+      setMotivationState(loadMotivationState(motivationUserId))
+    }
+    refresh()
+    window.addEventListener(MOTIVATION_UPDATED_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener(MOTIVATION_UPDATED_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [motivationUserId])
+
+  const motivationStats = getMotivationStats(motivationState)
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-sm text-muted-foreground">Good afternoon, Parth. Here is your learning momentum.</p>
+        <p className="text-sm text-muted-foreground">Good afternoon, {profileName}. Here is your learning momentum.</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">Dashboard overview</h2>
       </div>
 
@@ -99,11 +120,11 @@ export function DashboardPage({ plan, streakRewardClaimed, onClaimStreakReward, 
 
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="streak-title">
           <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-300">Learning streak</p><h3 id="streak-title" className="mt-1 text-xl font-semibold">Keep going</h3></div><span className="flex size-12 items-center justify-center rounded-2xl bg-orange-400/12 text-orange-300"><Flame className="size-6" /></span></div>
-          <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-white/[0.045] p-4"><p className="text-3xl font-bold text-white">7</p><p className="mt-1 text-xs text-slate-500">Current streak</p></div><div className="rounded-2xl bg-white/[0.045] p-4"><p className="text-3xl font-bold text-white">21</p><p className="mt-1 text-xs text-slate-500">Longest streak</p></div></div>
-          <div className="mt-5 flex justify-between" aria-label="Seven active study days this week">{['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, index) => <span key={day + index} className="flex size-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-amber-300 text-[10px] font-bold text-slate-950 shadow-lg shadow-orange-500/15">{day}</span>)}</div>
-          <p className="mt-5 text-sm leading-relaxed text-slate-300">You showed up every day this week. One focused session today keeps the streak alive.</p>
-          <div className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] p-3"><p className="text-xs font-semibold text-amber-100">7-day reward · +150 Nexus Points</p><button type="button" onClick={onClaimStreakReward} disabled={streakRewardClaimed} className="secondary-action mt-3 w-full text-xs">{streakRewardClaimed ? 'Reward claimed' : 'Claim reward'}</button></div>
-          <div className="mt-4 grid grid-cols-2 gap-2">{streakRewards.map((reward) => <div key={reward.days} className={cn('rounded-xl border px-3 py-2 text-[10px]', reward.days <= 7 ? 'border-orange-300/15 bg-orange-400/[0.06] text-orange-100' : 'border-white/8 bg-white/[0.025] text-slate-500')}><span className="font-semibold">{reward.days} days</span><span className="float-right">+{reward.points}</span></div>)}</div>
+          <div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-white/[0.045] p-4"><p className="text-3xl font-bold text-white">{motivationStats.currentStreak}</p><p className="mt-1 text-xs text-slate-500">Current streak</p></div><div className="rounded-2xl bg-white/[0.045] p-4"><p className="text-3xl font-bold text-white">{motivationStats.longestStreak}</p><p className="mt-1 text-xs text-slate-500">Longest streak</p></div></div>
+          <div className="mt-5 flex justify-between" aria-label={`${Math.min(motivationStats.currentStreak, 7)} of 7 streak days complete`}>{['1', '2', '3', '4', '5', '6', '7'].map((day, index) => <span key={day} className={cn('flex size-8 items-center justify-center rounded-full text-[10px] font-bold', index < motivationStats.currentStreak ? 'bg-gradient-to-br from-orange-400 to-amber-300 text-slate-950 shadow-lg shadow-orange-500/15' : 'bg-white/6 text-slate-500')}>{day}</span>)}</div>
+          <p className="mt-5 text-sm leading-relaxed text-slate-300">{motivationStats.currentStreak > 0 ? `You have studied for ${motivationStats.currentStreak} day${motivationStats.currentStreak === 1 ? '' : 's'} in a row.` : 'Complete a task, AI study turn, or focus sprint to begin your streak.'}</p>
+          <div className="mt-4 rounded-2xl border border-amber-300/15 bg-amber-300/[0.06] p-3"><p className="text-xs font-semibold text-amber-100">7-day reward · +150 Nexus Points</p><button type="button" onClick={onClaimStreakReward} disabled={streakRewardClaimed || motivationStats.currentStreak < 7} className="secondary-action mt-3 w-full text-xs">{streakRewardClaimed ? 'Reward claimed' : motivationStats.currentStreak < 7 ? `${7 - motivationStats.currentStreak} days to unlock` : 'Claim reward'}</button></div>
+          <div className="mt-4 grid grid-cols-2 gap-2">{streakRewards.map((reward) => <div key={reward.days} className={cn('rounded-xl border px-3 py-2 text-[10px]', reward.days <= motivationStats.longestStreak ? 'border-orange-300/15 bg-orange-400/[0.06] text-orange-100' : 'border-white/8 bg-white/[0.025] text-slate-500')}><span className="font-semibold">{reward.days} days</span><span className="float-right">+{reward.points}</span></div>)}</div>
         </section>
       </div>
 

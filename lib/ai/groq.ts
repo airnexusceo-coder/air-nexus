@@ -49,6 +49,7 @@ export type CreateTutorReplyInput = {
   purpose?: GroqTextPurpose
   action?: TutorAction
   tier?: TutorTier
+  memoryContext?: string
   signal?: AbortSignal
 }
 
@@ -210,6 +211,7 @@ export async function createTutorReply({
   mode = 'auto',
   purpose = 'conversation',
   action = 'teach',
+  memoryContext = '',
   signal,
 }: CreateTutorReplyInput): Promise<TutorReply> {
   const model = getTutorModel(action, purpose, documents)
@@ -218,10 +220,11 @@ export async function createTutorReply({
       '<document index="' + (index + 1) + '" name="' + document.name.replace(/[<>]/g, '') + '">\n' + document.text + '\n</document>',
     ).join('\n\n')
     : ''
+  const memoryInstruction = memoryContext ? `\n${memoryContext}` : ''
   const messages: GroqMessage[] = [
     {
       role: 'system',
-      content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${actionInstruction(action)}`,
+      content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${actionInstruction(action)}${memoryInstruction}`,
     },
     ...history.map((historyMessage) => ({ role: historyMessage.role, content: historyMessage.content })),
     {
@@ -263,6 +266,7 @@ export async function createTutorReplyStream({
   mode = 'auto',
   action = 'teach',
   purpose = 'conversation',
+  memoryContext = '',
   signal,
 }: CreateTutorReplyInput): Promise<TutorReplyStream> {
   const model = getTutorModel(action, purpose, documents)
@@ -271,10 +275,11 @@ export async function createTutorReplyStream({
       '<document index="' + (index + 1) + '" name="' + document.name.replace(/[<>]/g, '') + '">\n' + document.text + '\n</document>',
     ).join('\n\n')
     : ''
+  const memoryInstruction = memoryContext ? `\n${memoryContext}` : ''
   const messages: GroqMessage[] = [
     {
       role: 'system',
-      content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${actionInstruction(action)}`,
+      content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${actionInstruction(action)}${memoryInstruction}`,
     },
     ...history.map((historyMessage) => ({ role: historyMessage.role, content: historyMessage.content })),
     {
@@ -288,7 +293,7 @@ export async function createTutorReplyStream({
     const toolResponse = await fetchGroq({
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getGroqApiKey()}` },
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${automaticToolPrompt}` }, ...messages.slice(1)], tools: studyToolDefinitions, tool_choice: 'auto', temperature: 0.2, max_completion_tokens: 700, stream: false }),
+      body: JSON.stringify({ model, messages: [{ role: 'system', content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${automaticToolPrompt}${memoryInstruction}` }, ...messages.slice(1)], tools: studyToolDefinitions, tool_choice: 'auto', temperature: 0.2, max_completion_tokens: 700, stream: false }),
       signal,
     })
     const toolData = parseGroqResponse(await readGroqJson(toolResponse))
@@ -297,7 +302,7 @@ export async function createTutorReplyStream({
     if (toolCalls.length > 0) {
       const executions = toolCalls.map((call) => executeStudyTool(call, documents))
       usedTools = [...new Set(executions.map((execution) => execution.label))]
-      messages[0] = { role: 'system', content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${toolResultPrompt}` }
+      messages[0] = { role: 'system', content: `${tutorSystemPrompt}\n${modeInstruction(mode)}\n${toolResultPrompt}${memoryInstruction}` }
       messages.push({ role: 'assistant', content: null, tool_calls: toolCalls })
       messages.push(...executions.map((execution) => ({ role: 'tool' as const, name: execution.name, tool_call_id: execution.id, content: execution.content })))
     }

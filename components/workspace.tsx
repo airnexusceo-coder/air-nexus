@@ -14,6 +14,7 @@ import {
   ArrowUp,
   BarChart3,
   Bell,
+  Brain,
   Bold,
   BookOpen,
   CalendarDays,
@@ -92,6 +93,7 @@ const CalculatorsPage = dynamic(() => import('@/components/calculators-page').th
 const DashboardPage = dynamic(() => import('@/components/dashboard-page').then((module) => module.DashboardPage), { loading: SectionLoading })
 const IntelligentDashboardPage = dynamic(() => import('@/components/intelligent-dashboard-page').then((module) => module.IntelligentDashboardPage), { loading: SectionLoading })
 const MarketplacePage = dynamic(() => import('@/components/marketplace-page').then((module) => module.MarketplacePage), { loading: SectionLoading })
+const MemoryPage = dynamic(() => import('@/components/memory-page').then((module) => module.MemoryPage), { loading: SectionLoading })
 const WorkspacePages = dynamic(() => import('@/components/workspace-pages').then((module) => module.WorkspacePages), { loading: SectionLoading })
 
 type WorkspaceProps = {
@@ -104,6 +106,7 @@ type WorkspaceProps = {
   onNavigate: (section: string) => void
   onOpenDialog: (dialog: AppDialog) => void
   notify: (message: string, tone?: NoticeTone) => void
+  motivationUserId: string
   profileName: string
   plan: NexusPlan
   nexusPoints: number
@@ -119,6 +122,7 @@ type WorkspaceProps = {
   streakRewardClaimed: boolean
   onClaimStreakReward: () => void
   onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
+  onRecordStudyActivity: (activity: { id: string; xp: number; description: string; room?: string }) => void
 }
 
 type MainMessage = {
@@ -287,6 +291,7 @@ export function Workspace({
   onNavigate,
   onOpenDialog,
   notify,
+  motivationUserId,
   profileName,
   plan,
   nexusPoints,
@@ -302,6 +307,7 @@ export function Workspace({
   streakRewardClaimed,
   onClaimStreakReward,
   onEarnNexusPoints,
+  onRecordStudyActivity,
 }: WorkspaceProps) {
   const [draft, setDraft] = useState('')
   const [messages, setMessages] = useState<MainMessage[]>(() => copyInitialMessages())
@@ -344,7 +350,14 @@ export function Workspace({
   }, [mainChatOpen])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const textarea = composerRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 144)}px`
+  }, [draft, mainChatOpen])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: isSending ? 'auto' : 'smooth' })
   }, [messages, isSending])
 
   useEffect(() => {
@@ -575,6 +588,7 @@ export function Workspace({
       const safeReply = sanitizeResponse(streamedReply)
       if (!safeReply) throw new Error('AI returned an empty response')
       setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: safeReply } : message))
+      onRecordStudyActivity({ id: `ai-study-${assistantId}`, xp: readableAttachments.length > 0 ? 15 : 10, description: readableAttachments.length > 0 ? 'AI study: analysed documents' : 'AI study session completed' })
       if (autoSpeak && plan !== 'Free') {
         void speakWithOrpheus(safeReply).catch((error: unknown) => {
           if (!isSpeechCancellation(error)) notify(error instanceof Error ? error.message : 'Speech playback failed.', 'warning')
@@ -663,6 +677,7 @@ export function Workspace({
         onContinueStudy={onOpenMainChat}
         notify={notify}
         profileName={profileName}
+        motivationUserId={motivationUserId}
         plan={plan}
         nexusPoints={nexusPoints}
         planExpiry={planExpiry}
@@ -676,6 +691,7 @@ export function Workspace({
         streakRewardClaimed={streakRewardClaimed}
         onClaimStreakReward={onClaimStreakReward}
         onEarnNexusPoints={onEarnNexusPoints}
+        onRecordStudyActivity={onRecordStudyActivity}
       />
     )
   }
@@ -1295,6 +1311,10 @@ function FullPageChat({
                   rows={1}
                   onChange={(event) => onDraftChange(event.target.value)}
                   onKeyDown={onComposerKeyDown}
+                  onFocus={() => window.setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }), 120)}
+                  enterKeyHint="send"
+                  autoCapitalize="sentences"
+                  autoCorrect="on"
                   placeholder="Message AirGPT"
                   aria-label="Chat message"
                   className="max-h-40 min-h-8 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 outline-none placeholder:text-muted-foreground"
@@ -1669,6 +1689,7 @@ function SectionWorkspace({
   onContinueStudy,
   notify,
   profileName,
+  motivationUserId,
   plan,
   nexusPoints,
   planExpiry,
@@ -1682,6 +1703,7 @@ function SectionWorkspace({
   streakRewardClaimed,
   onClaimStreakReward,
   onEarnNexusPoints,
+  onRecordStudyActivity,
 }: {
   section: string
   onOpenSidebar: () => void
@@ -1690,6 +1712,7 @@ function SectionWorkspace({
   onContinueStudy: () => void
   notify: (message: string, tone?: NoticeTone) => void
   profileName: string
+  motivationUserId: string
   plan: NexusPlan
   nexusPoints: number
   planExpiry: string | null
@@ -1703,6 +1726,7 @@ function SectionWorkspace({
   streakRewardClaimed: boolean
   onClaimStreakReward: () => void
   onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
+  onRecordStudyActivity: (activity: { id: string; xp: number; description: string; room?: string }) => void
 }) {
   const [seconds, setSeconds] = useState(25 * 60)
   const [timerRunning, setTimerRunning] = useState(false)
@@ -1716,6 +1740,7 @@ function SectionWorkspace({
         if (current <= 1) {
           setTimerRunning(false)
           notify('Panic Mode focus sprint complete', 'success')
+          onRecordStudyActivity({ id: `focus-sprint-${Date.now()}`, xp: 25, description: 'Completed a 25-minute focus sprint' })
           return 0
         }
         return current - 1
@@ -1723,7 +1748,7 @@ function SectionWorkspace({
     }, 1000)
 
     return () => window.clearInterval(id)
-  }, [timerRunning, notify])
+  }, [timerRunning, notify, onRecordStudyActivity])
 
   const createRoom = () => {
     const name = roomName.trim()
@@ -1735,6 +1760,7 @@ function SectionWorkspace({
   const icon =
     section === 'Dashboard' ? Gauge :
     section === 'Daily Dashboard' ? Sparkles :
+    section === 'AI Memory' ? Brain :
     section === 'Study Coach' ? Compass :
     section === 'AI Tutor' ? GraduationCap :
     section === 'Flashcards' ? Layers3 :
@@ -1772,7 +1798,7 @@ function SectionWorkspace({
 
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
         {section === 'Dashboard' && (
-          <DashboardPage plan={plan} streakRewardClaimed={streakRewardClaimed} onClaimStreakReward={onClaimStreakReward} onNavigate={onNavigate} onRequestUpgrade={onRequestUpgrade} />
+          <DashboardPage plan={plan} motivationUserId={motivationUserId} profileName={profileName} streakRewardClaimed={streakRewardClaimed} onClaimStreakReward={onClaimStreakReward} onNavigate={onNavigate} onRequestUpgrade={onRequestUpgrade} />
         )}
 
         {section === 'Daily Dashboard' && (
@@ -1784,6 +1810,10 @@ function SectionWorkspace({
             notify={notify}
           />
         )}
+        {section === 'AI Memory' && (
+          <MemoryPage notify={notify} />
+        )}
+
 
         {section === 'Study Coach' && (
           <AiStudyCoachPage
@@ -1877,7 +1907,7 @@ function SectionWorkspace({
           </section>
         )}
         {['Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations'].includes(section) && (
-          <WorkspacePages page={section} onNavigate={onNavigate} notify={notify} onEarnNexusPoints={onEarnNexusPoints} />
+          <WorkspacePages page={section} onNavigate={onNavigate} notify={notify} onEarnNexusPoints={onEarnNexusPoints} motivationUserId={motivationUserId} profileName={profileName} />
         )}
 
         {section === 'Calculators' && (
@@ -1888,7 +1918,7 @@ function SectionWorkspace({
           <MarketplacePage currentPlan={plan} nexusPoints={nexusPoints} planExpiry={planExpiry} redeemedRewards={redeemedRewards} transactions={transactions} onSelectFree={onSelectFree} onPayWithCard={onPayWithCard} onPayWithPoints={onPayWithPoints} onRedeem={onRedeemReward} />
         )}
 
-        {!['Dashboard', 'Daily Dashboard', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Collaboration Rooms', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators'].includes(section) && (
+        {!['Dashboard', 'Daily Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Collaboration Rooms', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
