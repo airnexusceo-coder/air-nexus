@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import {
   ArrowLeft,
   BookOpenCheck,
@@ -22,28 +22,17 @@ import {
   X,
 } from 'lucide-react'
 import { AiMarkdown } from '@/components/ai-markdown'
+import { QuizCard } from '@/components/study/quiz-card'
 import { apiUrl } from '@/lib/api-client'
 import { DOCUMENT_ACCEPT, readDocument } from '@/lib/documents/client'
 import { TUTOR_MODES, type TutorAction, type TutorHistoryMessage, type TutorMode } from '@/lib/ai/tutor-types'
+import { FLASHCARD_DECK_STORAGE_KEY, parseFlashcardDeck, parseQuiz, type Flashcard, type FlashcardDeck, type Quiz } from '@/lib/ai/study-artifacts'
 import { cn } from '@/lib/utils'
 
 type TutorMessage = TutorHistoryMessage & {
   id: string
   createdAt: string
-}
-
-type Flashcard = {
-  id: string
-  front: string
-  back: string
-  hint: string
-  difficulty: 'beginner' | 'intermediate' | 'advanced'
-}
-
-type FlashcardDeck = {
-  title: string
-  cards: Flashcard[]
-  createdAt: string
+  quiz?: Quiz
 }
 
 type AiTutorPageProps = {
@@ -52,7 +41,6 @@ type AiTutorPageProps = {
   notify: (message: string, tone?: 'success' | 'info' | 'warning') => void
 }
 
-const FLASHCARD_DECK_STORAGE_KEY = 'airnexus-flashcard-deck-v1'
 const MAX_TUTOR_HISTORY = 16
 const MAX_FLASHCARD_NOTES = 10_000
 
@@ -80,34 +68,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function cleanText(value: unknown, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
-}
-
-function parseFlashcardDeck(reply: string): FlashcardDeck | null {
-  const normalized = reply.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim()
-  const start = normalized.indexOf('{')
-  const end = normalized.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
-  try {
-    const value: unknown = JSON.parse(normalized.slice(start, end + 1))
-    if (!isRecord(value) || !Array.isArray(value.cards)) return null
-    const cards = value.cards.flatMap((candidate, index): Flashcard[] => {
-      if (!isRecord(candidate)) return []
-      const front = cleanText(candidate.front, 240)
-      const back = cleanText(candidate.back, 500)
-      const hint = cleanText(candidate.hint, 220)
-      const difficulty = candidate.difficulty === 'intermediate' || candidate.difficulty === 'advanced' ? candidate.difficulty : 'beginner'
-      if (!front || !back) return []
-      return [{ id: `card-${index}-${Math.random().toString(36).slice(2, 7)}`, front, back, hint, difficulty }]
-    }).slice(0, 24)
-    if (cards.length < 3) return null
-    return {
-      title: cleanText(value.deckTitle, 100) || 'AirNexus study deck',
-      cards,
-      createdAt: new Date().toISOString(),
-    }
-  } catch {
-    return null
-  }
 }
 
 function loadSavedDeck() {
@@ -153,6 +113,11 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
   const [ratings, setRatings] = useState<Record<number, number>>({})
   const [sourceName, setSourceName] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const tutorMessagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    tutorMessagesEndRef.current?.scrollIntoView({ behavior: loading ? 'auto' : 'smooth' })
+  }, [messages, loading])
 
   const sendTutorMessage = async (text: string, requestedAction: TutorAction = 'teach') => {
     const content = text.trim()
@@ -172,12 +137,22 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, mode, action, history, documents: [], isPlus: true }),
+        body: JSON.stringify({ message: content, mode, action, purpose: 'tutoring', history, documents: [], isPlus: true }),
       })
       const data = await response.json() as { reply?: string; error?: string }
       if (!response.ok || !data.reply) throw new Error(data.error || 'The tutor could not respond')
-      setMessages((current) => [...current, { id: createId('tutor'), role: 'assistant', content: data.reply as string, createdAt: new Date().toISOString() }])
-      setAwaitingAnswer(action === 'practice' || action === 'quiz')
+      // A quiz renders as an interactive test, not a text bubble, whenever
+      // the reply actually parses — if the model didn't return valid JSON,
+      // fall back to showing the raw reply so the lesson never just breaks.
+      const quiz = action === 'quiz' ? parseQuiz(data.reply) : null
+      setMessages((current) => [...current, {
+        id: createId('tutor'),
+        role: 'assistant',
+        content: quiz ? `Here's your mini quiz: ${quiz.title}` : data.reply as string,
+        createdAt: new Date().toISOString(),
+        quiz: quiz ?? undefined,
+      }])
+      setAwaitingAnswer(action === 'practice' || (action === 'quiz' && !quiz))
     } catch (error) {
       setTutorError(error instanceof Error ? error.message : 'The tutor could not respond')
     } finally {
@@ -283,24 +258,29 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">Adaptive learning studio</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">Adaptive learning studio</p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">{activeTab === 'tutor' ? 'AI Tutor' : 'AI Flashcards'}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{activeTab === 'tutor' ? 'A teacher that checks understanding, gives hints, adapts difficulty, and finishes each lesson with a recap.' : 'Turn notes or files into active-recall cards, then review difficult ideas until they stick.'}</p>
         </div>
         <div className="flex rounded-2xl border border-white/8 bg-white/[0.035] p-1">
-          <button type="button" onClick={() => onNavigate('AI Tutor')} className={cn('rounded-xl px-4 py-2 text-sm font-medium transition', activeTab === 'tutor' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:text-white')}><GraduationCap className="mr-2 inline size-4" />Tutor</button>
-          <button type="button" onClick={() => onNavigate('Flashcards')} className={cn('rounded-xl px-4 py-2 text-sm font-medium transition', activeTab === 'flashcards' ? 'bg-orange-500 text-white' : 'text-slate-400 hover:text-white')}><Layers3 className="mr-2 inline size-4" />Flashcards</button>
+          <button type="button" onClick={() => onNavigate('AI Tutor')} className={cn('rounded-xl px-4 py-2 text-sm font-medium transition', activeTab === 'tutor' ? 'bg-white text-black' : 'text-slate-400 hover:text-white')}><GraduationCap className="mr-2 inline size-4" />Tutor</button>
+          <button type="button" onClick={() => onNavigate('Flashcards')} className={cn('rounded-xl px-4 py-2 text-sm font-medium transition', activeTab === 'flashcards' ? 'bg-white text-black' : 'text-slate-400 hover:text-white')}><Layers3 className="mr-2 inline size-4" />Flashcards</button>
         </div>
       </div>
 
       {activeTab === 'tutor' ? (
-        <div className="grid min-h-[680px] gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
+        // Fixed (not min-) height: this is a chat panel — the message list
+        // needs a bounded box so its own overflow-y-auto can scroll
+        // internally. A min-height never constrains a growing flex child,
+        // so with min-h the whole panel just grew taller on every message
+        // instead of scrolling, pushing the composer down the page.
+        <div className="grid h-[min(680px,calc(100dvh-220px))] min-h-[420px] gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <section className="glass rounded-3xl p-4">
-              <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-orange-400/10 text-orange-200"><BrainCircuit className="size-5" /></span><div><p className="text-sm font-semibold">Difficulty</p><p className="text-[10px] text-slate-500">Change anytime</p></div></div>
+              <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><BrainCircuit className="size-5" /></span><div><p className="text-sm font-semibold">Difficulty</p><p className="text-[10px] text-slate-500">Change anytime</p></div></div>
               <div className="mt-4 space-y-2">
                 {TUTOR_MODES.map((candidate) => (
-                  <button key={candidate} type="button" aria-pressed={mode === candidate} onClick={() => setMode(candidate)} className={cn('w-full rounded-2xl border p-3 text-left transition', mode === candidate ? 'border-orange-300/25 bg-orange-400/10' : 'border-white/7 bg-white/[0.025] hover:bg-white/[0.055]')}>
+                  <button key={candidate} type="button" aria-pressed={mode === candidate} onClick={() => setMode(candidate)} className={cn('w-full rounded-2xl border p-3 text-left transition', mode === candidate ? 'border-white/25 bg-white/10' : 'border-white/7 bg-white/[0.025] hover:bg-white/[0.055]')}>
                     <p className="text-sm font-medium text-white">{modeLabels[candidate].label}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{modeLabels[candidate].detail}</p>
                   </button>
                 ))}
@@ -323,16 +303,21 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
           </aside>
 
           <section className="glass flex min-h-0 flex-col overflow-hidden rounded-3xl" aria-label="Adaptive tutor lesson">
-            <div className="flex items-center justify-between border-b border-white/7 px-5 py-4"><div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-orange-400/10 text-orange-200"><GraduationCap className="size-5" /></span><div><p className="text-sm font-semibold">AirGPT Teacher</p><p className="text-[10px] text-emerald-300">{modeLabels[mode].label} mode · ready</p></div></div>{awaitingAnswer && <span className="rounded-full bg-amber-400/10 px-3 py-1 text-[10px] font-semibold text-amber-200">Waiting for your answer</span>}</div>
+            <div className="flex items-center justify-between border-b border-white/7 px-5 py-4"><div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><GraduationCap className="size-5" /></span><div><p className="text-sm font-semibold">AirGPT Teacher</p><p className="text-[10px] text-emerald-300">{modeLabels[mode].label} mode · ready</p></div></div>{awaitingAnswer && <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-semibold text-white">Waiting for your answer</span>}</div>
             <div className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
               {messages.map((message) => (
                 <article key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
-                  <div className={cn('max-w-[88%] rounded-3xl px-5 py-4 text-sm leading-7', message.role === 'user' ? 'message-self rounded-br-lg text-white' : 'border border-white/8 bg-white/[0.045] text-slate-200')}>
-                    {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
-                  </div>
+                  {message.quiz ? (
+                    <QuizCard quiz={message.quiz} />
+                  ) : (
+                    <div className={cn('max-w-[88%] rounded-3xl px-5 py-4 text-sm leading-7', message.role === 'user' ? 'message-self rounded-br-lg text-white' : 'border border-white/8 bg-white/[0.045] text-slate-200')}>
+                      {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                    </div>
+                  )}
                 </article>
               ))}
-              {loading && <div className="flex items-center gap-3 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin text-orange-300" />Your tutor is planning the next teaching step…</div>}
+              {loading && <div className="flex items-center gap-3 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin text-zinc-300" />Your tutor is planning the next teaching step…</div>}
+              <div ref={tutorMessagesEndRef} />
             </div>
             <div className="border-t border-white/7 p-4 sm:p-5">
               {tutorError && <p role="alert" className="mb-3 rounded-xl border border-rose-300/15 bg-rose-400/[0.06] p-3 text-xs text-rose-200">{tutorError}</p>}
@@ -344,9 +329,9 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
       ) : (
         <div className="grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
           <section className="glass rounded-3xl p-5 sm:p-6">
-            <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-orange-300">Source notes</p><h3 className="mt-1 text-xl font-semibold">Build a study deck</h3></div><span className="flex size-11 items-center justify-center rounded-2xl bg-orange-400/10 text-orange-200"><Layers3 className="size-5" /></span></div>
+            <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">Source notes</p><h3 className="mt-1 text-xl font-semibold">Build a study deck</h3></div><span className="flex size-11 items-center justify-center rounded-2xl bg-white/10 text-white"><Layers3 className="size-5" /></span></div>
             <p className="mt-2 text-sm leading-6 text-slate-400">Paste notes or attach a document. AirGPT will extract the concepts that are worth actively recalling.</p>
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value.slice(0, MAX_FLASHCARD_NOTES))} rows={13} placeholder="Paste class notes, a chapter summary, key definitions, or revision material…" aria-label="Flashcard source notes" className="mt-5 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm leading-6 outline-none transition placeholder:text-slate-600 focus:border-orange-300/35" />
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value.slice(0, MAX_FLASHCARD_NOTES))} rows={13} placeholder="Paste class notes, a chapter summary, key definitions, or revision material…" aria-label="Flashcard source notes" className="mt-5 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm leading-6 outline-none transition placeholder:text-slate-600 focus:border-white/35" />
             <div className="mt-3 flex flex-wrap items-center gap-2"><input ref={fileInputRef} type="file" accept={DOCUMENT_ACCEPT} onChange={attachNotes} className="sr-only" /><button type="button" onClick={() => fileInputRef.current?.click()} className="secondary-action"><Paperclip className="size-4" />Attach notes</button>{sourceName && <span className="inline-flex items-center gap-1 rounded-full bg-white/7 px-3 py-1.5 text-xs text-slate-300"><FileText className="size-3" />{sourceName}<button type="button" onClick={() => setSourceName('')} aria-label="Clear attached file label"><X className="size-3" /></button></span>}</div>
             <label className="mt-5 block text-xs text-slate-400">Number of cards<select value={cardCount} onChange={(event) => setCardCount(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2.5 text-sm text-white outline-none"><option value={8}>8 focused cards</option><option value={10}>10 balanced cards</option><option value={16}>16 detailed cards</option></select></label>
             {flashcardError && <p role="alert" className="mt-4 rounded-xl border border-rose-300/15 bg-rose-400/[0.06] p-3 text-xs text-rose-200">{flashcardError}</p>}
@@ -355,15 +340,15 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
 
           <section className="glass min-h-[650px] rounded-3xl p-5 sm:p-6" aria-label="Flashcard study area">
             {!deck ? (
-              <div className="flex min-h-[580px] flex-col items-center justify-center text-center"><span className="flex size-16 items-center justify-center rounded-3xl bg-orange-400/10 text-orange-200"><BrainCircuit className="size-8" /></span><h3 className="mt-5 text-xl font-semibold">Your active-recall deck appears here</h3><p className="mt-2 max-w-md text-sm leading-6 text-slate-400">Generate cards from your own notes, reveal each answer, then rate how well you remembered it.</p></div>
+              <div className="flex min-h-[580px] flex-col items-center justify-center text-center"><span className="flex size-16 items-center justify-center rounded-3xl bg-white/10 text-white"><BrainCircuit className="size-8" /></span><h3 className="mt-5 text-xl font-semibold">Your active-recall deck appears here</h3><p className="mt-2 max-w-md text-sm leading-6 text-slate-400">Generate cards from your own notes, reveal each answer, then rate how well you remembered it.</p></div>
             ) : currentCard ? (
               <div className="flex min-h-[580px] flex-col">
-                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-orange-300">{deck.title}</p><p className="mt-1 text-sm text-slate-500">{mastered}/{deck.cards.length} mastered · {queue.length} in this round</p></div><button type="button" onClick={() => restartDeck(false)} aria-label="Restart flashcard deck" className="interactive-icon"><RefreshCw className="size-4" /></button></div>
-                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-300 transition-all" style={{ width: `${(mastered / deck.cards.length) * 100}%` }} /></div>
-                <button type="button" onClick={() => setFlipped((current) => !current)} aria-label="Flip flashcard" className="group mt-8 flex min-h-80 flex-1 flex-col items-center justify-center rounded-[2rem] border border-orange-300/15 bg-[radial-gradient(circle_at_top,rgba(251,146,60,.13),transparent_55%),rgba(255,255,255,.035)] p-8 text-center shadow-2xl transition hover:border-orange-300/30">
+                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">{deck.title}</p><p className="mt-1 text-sm text-slate-500">{mastered}/{deck.cards.length} mastered · {queue.length} in this round</p></div><button type="button" onClick={() => restartDeck(false)} aria-label="Restart flashcard deck" className="interactive-icon"><RefreshCw className="size-4" /></button></div>
+                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full bg-gradient-to-r from-zinc-300 to-white transition-all" style={{ width: `${(mastered / deck.cards.length) * 100}%` }} /></div>
+                <button type="button" onClick={() => setFlipped((current) => !current)} aria-label="Flip flashcard" className="group mt-8 flex min-h-80 flex-1 flex-col items-center justify-center rounded-[2rem] border border-white/15 bg-[radial-gradient(circle_at_top,rgba(255,255,255,.08),transparent_55%),rgba(255,255,255,.035)] p-8 text-center shadow-2xl transition hover:border-white/30">
                   <span className="rounded-full bg-white/7 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{flipped ? 'Answer' : 'Question'} · {currentCard.difficulty}</span>
                   <p className={cn('mt-6 max-w-2xl text-white', flipped ? 'text-xl leading-8' : 'text-2xl font-semibold leading-9')}>{flipped ? currentCard.back : currentCard.front}</p>
-                  {!flipped && showHint && currentCard.hint && <p className="mt-5 rounded-2xl bg-amber-400/8 px-4 py-3 text-sm leading-6 text-amber-100">Hint: {currentCard.hint}</p>}
+                  {!flipped && showHint && currentCard.hint && <p className="mt-5 rounded-2xl bg-white/8 px-4 py-3 text-sm leading-6 text-white">Hint: {currentCard.hint}</p>}
                   <span className="mt-8 inline-flex items-center gap-2 text-xs text-slate-500"><RotateCcw className="size-3.5 transition group-hover:rotate-180" />Tap to {flipped ? 'see the question' : 'reveal the answer'}</span>
                 </button>
                 {!flipped ? <button type="button" onClick={() => setShowHint((current) => !current)} disabled={!currentCard.hint} className="secondary-action mx-auto mt-4"><Lightbulb className="size-4" />{showHint ? 'Hide hint' : 'Show hint'}</button> : <div className="mt-5 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => rateCard(0)} className="rounded-xl border border-rose-300/15 bg-rose-400/[0.06] px-4 py-3 text-sm font-semibold text-rose-200 hover:bg-rose-400/10"><RotateCcw className="mr-2 inline size-4" />Again</button><button type="button" onClick={() => rateCard(1)} className="rounded-xl border border-amber-300/15 bg-amber-400/[0.06] px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-400/10"><CircleHelp className="mr-2 inline size-4" />Learning</button><button type="button" onClick={() => rateCard(2)} className="rounded-xl border border-emerald-300/15 bg-emerald-400/[0.06] px-4 py-3 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/10"><Check className="mr-2 inline size-4" />Know it</button></div>}

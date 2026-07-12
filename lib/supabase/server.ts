@@ -191,6 +191,45 @@ export async function supabaseRestFetch(accessToken: string, path: string, init:
   return fetch(`${getSupabaseUrl()}/rest/v1${path}`, { ...init, headers, cache: 'no-store' })
 }
 
+function getSupabaseServiceKey() {
+  const value = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  if (!value) {
+    throw new SupabaseConfigurationError('Missing SUPABASE_SERVICE_ROLE_KEY (required for Nexus Clash server authority)')
+  }
+  return value
+}
+
+/**
+ * Server-only, service-role PostgREST call. Bypasses RLS — use ONLY inside
+ * trusted backend logic (e.g. Apex/AirNexus server authority) that has already
+ * validated the caller. Never expose this key or its responses' privileged
+ * fields to the client.
+ */
+export async function supabaseServiceFetch(path: string, init: RequestInit = {}) {
+  const key = getSupabaseServiceKey()
+  const headers = new Headers(init.headers)
+  headers.set('apikey', key)
+  headers.set('Authorization', `Bearer ${key}`)
+  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
+  return fetch(`${getSupabaseUrl()}/rest/v1${path}`, { ...init, headers, cache: 'no-store' })
+}
+
+/**
+ * Server-only, service-role call to the GoTrue Admin API (`/auth/v1/admin/*`)
+ * — a different surface from supabaseServiceFetch's PostgREST calls. Used
+ * only by the Admin Console (lib/admin/users.ts) to list/create/ban real
+ * AirNexus accounts. Same trust boundary as supabaseServiceFetch: server-only,
+ * never exposed to the client, caller must already have validated the request.
+ */
+export async function supabaseAdminAuthFetch(path: string, init: RequestInit = {}) {
+  const key = getSupabaseServiceKey()
+  const headers = new Headers(init.headers)
+  headers.set('apikey', key)
+  headers.set('Authorization', `Bearer ${key}`)
+  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json')
+  return fetch(`${getSupabaseUrl()}/auth/v1/admin${path}`, { ...init, headers, cache: 'no-store' })
+}
+
 export async function readSupabaseRestJson<T>(response: Response, fallbackMessage: string): Promise<T> {
   const value = await readJson(response)
   if (!response.ok) {

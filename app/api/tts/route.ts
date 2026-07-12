@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cleanTextForSpeech } from '@/lib/voice/clean-text-for-speech'
 import { GROQ_MODEL_ROLES } from '@/lib/ai/model-router'
+import { isOpenAiConfigured, synthesizeWithOpenAi } from '@/lib/ai/providers/openai-speech'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -62,15 +63,18 @@ async function requestSpeech(apiKey: string, input: string, voice: string) {
   throw lastError instanceof Error ? lastError : new Error('Speech request failed')
 }
 
-export async function POST(request: Request) {
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: 'Text-to-speech is not configured. Add GROQ_API_KEY to the server environment.' },
-      { status: 503 },
-    )
-  }
+function audioResponse(response: Response, audio: ArrayBuffer) {
+  return new Response(audio, {
+    status: 200,
+    headers: {
+      'Content-Type': response.headers.get('content-type') ?? 'audio/wav',
+      'Content-Length': String(audio.byteLength),
+      'Cache-Control': 'no-store',
+    },
+  })
+}
 
+export async function POST(request: Request) {
   let body: TtsRequestBody
   try {
     const value: unknown = await request.json()
@@ -88,29 +92,46 @@ export async function POST(request: Request) {
   if (!text) return NextResponse.json({ error: 'Text is required' }, { status: 400 })
   if (text.length > MAX_TEXT_LENGTH) return NextResponse.json({ error: 'Text is too long' }, { status: 413 })
 
-  try {
-    const response = await requestSpeech(apiKey, text, voice)
-    if (!response.ok) {
-      const providerDetail = (await response.text()).slice(0, 500)
-      console.error('Groq TTS request failed', { status: response.status, detail: providerDetail })
-      return NextResponse.json(
-        { error: publicProviderError(response.status) },
-        { status: response.status === 429 ? 429 : response.status >= 500 ? 502 : 400 },
-      )
+  const groqApiKey = process.env.GROQ_API_KEY
+  if (groqApiKey) {
+    try {
+      const response = await requestSpeech(groqApiKey, text, voice)
+      if (response.ok) {
+        const audio = await response.arrayBuffer()
+        if (audio.byteLength > 0) return audioResponse(response, audio)
+      } else {
+        const providerDetail = (await response.text()).slice(0, 500)
+        console.error('Groq TTS request failed', { status: response.status, detail: providerDetail })
+        if (!isOpenAiConfigured()) {
+          return NextResponse.json(
+            { error: publicProviderError(response.status) },
+            { status: response.status === 429 ? 429 : response.status >= 500 ? 502 : 400 },
+          )
+        }
+      }
+    } catch (error) {
+      console.error('Groq TTS error:', error instanceof Error ? error.message : 'Unknown error')
+      if (!isOpenAiConfigured()) return NextResponse.json({ error: 'Speech service could not be reached.' }, { status: 502 })
     }
-
-    const audio = await response.arrayBuffer()
-    if (audio.byteLength === 0) return NextResponse.json({ error: 'Speech service returned empty audio.' }, { status: 502 })
-    return new Response(audio, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('content-type') ?? 'audio/wav',
-        'Content-Length': String(audio.byteLength),
-        'Cache-Control': 'no-store',
-      },
-    })
-  } catch (error) {
-    console.error('Groq TTS error:', error instanceof Error ? error.message : 'Unknown error')
-    return NextResponse.json({ error: 'Speech service could not be reached.' }, { status: 502 })
   }
+
+  if (isOpenAiConfigured()) {
+    try {
+      const response = await synthesizeWithOpenAi(text)
+      const audio = await response.arrayBuffer()
+      if (audio.byteLength === 0) return NextResponse.json({ error: 'Speech service returned empty audio.' }, { status: 502 })
+      return audioResponse(response, audio)
+    } catch (error) {
+      console.error('OpenAI TTS error:', error instanceof Error ? error.message : 'Unknown error')
+      return NextResponse.json({ error: 'Speech service could not be reached.' }, { status: 502 })
+    }
+  }
+
+  if (!groqApiKey) {
+    return NextResponse.json(
+      { error: 'Text-to-speech is not configured. Add GROQ_API_KEY to the server environment.' },
+      { status: 503 },
+    )
+  }
+  return NextResponse.json({ error: 'Speech service returned empty audio.' }, { status: 502 })
 }

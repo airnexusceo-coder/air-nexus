@@ -42,8 +42,8 @@ export function SpeakButton({ text, onError, className }: SpeakButtonProps) {
       aria-pressed={active}
       title={active ? 'Stop speech' : 'Speak with Orpheus'}
       className={cn(
-        'inline-flex size-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/8 hover:text-orange-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300/50',
-        active && 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-400/30',
+        'inline-flex size-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/8 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50',
+        active && 'bg-white/15 text-white ring-1 ring-white/30',
         className,
       )}
     >

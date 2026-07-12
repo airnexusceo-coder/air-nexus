@@ -48,7 +48,7 @@ export function Modal({
         aria-labelledby="modal-title"
         aria-describedby={description ? 'modal-description' : undefined}
         className={cn(
-          'glass-strong max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl border border-orange-300/15 p-6 shadow-2xl shadow-orange-950/50',
+          'glass-strong max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/15 p-6 shadow-2xl shadow-black/50',
           className,
         )}
       >

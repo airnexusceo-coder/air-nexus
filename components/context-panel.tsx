@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -14,8 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
-  Download,
-  FileText,
+  FilePlus2,
   ListTodo,
   LoaderCircle,
   LockKeyhole,
@@ -23,6 +23,7 @@ import {
   MessageSquare,
   Mic,
   Paperclip,
+  Plus,
   Search,
   Send,
   Smile,
@@ -36,7 +37,9 @@ import { sanitizeResponse } from '@/lib/ai/sanitize-response'
 import { apiUrl } from '@/lib/api-client'
 import { isSpeechCancellation, speakWithOrpheus } from '@/lib/voice/orpheus'
 import { useVoiceInput } from '@/lib/voice/use-voice-input'
-import { chatMessages, type ChatMessage } from '@/lib/data'
+import type { ChatMessage } from '@/lib/data'
+import type { RoomDetail, RoomMessageDTO, RoomTaskDTO } from '@/lib/rooms/types'
+import { colorForUser, initialsFor } from '@/lib/rooms/display'
 import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
 import {
@@ -50,7 +53,8 @@ import {
 type PanelTab = 'ai' | 'chat' | 'comments' | 'tasks'
 
 type ContextPanelProps = {
-  activeRoom: string
+  roomId: string | null
+  docId: string | null
   mobileOpen: boolean
   desktopCollapsed: boolean
   onCloseMobile: () => void
@@ -61,6 +65,12 @@ type ContextPanelProps = {
   onRequestUpgrade: (feature: string, requiredPlan: 'Plus' | 'Premium') => void
 }
 
+type DocContext = { title: string; body: string; role: 'owner' | 'editor' | 'viewer' }
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 const tabs = [
   { id: 'ai', label: 'AI', icon: Sparkles },
   { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -69,40 +79,32 @@ const tabs = [
 ] as const
 
 const colorMap: Record<string, string> = {
-  'from-emerald-400 to-green-500': 'bg-gradient-to-br from-emerald-400 to-green-500',
-  'from-orange-500 to-amber-500': 'bg-gradient-to-br from-orange-500 to-amber-500',
-  'from-red-500 to-orange-500': 'bg-gradient-to-br from-red-500 to-orange-500',
-  'from-orange-400 to-orange-500': 'bg-gradient-to-br from-orange-400 to-orange-500',
-  'from-orange-400 to-amber-500': 'bg-gradient-to-br from-orange-400 to-amber-500',
-  'from-amber-400 to-orange-500': 'bg-gradient-to-br from-amber-400 to-orange-500',
-  'from-emerald-400 to-teal-500': 'bg-gradient-to-br from-emerald-400 to-teal-500',
+  'from-white to-zinc-200': 'bg-gradient-to-br from-white to-zinc-200',
+  'from-white to-zinc-300': 'bg-gradient-to-br from-white to-zinc-300',
+  'from-zinc-300 to-zinc-500': 'bg-gradient-to-br from-zinc-300 to-zinc-500',
+  'from-zinc-400 to-zinc-600': 'bg-gradient-to-br from-zinc-400 to-zinc-600',
+  'from-zinc-500 to-zinc-700': 'bg-gradient-to-br from-zinc-500 to-zinc-700',
+  'from-zinc-600 to-zinc-800': 'bg-gradient-to-br from-zinc-600 to-zinc-800',
 }
-
-const comments = [
-  {
-    id: 1,
-    author: 'Julian K.',
-    initials: 'JK',
-    color: 'from-orange-400 to-amber-500',
-    text: 'Should the $42M figure be net or gross ARR? Worth a footnote.',
-    anchor: 'AI Summary',
-  },
-  {
-    id: 2,
-    author: 'Maya N.',
-    initials: 'MN',
-    color: 'from-amber-400 to-orange-500',
-    text: 'Love the three-motion framing. Can we add a slide reference?',
-    anchor: 'Launch milestones',
-  },
-]
 
 function messageId(prefix: string) {
   return prefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2)
 }
 
-function messageTime() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function messageTime(iso?: string) {
+  return new Date(iso ?? Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function roomMessageToChatMessage(row: RoomMessageDTO): ChatMessage {
+  return {
+    id: row.id,
+    author: row.self ? 'You' : row.senderName,
+    initials: row.self ? 'Y' : initialsFor(row.senderName),
+    color: row.self ? 'from-white to-zinc-200' : colorForUser(row.senderId),
+    time: messageTime(row.createdAt),
+    text: row.body,
+    self: row.self,
+  }
 }
 
 function Avatar({
@@ -122,7 +124,8 @@ function Avatar({
 }
 
 export function ContextPanel({
-  activeRoom,
+  roomId,
+  docId,
   mobileOpen,
   desktopCollapsed,
   onCloseMobile,
@@ -133,7 +136,11 @@ export function ContextPanel({
   onRequestUpgrade,
 }: ContextPanelProps) {
   const [tab, setTab] = useState<PanelTab>('chat')
-  const [collabMessages, setCollabMessages] = useState<ChatMessage[]>(chatMessages)
+  const [roomDetail, setRoomDetail] = useState<RoomDetail | null>(null)
+  const [docContext, setDocContext] = useState<DocContext | null>(null)
+  const [collabMessages, setCollabMessages] = useState<RoomMessageDTO[]>([])
+  const [roomTasks, setRoomTasks] = useState<RoomTaskDTO[]>([])
+  const [newTaskTitle, setNewTaskTitle] = useState('')
   const [aiMessages, setAiMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
@@ -142,15 +149,11 @@ export function ContextPanel({
   const [mentionOpen, setMentionOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [attachments, setAttachments] = useState<DocumentAttachment[]>([])
-  const [taskItems, setTaskItems] = useState([
-    { id: 1, text: 'Confirm 5 enterprise LOIs', owner: 'EM', done: false },
-    { id: 2, text: 'Publish migration guide', owner: 'JK', done: false },
-    { id: 3, text: 'Keynote storyboard frame', owner: 'AT', done: true },
-  ])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const lastMessageTimeRef = useRef<string | null>(null)
 
   const { isListening, toggleListening } = useVoiceInput({
     onTranscript: (transcript) => {
@@ -159,11 +162,12 @@ export function ContextPanel({
     onError: (message) => notify(message, 'warning'),
   })
   const chatMode = tab === 'ai' || tab === 'chat'
-  const activeMessages = tab === 'ai' ? aiMessages : collabMessages
+  const collabAsChatMessages = collabMessages.map(roomMessageToChatMessage)
+  const activeMessages = tab === 'ai' ? aiMessages : collabAsChatMessages
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeMessages, loading])
+  }, [activeMessages.length, loading])
 
   useEffect(() => {
     const closePopovers = (event: globalThis.KeyboardEvent) => {
@@ -176,17 +180,88 @@ export function ContextPanel({
     return () => document.removeEventListener('keydown', closePopovers)
   }, [])
 
+  // Room-switch: clear stale state and load the newly selected room. Deferred
+  // via setTimeout(0) so state clearing/loading happens outside the effect body.
+  useEffect(() => {
+    let cancelled = false
+    const timeoutId = window.setTimeout(() => {
+      setRoomDetail(null)
+      setCollabMessages([])
+      setRoomTasks([])
+      lastMessageTimeRef.current = null
+      if (!roomId) return
+
+      void (async () => {
+        const [detailResponse, messagesResponse, tasksResponse] = await Promise.all([
+          fetch(`/api/rooms/${roomId}`, { credentials: 'include', cache: 'no-store' }),
+          fetch(`/api/rooms/${roomId}/messages`, { credentials: 'include', cache: 'no-store' }),
+          fetch(`/api/rooms/${roomId}/tasks`, { credentials: 'include', cache: 'no-store' }),
+        ])
+        if (cancelled) return
+        if (detailResponse.ok) setRoomDetail((await detailResponse.json()) as RoomDetail)
+        if (messagesResponse.ok) {
+          const data = (await messagesResponse.json()) as { messages: RoomMessageDTO[] }
+          setCollabMessages(data.messages)
+          lastMessageTimeRef.current = data.messages.at(-1)?.createdAt ?? null
+        }
+        if (tasksResponse.ok) setRoomTasks(((await tasksResponse.json()) as { tasks: RoomTaskDTO[] }).tasks)
+      })()
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [roomId])
+
+  // Read-only doc context for the AI tab — re-fetched whenever the open
+  // document changes or the user switches back into the AI tab, so a
+  // question always sees reasonably fresh content without polling.
+  useEffect(() => {
+    let cancelled = false
+    const timeoutId = window.setTimeout(() => {
+      if (!docId || tab !== 'ai') {
+        if (!docId) setDocContext(null)
+        return
+      }
+      void (async () => {
+        const response = await fetch(`/api/docs/${docId}`, { credentials: 'include', cache: 'no-store' })
+        if (cancelled || !response.ok) return
+        const data = (await response.json()) as { title: string; body: string; role: 'owner' | 'editor' | 'viewer' }
+        setDocContext({ title: data.title, body: data.body, role: data.role })
+      })()
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [docId, tab])
+
+  // Poll for new room messages — no realtime layer in this app. Only while the
+  // Chat tab is actually open and the page is visible.
+  useEffect(() => {
+    if (tab !== 'chat' || !roomId) return
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void (async () => {
+        const since = lastMessageTimeRef.current ? `?since=${encodeURIComponent(lastMessageTimeRef.current)}` : ''
+        const response = await fetch(`/api/rooms/${roomId}/messages${since}`, { credentials: 'include', cache: 'no-store' })
+        if (!response.ok) return
+        const data = (await response.json()) as { messages: RoomMessageDTO[] }
+        if (data.messages.length === 0) return
+        lastMessageTimeRef.current = data.messages.at(-1)?.createdAt ?? lastMessageTimeRef.current
+        setCollabMessages((current) => [...current, ...data.messages])
+      })()
+    }, 5000)
+    return () => window.clearInterval(id)
+  }, [tab, roomId])
+
   const filteredMessages = activeMessages.filter((message) =>
     (message.author + ' ' + message.text).toLowerCase().includes(query.toLowerCase()),
   )
 
-  const appendMessage = (mode: 'ai' | 'chat', message: ChatMessage) => {
-    if (mode === 'ai') setAiMessages((current) => [...current, message])
-    else setCollabMessages((current) => [...current, message])
-  }
-
   const sendMessage = async () => {
     if (!chatMode || loading) return
+    if (tab === 'chat' && !roomId) return
     const text = draft.trim()
     if (!text && attachments.length === 0) return
     if (attachments.some((file) => file.status === 'processing')) {
@@ -204,58 +279,78 @@ export function ContextPanel({
       (text || 'Please review the attached document.') +
       (readableAttachments.length ? '\nAttached: ' + readableAttachments.map((file) => file.name).join(', ') : '')
 
-    appendMessage(mode, {
-      id: messageId('context-user'),
-      author: 'You',
-      initials: 'Y',
-      color: 'from-emerald-400 to-green-500',
-      time: messageTime(),
-      text: content,
-      self: true,
-    })
     setDraft('')
     setAttachments([])
     setLoading(true)
 
     try {
-      const response = await fetch(apiUrl(mode === 'ai' ? '/api/chat' : '/api/collab'), {
+      if (mode === 'chat' && roomId) {
+        const response = await fetch(`/api/rooms/${roomId}/messages`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: content }),
+        })
+        if (!response.ok) {
+          const data = await response.json().catch(() => null) as { error?: string } | null
+          notify(data?.error ?? 'Could not send message.', 'warning')
+          return
+        }
+        const sent = (await response.json()) as RoomMessageDTO
+        lastMessageTimeRef.current = sent.createdAt
+        setCollabMessages((current) => [...current, sent])
+        return
+      }
+
+      // AI tab — unchanged real /api/chat flow. The open document (if any)
+      // rides along as an extra attachment, reusing the same documents[]
+      // context mechanism as file uploads.
+      setAiMessages((current) => [
+        ...current,
+        { id: messageId('context-user'), author: 'You', initials: 'Y', color: 'from-white to-zinc-200', time: messageTime(), text: content, self: true },
+      ])
+      const documents = [
+        ...readableAttachments.map((file) => ({ name: file.name, text: file.text })),
+        ...(docContext ? [{ name: docContext.title, text: stripHtml(docContext.body) }] : []),
+      ]
+      const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text || 'Please review and summarize the attached documents.',
           isPlus,
-          documents: readableAttachments.map((file) => ({ name: file.name, text: file.text })),
+          documents,
         }),
       })
       const data = (await response.json()) as { reply?: string; error?: string }
       if (!response.ok || !data.reply) throw new Error(data.error || 'No response')
       const safeReply = sanitizeResponse(data.reply)
-      appendMessage(mode, {
-        id: messageId('context-reply'),
-        author: mode === 'ai' ? 'AirGPT' : 'Collaborator',
-        initials: mode === 'ai' ? 'AI' : 'CO',
-        color: mode === 'ai' ? 'from-orange-500 to-amber-500' : 'from-orange-400 to-amber-500',
-        time: messageTime(),
-        text: safeReply,
-      })
-      if (mode === 'ai' && autoSpeak && isPlus) {
+      setAiMessages((current) => [
+        ...current,
+        { id: messageId('context-reply'), author: 'AirGPT', initials: 'AI', color: 'from-white to-zinc-200', time: messageTime(), text: safeReply },
+      ])
+      if (autoSpeak && isPlus) {
         void speakWithOrpheus(safeReply).catch((error: unknown) => {
           if (!isSpeechCancellation(error)) notify(error instanceof Error ? error.message : 'Speech playback failed.', 'warning')
         })
       }
     } catch {
-      appendMessage(mode, {
-        id: messageId('context-reply'),
-        author: mode === 'ai' ? 'AirGPT' : 'Collaborator',
-        initials: mode === 'ai' ? 'AI' : 'CO',
-        color: mode === 'ai' ? 'from-orange-500 to-amber-500' : 'from-orange-400 to-amber-500',
-        time: messageTime(),
-        text:
-          mode === 'ai'
-            ? 'I can help turn this brief into a clear next action. The onboarding owner is the highest-priority gap.'
-            : 'Got it — I’ve added that to the launch room context.',
-      })
-      notify('Using a local context-panel reply', 'warning')
+      if (mode === 'ai') {
+        setAiMessages((current) => [
+          ...current,
+          {
+            id: messageId('context-reply'),
+            author: 'AirGPT',
+            initials: 'AI',
+            color: 'from-white to-zinc-200',
+            time: messageTime(),
+            text: 'I can help turn this brief into a clear next action. The onboarding owner is the highest-priority gap.',
+          },
+        ])
+        notify('Using a local context-panel reply', 'warning')
+      } else {
+        notify('Network error. Please try again.', 'warning')
+      }
     } finally {
       setLoading(false)
     }
@@ -295,6 +390,29 @@ export function ContextPanel({
     }
   }
 
+  const insertIntoDocument = async (text: string) => {
+    if (!docId) return
+    const response = await fetch(`/api/docs/${docId}`, { credentials: 'include', cache: 'no-store' })
+    if (!response.ok) {
+      notify('Could not reach the document to insert into.', 'warning')
+      return
+    }
+    const current = (await response.json()) as { body: string }
+    const addition = '<br><br>' + sanitizeResponse(text).split('\n').map((line) => `<p>${line}</p>`).join('')
+    const patchResponse = await fetch(`/api/docs/${docId}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: (current.body || '') + addition }),
+    })
+    if (!patchResponse.ok) {
+      const data = await patchResponse.json().catch(() => ({})) as { error?: string }
+      notify(data.error ?? 'Could not insert into the document.', 'warning')
+      return
+    }
+    notify('Added to your document', 'success')
+  }
+
   const insertMention = (name: string) => {
     setDraft((current) => current + '@' + name + ' ')
     setMentionOpen(false)
@@ -306,6 +424,45 @@ export function ContextPanel({
     setEmojiOpen(false)
     composerRef.current?.focus()
   }
+
+  const toggleTask = useCallback(async (task: RoomTaskDTO) => {
+    if (!roomId) return
+    const nextStatus = task.status === 'done' ? 'todo' : 'done'
+    setRoomTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: nextStatus } : item))
+    const response = await fetch(`/api/rooms/${roomId}/tasks/${task.id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus }),
+    })
+    if (response.ok) {
+      const updated = (await response.json()) as RoomTaskDTO
+      setRoomTasks((current) => current.map((item) => item.id === updated.id ? updated : item))
+    } else {
+      setRoomTasks((current) => current.map((item) => item.id === task.id ? task : item))
+      notify('Could not update task.', 'warning')
+    }
+  }, [roomId, notify])
+
+  const addTask = useCallback(async () => {
+    const title = newTaskTitle.trim()
+    if (!title || !roomId) return
+    setNewTaskTitle('')
+    const response = await fetch(`/api/rooms/${roomId}/tasks`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    if (response.ok) {
+      const task = (await response.json()) as RoomTaskDTO
+      setRoomTasks((current) => [...current, task])
+    } else {
+      notify('Could not create task.', 'warning')
+    }
+  }, [newTaskTitle, roomId, notify])
+
+  const memberNames = roomDetail?.members.map((member) => member.displayName) ?? []
 
   return (
     <>
@@ -427,16 +584,11 @@ export function ContextPanel({
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {tab === 'chat' && (
-          <ChatView
-            room={activeRoom}
-            messages={filteredMessages}
-            loading={loading}
-            messagesEndRef={messagesEndRef}
-            onDownload={() => {
-              downloadPanelFile()
-              notify('narrative-v3.pdf downloaded', 'success')
-            }}
-          />
+          roomId && roomDetail ? (
+            <ChatView room={roomDetail} messages={filteredMessages} loading={loading} messagesEndRef={messagesEndRef} />
+          ) : (
+            <EmptyState label="You're not in any rooms yet. Create or open one from Collaboration Rooms." />
+          )
         )}
         {tab === 'ai' && (
           <AiView
@@ -446,6 +598,8 @@ export function ContextPanel({
             onSpeechError={(message) => notify(message, 'warning')}
             canUseVoice={isPlus}
             onVoiceUpgrade={() => onRequestUpgrade('Text-to-Speech', 'Plus')}
+            docContext={docContext}
+            onInsertToDocument={docContext && docContext.role !== 'viewer' ? (text: string) => void insertIntoDocument(text) : undefined}
             onSuggestion={(prompt) => {
               setDraft(prompt)
               composerRef.current?.focus()
@@ -453,36 +607,25 @@ export function ContextPanel({
           />
         )}
         {tab === 'comments' && (
-          <CommentsView
-            query={query}
-            onReply={(author) => {
-              setTab('chat')
-              setDraft('@' + author.split(' ')[0] + ' ')
-              window.setTimeout(() => composerRef.current?.focus(), 0)
-            }}
-            onResolve={(id) => notify('Comment ' + id + ' resolved', 'success')}
-          />
+          <EmptyState label="Comments aren't available yet." />
         )}
         {tab === 'tasks' && (
-          <TasksView
-            tasks={taskItems}
-            onToggle={(id) =>
-              setTaskItems((current) =>
-                current.map((task) => task.id === id ? { ...task, done: !task.done } : task),
-              )
-            }
-          />
+          roomId ? (
+            <TasksView tasks={roomTasks} newTaskTitle={newTaskTitle} onNewTaskTitleChange={setNewTaskTitle} onToggle={toggleTask} onAdd={addTask} />
+          ) : (
+            <EmptyState label="You're not in any rooms yet. Create or open one from Collaboration Rooms." />
+          )
         )}
       </div>
-      {chatMode && (
+      {chatMode && (tab === 'ai' || roomId) && (
         <div className="relative shrink-0 px-4 pb-4">
           {attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {attachments.map((file) => (
                 <span key={file.id} className="glass flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px]" title={file.error}>
-                  {file.status === 'processing' ? <LoaderCircle className="size-3 animate-spin text-orange-300" /> : file.status === 'error' ? <CircleAlert className="size-3 text-rose-300" /> : <CheckCircle2 className="size-3 text-emerald-300" />}
+                  {file.status === 'processing' ? <LoaderCircle className="size-3 animate-spin text-zinc-300" /> : file.status === 'error' ? <CircleAlert className="size-3 text-rose-300" /> : <CheckCircle2 className="size-3 text-emerald-300" />}
                   <span className="max-w-32 truncate">{file.name}</span>
-                  <span className={file.status === 'error' ? 'text-rose-300' : file.status === 'ready' ? 'text-emerald-300' : 'text-orange-200'}>
+                  <span className={file.status === 'error' ? 'text-rose-300' : file.status === 'ready' ? 'text-emerald-300' : 'text-zinc-300'}>
                     {file.status === 'processing' ? 'Reading…' : file.status === 'error' ? 'Unreadable' : 'Ready'}
                   </span>
                   <button
@@ -499,11 +642,15 @@ export function ContextPanel({
 
           {mentionOpen && (
             <div className="menu-popover bottom-16 left-4 w-48">
-              {['Elena', 'Julian', 'Aarav', 'Maya'].map((name) => (
-                <button key={name} type="button" onClick={() => insertMention(name)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/8">
-                  @{name}
-                </button>
-              ))}
+              {memberNames.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-muted-foreground">No other room members yet.</p>
+              ) : (
+                memberNames.map((name) => (
+                  <button key={name} type="button" onClick={() => insertMention(name)} className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/8">
+                    @{name}
+                  </button>
+                ))
+              )}
             </div>
           )}
 
@@ -540,7 +687,7 @@ export function ContextPanel({
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               disabled={loading}
-              placeholder={tab === 'ai' ? 'Ask AirGPT' : 'Message #' + activeRoom.toLowerCase().replaceAll(' ', '-')}
+              placeholder={tab === 'ai' ? 'Ask AirGPT' : 'Message #' + (roomDetail?.name.toLowerCase().replaceAll(' ', '-') ?? 'room')}
               aria-label={tab === 'ai' ? 'AI message' : 'Room message'}
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
             />
@@ -588,40 +735,29 @@ function ChatView({
   messages,
   loading,
   messagesEndRef,
-  onDownload,
 }: {
-  room: string
+  room: RoomDetail
   messages: ChatMessage[]
   loading: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
-  onDownload: () => void
 }) {
   return (
     <div className="space-y-4">
       <div className="glass-subtle flex items-center gap-3 rounded-2xl p-3">
-        <span className="flex size-9 items-center justify-center rounded-xl bg-amber-500/20 font-semibold">#</span>
+        <span className="flex size-9 items-center justify-center rounded-xl bg-white/15 font-semibold">#</span>
         <div className="min-w-0 leading-tight">
-          <p className="truncate text-sm font-medium">{room}</p>
-          <p className="text-xs text-emerald-400">4 online · 12 members</p>
+          <p className="truncate text-sm font-medium">{room.name}</p>
+          <p className="text-xs text-muted-foreground">{room.members.length} member{room.members.length === 1 ? '' : 's'}</p>
         </div>
       </div>
-      <p className="text-center text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Today</p>
-      {messages.map((message, index) => (
-        <MessageBubble key={message.id ?? message.author + '-' + index} message={message} />
-      ))}
-      {loading && <LoadingBubble author="Collaborator" initials="CO" />}
-      <div className="glass-subtle flex items-center gap-3 rounded-2xl p-3">
-        <span className="flex size-9 items-center justify-center rounded-xl bg-orange-500/15">
-          <FileText className="size-4 text-orange-300" />
-        </span>
-        <div className="min-w-0 flex-1 leading-tight">
-          <p className="truncate text-sm font-medium">narrative-v3.pdf</p>
-          <p className="text-xs text-muted-foreground">Shared by Elena · 2.4 MB</p>
-        </div>
-        <button type="button" onClick={onDownload} aria-label="Download narrative-v3.pdf" className="interactive-icon size-8">
-          <Download className="size-4" />
-        </button>
-      </div>
+      {messages.length === 0 ? (
+        <EmptyState label="No messages yet. Say hello." />
+      ) : (
+        messages.map((message, index) => (
+          <MessageBubble key={message.id ?? message.author + '-' + index} message={message} />
+        ))
+      )}
+      {loading && <LoadingBubble author="Sending" initials="…" />}
       <div ref={messagesEndRef} />
     </div>
   )
@@ -634,6 +770,8 @@ function AiView({
   onSpeechError,
   canUseVoice,
   onVoiceUpgrade,
+  docContext,
+  onInsertToDocument,
   onSuggestion,
 }: {
   messages: ChatMessage[]
@@ -642,27 +780,45 @@ function AiView({
   onSpeechError: (message: string) => void
   canUseVoice: boolean
   onVoiceUpgrade: () => void
+  docContext: DocContext | null
+  onInsertToDocument?: (text: string) => void
   onSuggestion: (prompt: string) => void
 }) {
-  const suggestions = [
-    'Summarize this document into 5 key points',
-    'Extract action items and assign owners',
-    'Draft a launch announcement',
-    'Identify risks in developer activation',
-  ]
+  const suggestions = docContext
+    ? [
+      `Summarize "${docContext.title}" into key points`,
+      'Suggest what to write next in this document',
+      'Give feedback on what I have so far',
+      'Fix grammar and tighten the wording',
+    ]
+    : [
+      'Help me plan a study session',
+      'Explain a topic I am stuck on',
+      'Quiz me on my current subject',
+      'Draft a study plan for this week',
+    ]
   return (
     <div className="space-y-4">
-      <div className="glass flex gap-3 rounded-2xl p-4">
-        <ThinkingLogo isThinking={false} className="size-8" />
-        <p className="text-sm leading-relaxed text-slate-200">
-          I’ve analyzed the brief. Developer activation is at risk because the onboarding milestone has no confirmed owner.
-        </p>
-      </div>
+      {docContext ? (
+        <div className="glass flex gap-3 rounded-2xl p-4">
+          <ThinkingLogo isThinking={false} className="size-8" />
+          <p className="text-sm leading-relaxed text-slate-200">
+            AirGPT can see <span className="font-semibold text-white">&quot;{docContext.title}&quot;</span>. Ask a question about it, or ask AirGPT to write or improve part of it.
+          </p>
+        </div>
+      ) : (
+        <div className="glass flex gap-3 rounded-2xl p-4">
+          <ThinkingLogo isThinking={false} className="size-8" />
+          <p className="text-sm leading-relaxed text-slate-200">
+            Ask AirGPT anything. Open a document from the Documents tab to let AirGPT read it and help you write.
+          </p>
+        </div>
+      )}
       <p className="px-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Suggested next steps</p>
       <div className="space-y-2">
         {suggestions.map((suggestion) => (
           <button key={suggestion} type="button" onClick={() => onSuggestion(suggestion)} className="glass-subtle flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/6">
-            <Sparkles className="size-3.5 shrink-0 text-orange-300" />
+            <Sparkles className="size-3.5 shrink-0 text-zinc-300" />
             {suggestion}
           </button>
         ))}
@@ -670,7 +826,7 @@ function AiView({
       {messages.length > 0 && (
         <div className="space-y-3 border-t border-white/8 pt-4">
           {messages.map((message, index) => (
-            <MessageBubble key={message.id ?? message.author + '-' + index} message={message} onSpeechError={onSpeechError} canUseVoice={canUseVoice} onVoiceUpgrade={onVoiceUpgrade} />
+            <MessageBubble key={message.id ?? message.author + '-' + index} message={message} onSpeechError={onSpeechError} canUseVoice={canUseVoice} onVoiceUpgrade={onVoiceUpgrade} onInsertToDocument={onInsertToDocument} />
           ))}
         </div>
       )}
@@ -679,73 +835,63 @@ function AiView({
     </div>
   )
 }
-function CommentsView({
-  query,
-  onReply,
-  onResolve,
+
+function TasksView({
+  tasks,
+  newTaskTitle,
+  onNewTaskTitleChange,
+  onToggle,
+  onAdd,
 }: {
-  query: string
-  onReply: (author: string) => void
-  onResolve: (id: number) => void
+  tasks: RoomTaskDTO[]
+  newTaskTitle: string
+  onNewTaskTitleChange: (value: string) => void
+  onToggle: (task: RoomTaskDTO) => void
+  onAdd: () => void
 }) {
-  const filtered = comments.filter((comment) =>
-    (comment.author + ' ' + comment.text).toLowerCase().includes(query.toLowerCase()),
-  )
   return (
     <div className="space-y-3">
-      {filtered.map((comment) => (
-        <article key={comment.id} className="glass-subtle rounded-2xl p-3">
-          <div className="flex items-center gap-2">
-            <Avatar initials={comment.initials} color={comment.color} className="size-6" />
-            <span className="text-sm font-medium">{comment.author}</span>
-          </div>
-          <p className="mt-2 text-[10px] font-medium text-orange-300">On “{comment.anchor}”</p>
-          <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{comment.text}</p>
-          <div className="mt-3 flex gap-2">
-            <button type="button" onClick={() => onReply(comment.author)} className="rounded-lg bg-white/6 px-2.5 py-1.5 text-xs hover:bg-white/10">
-              Reply
-            </button>
-            <button type="button" onClick={() => onResolve(comment.id)} className="rounded-lg px-2.5 py-1.5 text-xs text-emerald-300 hover:bg-emerald-400/10">
-              Resolve
-            </button>
-          </div>
-        </article>
-      ))}
-      {filtered.length === 0 && <EmptyState label="No comments match your search." />}
+      <div className="flex items-center gap-2">
+        <input
+          value={newTaskTitle}
+          onChange={(event) => onNewTaskTitleChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') onAdd()
+          }}
+          placeholder="Add a task"
+          className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none focus:border-white/40"
+        />
+        <button type="button" disabled={!newTaskTitle.trim()} onClick={onAdd} aria-label="Add task" className="interactive-icon size-9 disabled:opacity-40">
+          <Plus className="size-4" />
+        </button>
+      </div>
+      {tasks.length === 0 ? (
+        <EmptyState label="No tasks yet." />
+      ) : (
+        <ul className="space-y-2">
+          {tasks.map((task) => (
+            <li key={task.id}>
+              <button
+                type="button"
+                aria-pressed={task.status === 'done'}
+                onClick={() => onToggle(task)}
+                className="glass-subtle flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-white/6"
+              >
+                <span className={cn('flex size-4 shrink-0 items-center justify-center rounded border', task.status === 'done' ? 'border-transparent bg-white text-black' : 'border-white/20')}>
+                  {task.status === 'done' && <Check className="size-3" />}
+                </span>
+                <span className={cn('flex-1 text-sm', task.status === 'done' && 'text-muted-foreground line-through')}>{task.title}</span>
+                {task.assigneeName && <Avatar initials={initialsFor(task.assigneeName)} color="from-zinc-500 to-zinc-700" className="size-6" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
 
-function TasksView({
-  tasks,
-  onToggle,
-}: {
-  tasks: Array<{ id: number; text: string; owner: string; done: boolean }>
-  onToggle: (id: number) => void
-}) {
-  return (
-    <ul className="space-y-2">
-      {tasks.map((task) => (
-        <li key={task.id}>
-          <button
-            type="button"
-            aria-pressed={task.done}
-            onClick={() => onToggle(task.id)}
-            className="glass-subtle flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-white/6"
-          >
-            <span className={cn('flex size-4 items-center justify-center rounded border', task.done ? 'border-transparent bg-orange-500' : 'border-white/20')}>
-              {task.done && <Check className="size-3" />}
-            </span>
-            <span className={cn('flex-1 text-sm', task.done && 'text-muted-foreground line-through')}>{task.text}</span>
-            <Avatar initials={task.owner} color="from-orange-400 to-orange-500" className="size-6" />
-          </button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function MessageBubble({ message, onSpeechError, canUseVoice = false, onVoiceUpgrade }: { message: ChatMessage; onSpeechError?: (message: string) => void; canUseVoice?: boolean; onVoiceUpgrade?: () => void }) {
+function MessageBubble({ message, onSpeechError, canUseVoice = false, onVoiceUpgrade, onInsertToDocument }: { message: ChatMessage; onSpeechError?: (message: string) => void; canUseVoice?: boolean; onVoiceUpgrade?: () => void; onInsertToDocument?: (text: string) => void }) {
   return (
     <article className={cn('flex gap-2.5', message.self && 'flex-row-reverse')}>
       <Avatar initials={message.initials} color={message.color} className="size-7" />
@@ -754,11 +900,16 @@ function MessageBubble({ message, onSpeechError, canUseVoice = false, onVoiceUpg
           <span className="text-xs font-medium">{message.author}</span>
           <span className="text-[10px] text-muted-foreground">{message.time}</span>
         </div>
-        <div className={cn('mt-1 whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-left text-sm leading-relaxed', message.self ? 'message-self rounded-tr-md text-white' : 'message-highlight rounded-tl-md')}>
+        <div className={cn('mt-1 whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-left text-sm leading-relaxed', message.self ? 'message-self rounded-tr-md text-black' : 'message-highlight rounded-tl-md')}>
           {message.self ? message.text : <AiMarkdown>{message.text}</AiMarkdown>}
-          {message.author === 'AirGPT' && onSpeechError && (
-            <div className="mt-2 flex justify-end">
-              {canUseVoice ? <SpeakButton text={sanitizeResponse(message.text)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>}
+          {message.author === 'AirGPT' && (onSpeechError || onInsertToDocument) && (
+            <div className="mt-2 flex items-center justify-end gap-1.5">
+              {onInsertToDocument && (
+                <button type="button" onClick={() => onInsertToDocument(message.text)} aria-label="Add to document" title="Add to document" className="interactive-icon size-8">
+                  <FilePlus2 className="size-3.5" />
+                </button>
+              )}
+              {onSpeechError && (canUseVoice ? <SpeakButton text={sanitizeResponse(message.text)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>)}
             </div>
           )}
         </div>
@@ -781,7 +932,7 @@ function LoadingBubble({
       {isAi ? (
         <ThinkingLogo isThinking className="size-7" />
       ) : (
-        <Avatar initials={initials} color="from-orange-500 to-amber-500" className="size-7" />
+        <Avatar initials={initials} color="from-white to-zinc-200" className="size-7" />
       )}
       <div>
         <span className="text-xs font-medium">{author}</span>
@@ -799,19 +950,4 @@ function EmptyState({ label }: { label: string }) {
       {label}
     </div>
   )
-}
-
-function downloadPanelFile() {
-  const content = [
-    'AirGPT Narrative v3',
-    '',
-    'AirGPT 3.0 launch narrative',
-    'Enterprise design partners, developer activation, and the November keynote.',
-  ].join('\n')
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/pdf' }))
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = 'narrative-v3.pdf'
-  anchor.click()
-  URL.revokeObjectURL(url)
 }

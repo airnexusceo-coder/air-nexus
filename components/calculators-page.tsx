@@ -62,13 +62,13 @@ export function CalculatorsPage({ plan, onRequestUpgrade }: CalculatorsPageProps
         {tabs.map((tab) => {
           const Icon = tab.icon
           const unlocked = planRank[plan] >= planRank[tab.plan]
-          return <button key={tab.id} type="button" role="tab" aria-selected={active === tab.id} onClick={() => selectTab(tab)} className={cn('flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition', active === tab.id ? 'border-orange-300/30 bg-orange-400/10 text-orange-100' : 'border-white/8 bg-white/[0.035] text-slate-400 hover:bg-white/[0.07]')}><Icon className="size-4" />{tab.label}{!unlocked && <span className="ml-1 flex items-center gap-1 rounded-full bg-white/6 px-2 py-0.5 text-[9px]"><LockKeyhole className="size-2.5" />{tab.plan}</span>}</button>
+          return <button key={tab.id} type="button" role="tab" aria-selected={active === tab.id} onClick={() => selectTab(tab)} className={cn('flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-sm transition', active === tab.id ? 'border-white/30 bg-white/10 text-white' : 'border-white/8 bg-white/[0.035] text-slate-400 hover:bg-white/[0.07]')}><Icon className="size-4" />{tab.label}{!unlocked && <span className="ml-1 flex items-center gap-1 rounded-full bg-white/6 px-2 py-0.5 text-[9px]"><LockKeyhole className="size-2.5" />{tab.plan}</span>}</button>
         })}
       </div>
       <div className="mt-4">{active === 'grade' ? <GradeCalculator onSave={saveResult} /> : active === 'atar' ? <AtarCalculator onSave={saveResult} /> : <GraphingCalculator />}</div>
       <section className="glass mt-5 rounded-2xl p-4" aria-labelledby="calculator-history-heading">
-        <div className="flex items-center gap-2"><History className="size-4 text-orange-300" /><h2 id="calculator-history-heading" className="text-sm font-semibold">Saved calculator results</h2></div>
-        {history.length === 0 ? <p className="mt-3 text-xs text-slate-500">No saved results yet. Use Save result after calculating.</p> : <div className="mt-3 grid gap-2 sm:grid-cols-2">{history.slice(0, 6).map((item) => <div key={item.id} className="rounded-xl border border-white/8 bg-white/[0.03] p-3"><div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-orange-100">{item.tool}</span><span className="text-[9px] text-slate-600">{new Date(item.createdAt).toLocaleDateString()}</span></div><p className="mt-1 text-xs text-slate-400">{item.result}</p></div>)}</div>}
+        <div className="flex items-center gap-2"><History className="size-4 text-zinc-300" /><h2 id="calculator-history-heading" className="text-sm font-semibold">Saved calculator results</h2></div>
+        {history.length === 0 ? <p className="mt-3 text-xs text-slate-500">No saved results yet. Use Save result after calculating.</p> : <div className="mt-3 grid gap-2 sm:grid-cols-2">{history.slice(0, 6).map((item) => <div key={item.id} className="rounded-xl border border-white/8 bg-white/[0.03] p-3"><div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-white">{item.tool}</span><span className="text-[9px] text-slate-600">{new Date(item.createdAt).toLocaleDateString()}</span></div><p className="mt-1 text-xs text-slate-400">{item.result}</p></div>)}</div>}
       </section>
     </div>
   )
@@ -102,7 +102,7 @@ function GradeCalculator({ onSave }: { onSave: (tool: string, result: string) =>
 
   return (
     <section className="glass rounded-3xl p-5 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-orange-300">Free tool</p><h2 className="mt-1 text-xl font-semibold">Grade Calculator</h2></div><button type="button" onClick={() => setAssessments((items) => [...items, { id: Date.now(), name: '', score: '', total: '100', weight: '' }])} className="primary-action"><Plus className="size-4" />Add assessment</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">Free tool</p><h2 className="mt-1 text-xl font-semibold">Grade Calculator</h2></div><button type="button" onClick={() => setAssessments((items) => [...items, { id: Date.now(), name: '', score: '', total: '100', weight: '' }])} className="primary-action"><Plus className="size-4" />Add assessment</button></div>
       <div className="mt-5 space-y-3">
         {assessments.map((item) => (
           <div key={item.id} className="grid gap-2 rounded-2xl border border-white/8 bg-white/[0.03] p-3 sm:grid-cols-[2fr_repeat(3,1fr)_auto]">
@@ -119,7 +119,7 @@ function GradeCalculator({ onSave }: { onSave: (tool: string, result: string) =>
         <ResultCard label="Weighted grade" value={calculated.weighted.toFixed(1) + '%'} detail={calculated.weightedPoints.toFixed(1) + ' weighted points'} />
         <div className="rounded-2xl border border-white/8 bg-white/[0.035] p-4"><label htmlFor="target-grade" className="text-[10px] uppercase tracking-wider text-slate-500">Target grade</label><div className="mt-2 flex items-center gap-2"><input id="target-grade" type="number" min="0" max="100" value={target} onChange={(event) => setTarget(event.target.value)} className="calculator-input min-w-0 flex-1" /><span className="text-slate-500">%</span></div></div>
       </div>
-      <div className={cn('mt-4 rounded-2xl border p-4 text-sm', gradeError ? 'border-rose-300/15 bg-rose-400/[0.06] text-rose-200' : 'border-orange-300/15 bg-orange-400/[0.055] text-orange-50')}>{gradeError ?? (calculated.remaining <= 0 ? 'All 100% of assessment weight is already entered.' : calculated.needed === null || !Number.isFinite(calculated.needed) ? 'Enter valid assessments and a target grade.' : calculated.needed <= 0 ? 'You have already secured your target grade.' : calculated.needed > 100 ? 'The target is not reachable with the remaining ' + calculated.remaining.toFixed(0) + '% weight.' : 'You need ' + calculated.needed.toFixed(1) + '% across the remaining ' + calculated.remaining.toFixed(0) + '% weight to reach your target.')}</div>
+      <div className={cn('mt-4 rounded-2xl border p-4 text-sm', gradeError ? 'border-rose-300/15 bg-rose-400/[0.06] text-rose-200' : 'border-white/15 bg-white/[0.06] text-white')}>{gradeError ?? (calculated.remaining <= 0 ? 'All 100% of assessment weight is already entered.' : calculated.needed === null || !Number.isFinite(calculated.needed) ? 'Enter valid assessments and a target grade.' : calculated.needed <= 0 ? 'You have already secured your target grade.' : calculated.needed > 100 ? 'The target is not reachable with the remaining ' + calculated.remaining.toFixed(0) + '% weight.' : 'You need ' + calculated.needed.toFixed(1) + '% across the remaining ' + calculated.remaining.toFixed(0) + '% weight to reach your target.')}</div>
       <button type="button" disabled={Boolean(gradeError) || calculated.validCount === 0} onClick={() => onSave('Grade Calculator', `${calculated.current.toFixed(1)}% current · ${calculated.weighted.toFixed(1)}% weighted`)} className="secondary-action mt-4"><Save className="size-4" />Save result</button>
     </section>
   )
@@ -168,7 +168,7 @@ function AtarCalculator({ onSave }: { onSave: (tool: string, result: string) => 
 
   return (
     <section className="glass rounded-3xl p-5 sm:p-6">
-      <p className="text-xs font-semibold uppercase tracking-wider text-orange-300">Plus tool</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">Plus tool</p>
       <h2 className="mt-1 text-xl font-semibold">ATAR Calculator</h2>
       <p className="mt-2 text-sm text-slate-500">Choose your curriculum and subjects. AirGPT applies the stored scaling estimate automatically.</p>
 
@@ -210,7 +210,7 @@ function AtarCalculator({ onSave }: { onSave: (tool: string, result: string) => 
       <div className="mt-5 overflow-x-auto rounded-2xl border border-white/8">
         <table className="w-full min-w-[600px] text-left text-xs">
           <thead className="bg-white/[0.045] text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="px-4 py-3">Subject</th><th className="px-4 py-3">Raw score</th><th className="px-4 py-3">Scaled score</th><th className="px-4 py-3">Scaling adjustment</th></tr></thead>
-          <tbody className="divide-y divide-white/5">{result.breakdown.length === 0 ? <tr><td colSpan={4} className="px-4 py-5 text-center text-slate-500">Choose subjects and valid scores to see the automatic scaling breakdown.</td></tr> : result.breakdown.map((subject, index) => <tr key={`${subject.subjectId}-${index}`}><td className="px-4 py-3 font-medium text-slate-200">{subject.subject}</td><td className="px-4 py-3 text-slate-400">{subject.rawScore.toFixed(1)}</td><td className="px-4 py-3 font-semibold text-orange-100">{subject.scaledScore.toFixed(1)}</td><td className={cn('px-4 py-3 font-medium', subject.adjustment >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{subject.adjustment >= 0 ? '+' : ''}{subject.adjustment.toFixed(1)}</td></tr>)}</tbody>
+          <tbody className="divide-y divide-white/5">{result.breakdown.length === 0 ? <tr><td colSpan={4} className="px-4 py-5 text-center text-slate-500">Choose subjects and valid scores to see the automatic scaling breakdown.</td></tr> : result.breakdown.map((subject, index) => <tr key={`${subject.subjectId}-${index}`}><td className="px-4 py-3 font-medium text-slate-200">{subject.subject}</td><td className="px-4 py-3 text-slate-400">{subject.rawScore.toFixed(1)}</td><td className="px-4 py-3 font-semibold text-white">{subject.scaledScore.toFixed(1)}</td><td className={cn('px-4 py-3 font-medium', subject.adjustment >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{subject.adjustment >= 0 ? '+' : ''}{subject.adjustment.toFixed(1)}</td></tr>)}</tbody>
         </table>
       </div>
 
@@ -219,7 +219,9 @@ function AtarCalculator({ onSave }: { onSave: (tool: string, result: string) => 
     </section>
   )
 }
-const graphColors = ['#ff6a00', '#fb923c', '#fbbf24', '#f472b6']
+// Chart lines are the one place that stays multi-tone — flattening 4
+// simultaneous functions to pure white/grey would make them unreadable.
+const graphColors = ['#ffffff', '#a1a1aa', '#71717a', '#38bdf8']
 
 function GraphingCalculator() {
   const [functions, setFunctions] = useState(['x^2', '2x + 3'])
@@ -265,7 +267,7 @@ function GraphingCalculator() {
 
   return (
     <section className="glass rounded-3xl p-5 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Premium tool</p><h2 className="mt-1 text-xl font-semibold">Graphing Calculator</h2></div><button type="button" onClick={() => setFunctions((items) => [...items, 'sin(x)'])} className="primary-action"><Plus className="size-4" />Add function</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">Premium tool</p><h2 className="mt-1 text-xl font-semibold">Graphing Calculator</h2></div><button type="button" onClick={() => setFunctions((items) => [...items, 'sin(x)'])} className="primary-action"><Plus className="size-4" />Add function</button></div>
       <div className="mt-5 grid gap-5 lg:grid-cols-[280px_1fr]">
         <div className="space-y-3">
           {functions.map((expression, index) => <div key={index} className="flex items-center gap-2 rounded-2xl border border-white/8 bg-white/[0.03] p-2"><span className="size-3 rounded-full" style={{ backgroundColor: graphColors[index % graphColors.length] }} /><span className="text-xs text-slate-500">y =</span><input aria-label={'Function ' + (index + 1)} value={expression} onChange={(event) => setFunctions((items) => items.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} className="min-w-0 flex-1 bg-transparent text-sm outline-none" /><button type="button" onClick={() => setFunctions((items) => items.length > 1 ? items.filter((_, itemIndex) => itemIndex !== index) : items)} disabled={functions.length === 1} aria-label={'Remove function ' + (index + 1)} className="interactive-icon size-8"><Trash2 className="size-3.5" /></button></div>)}
@@ -290,5 +292,5 @@ function GraphingCalculator() {
 }
 
 function ResultCard({ label, value, detail }: { label: string; value: string; detail?: string }) {
-  return <div className="rounded-2xl border border-orange-300/12 bg-orange-400/[0.045] p-4"><p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold text-orange-50">{value}</p>{detail && <p className="mt-1 text-[10px] text-slate-500">{detail}</p>}</div>
+  return <div className="rounded-2xl border border-white/12 bg-white/[0.045] p-4"><p className="text-[10px] uppercase tracking-wider text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold text-white">{value}</p>{detail && <p className="mt-1 text-[10px] text-slate-500">{detail}</p>}</div>
 }

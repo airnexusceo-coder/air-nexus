@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server'
-import {
-  createTutorReply,
-  createTutorReplyStream,
-  GroqApiError,
-  GroqConfigurationError,
-} from '@/lib/ai/groq'
+import { GroqApiError, GroqConfigurationError } from '@/lib/ai/groq'
+import { createTutorReplyWithFallback, createTutorReplyStreamWithFallback } from '@/lib/ai/text-fallback'
+import { ProviderApiError, ProviderConfigurationError } from '@/lib/ai/providers/types'
 import { isGroqTextPurpose } from '@/lib/ai/model-router'
 import { sanitizeResponse } from '@/lib/ai/sanitize-response'
 import {
@@ -152,10 +149,6 @@ function createSanitizedTextStream(source: ReadableStream<Uint8Array>, onDone: (
         if (!emitted) throw new Error('AI stream returned no message content')
         controller.close()
       } catch (error) {
-    if (error instanceof SupabaseConfigurationError) {
-      console.error('Supabase configuration error:', error.message)
-      return NextResponse.json({ error: 'Supabase authentication is not configured' }, { status: 500 })
-    }
         controller.error(error)
       } finally {
         finish()
@@ -178,7 +171,16 @@ export async function POST(req: Request) {
   if (!message) return NextResponse.json({ error: 'Message is required' }, { status: 400 })
   if (message.length > MAX_MESSAGE_LENGTH) return NextResponse.json({ error: 'Message is too long' }, { status: 413 })
   if (!documents) return NextResponse.json({ error: 'Invalid document context. Attach up to five readable documents.' }, { status: 400 })
-  const auth = await getServerAuthSession()
+  let auth: Awaited<ReturnType<typeof getServerAuthSession>>
+  try {
+    auth = await getServerAuthSession()
+  } catch (error) {
+    if (error instanceof SupabaseConfigurationError) {
+      console.error('Supabase configuration error:', error.message)
+      return NextResponse.json({ error: 'Supabase authentication is not configured' }, { status: 500 })
+    }
+    throw error
+  }
   if (!auth) {
     return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
   }
@@ -207,26 +209,26 @@ export async function POST(req: Request) {
     }
     if (body?.stream === true) {
       void autoSummarizeConversationMemory(auth, message).catch((error: unknown) => console.error('Memory summary error:', error instanceof Error ? error.message : 'Unknown error'))
-      const result = await createTutorReplyStream(input)
+      const result = await createTutorReplyStreamWithFallback(input)
       streamOwnsTimeout = true
       return new Response(createSanitizedTextStream(result.stream, () => clearTimeout(timeoutId)), {
-        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-AirNexus-Model': result.model, 'X-AirNexus-Tools': result.tools.map(encodeURIComponent).join('|') },
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-AirNexus-Model': result.model, 'X-AirNexus-Provider': result.provider, 'X-AirNexus-Tools': result.tools.map(encodeURIComponent).join('|') },
       })
     }
     void autoSummarizeConversationMemory(auth, message).catch((summaryError: unknown) => console.error('Memory summary error:', summaryError instanceof Error ? summaryError.message : 'Unknown error'))
-    const result = await createTutorReply({
+    const result = await createTutorReplyWithFallback({
       ...input,
     })
     return NextResponse.json({ ...result, reply: sanitizeResponse(result.reply) })
   } catch (error) {
-    if (error instanceof GroqConfigurationError) {
+    if (error instanceof GroqConfigurationError || error instanceof ProviderConfigurationError) {
       console.error('AI configuration error:', error.message)
       return NextResponse.json({ error: 'AI service is not configured' }, { status: 500 })
     }
-    if (error instanceof GroqApiError) {
-      console.error('Groq API error:', error.message)
+    if (error instanceof GroqApiError || error instanceof ProviderApiError) {
+      console.error('AI provider error:', error.message)
       const status = error.status === 429 ? 429 : error.status >= 500 ? 502 : 400
-      const message = error.status === 429 ? 'AI service is busy. Please retry in a few seconds.' : 'Groq request failed'
+      const message = error.status === 429 ? 'AI service is busy. Please retry in a few seconds.' : 'AI request failed'
       const headers: Record<string, string> = status === 429 ? { 'Retry-After': '3', 'Cache-Control': 'no-store' } : { 'Cache-Control': 'no-store' }
       return NextResponse.json({ error: message }, { status, headers })
     }

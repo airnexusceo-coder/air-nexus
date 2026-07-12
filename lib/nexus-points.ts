@@ -16,6 +16,8 @@ export type NexusRewardsState = {
   transactions: NexusTransaction[]
   rewardedActions: string[]
   lastDailyLogin: string | null
+  equippedAvatar: string | null
+  equippedBadge: string | null
 }
 
 export const NEXUS_REWARDS_STORAGE_KEY = 'airnexus-nexus-rewards-v1'
@@ -64,6 +66,8 @@ export function parseRewardsState(value: string | null): NexusRewardsState | nul
         : [],
       rewardedActions: Array.isArray(parsed.rewardedActions) ? parsed.rewardedActions.filter((item): item is string => typeof item === 'string') : [],
       lastDailyLogin: typeof parsed.lastDailyLogin === 'string' ? parsed.lastDailyLogin : null,
+      equippedAvatar: typeof parsed.equippedAvatar === 'string' ? parsed.equippedAvatar : null,
+      equippedBadge: typeof parsed.equippedBadge === 'string' ? parsed.equippedBadge : null,
     }
   } catch {
     return null

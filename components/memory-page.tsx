@@ -152,7 +152,7 @@ export function MemoryPage({ notify }: { notify: (message: string, tone?: Notice
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-300/80">Student memory</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300/80">Student memory</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">AI Memory</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Manage what AirGPT remembers about your subjects, learning style, assignments, weak topics, exam dates, and goals.</p>
         </div>
@@ -167,7 +167,7 @@ export function MemoryPage({ notify }: { notify: (message: string, tone?: Notice
 
       <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
         <form onSubmit={saveMemory} className="glass rounded-3xl p-5">
-          <div className="flex items-center gap-3"><Brain className="size-5 text-orange-300" /><h3 className="font-semibold">{editingId ? 'Edit memory' : 'Add memory'}</h3></div>
+          <div className="flex items-center gap-3"><Brain className="size-5 text-zinc-300" /><h3 className="font-semibold">{editingId ? 'Edit memory' : 'Add memory'}</h3></div>
           <label className="form-label mt-5">Type<select value={type} onChange={(event) => setType(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none">{memoryTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="form-label mt-4">Title<input value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={180} className="nexus-field mt-2" placeholder="e.g. Learns best with worked examples" /></label>
           <label className="form-label mt-4">Memory<textarea value={content} onChange={(event) => setContent(event.target.value)} required rows={5} className="nexus-field mt-2 resize-none" placeholder="What should AirGPT remember?" /></label>
@@ -183,7 +183,7 @@ export function MemoryPage({ notify }: { notify: (message: string, tone?: Notice
           <div className="mt-5 space-y-3">
             {loading ? <div className="premium-skeleton h-28 rounded-2xl" /> : visibleMemories.length === 0 ? <p className="rounded-2xl border border-white/8 bg-white/[0.035] p-5 text-sm text-slate-500">No memories found yet. Add one manually or keep chatting with auto summaries enabled.</p> : visibleMemories.map((memory) => (
               <article key={memory.id} className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
-                <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold uppercase tracking-wider text-orange-300">{memory.type.replace(/_/g, ' ')}</p><h4 className="mt-1 font-semibold text-white">{memory.title}</h4><p className="mt-2 text-sm leading-6 text-slate-400">{memory.content}</p>{memory.tags.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{memory.tags.map((tag) => <span key={tag} className="rounded-full bg-white/8 px-2 py-1 text-[10px] text-slate-400">{tag}</span>)}</div>}</div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => editMemory(memory)} className="interactive-icon text-xs">Edit</button><button type="button" onClick={() => void deleteMemory(memory)} aria-label={`Delete ${memory.title}`} className="interactive-icon text-rose-200"><Trash2 className="size-4" /></button></div></div>
+                <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">{memory.type.replace(/_/g, ' ')}</p><h4 className="mt-1 font-semibold text-white">{memory.title}</h4><p className="mt-2 text-sm leading-6 text-slate-400">{memory.content}</p>{memory.tags.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{memory.tags.map((tag) => <span key={tag} className="rounded-full bg-white/8 px-2 py-1 text-[10px] text-slate-400">{tag}</span>)}</div>}</div><div className="flex shrink-0 gap-1"><button type="button" onClick={() => editMemory(memory)} className="interactive-icon text-xs">Edit</button><button type="button" onClick={() => void deleteMemory(memory)} aria-label={`Delete ${memory.title}`} className="interactive-icon text-rose-200"><Trash2 className="size-4" /></button></div></div>
               </article>
             ))}
           </div>
@@ -194,5 +194,5 @@ export function MemoryPage({ notify }: { notify: (message: string, tone?: Notice
 }
 
 function MemoryToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.035] p-3 text-sm text-slate-200"><span>{label}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-orange-500" /></label>
+  return <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.035] p-3 text-sm text-slate-200"><span>{label}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-white" /></label>
 }

@@ -64,6 +64,8 @@ const DEFAULT_STATE: MotivationState = {
 }
 
 const XP_PER_LEVEL = 200
+/** Bounds the locally-stored event log. lifetimeXp and unlockedAchievements are each persisted as their own running-total field (not re-derived from the full event history), so trimming old events never loses XP or un-earns a badge — the one accuracy tradeoff is that a longestStreak set further back than this many events can become invisible, which is a far better failure mode than the unbounded array eventually hitting the browser's localStorage quota and throwing on every future write. */
+const MAX_STORED_EVENTS = 1000
 
 export function motivationStorageKey(userId: string) {
   return `airnexus-motivation-v1:${userId}`
@@ -178,6 +180,24 @@ function achievementIds(state: MotivationState, stats: Omit<MotivationStats, 'un
   return Array.from(new Set([...state.unlockedAchievements, ...earned]))
 }
 
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+/** Real per-weekday XP totals for the current week (Monday-start, matching startOfWeek), for charting actual study activity instead of invented numbers. */
+export function getWeeklyXpBreakdown(state: MotivationState, now = new Date()): Array<{ day: string; xp: number }> {
+  const start = startOfWeek(now)
+  const totals = WEEKDAY_LABELS.map((day, index) => {
+    const date = new Date(start)
+    date.setDate(date.getDate() + index)
+    return { day, key: localDateKey(date), xp: 0 }
+  })
+  for (const event of state.events) {
+    const key = localDateKey(new Date(event.createdAt))
+    const bucket = totals.find((entry) => entry.key === key)
+    if (bucket) bucket.xp += event.xp
+  }
+  return totals.map(({ day, xp }) => ({ day, xp }))
+}
+
 export function getMotivationStats(state: MotivationState, now = new Date()): MotivationStats {
   const today = localDateKey(now)
   const weekStart = startOfWeek(now).getTime()
@@ -201,8 +221,14 @@ export function getMotivationStats(state: MotivationState, now = new Date()): Mo
   return { ...base, unlockedAchievementIds: achievementIds(state, base) }
 }
 
+/** Never lets a storage failure (quota exceeded, private-browsing restrictions) throw into the calling UI action — XP recording degrades to "not saved this time" instead of crashing whatever triggered it (task completion, chat reply, etc.). */
 function writeState(userId: string, state: MotivationState) {
-  window.localStorage.setItem(motivationStorageKey(userId), JSON.stringify(state))
+  try {
+    window.localStorage.setItem(motivationStorageKey(userId), JSON.stringify(state))
+  } catch (error) {
+    console.warn('Could not save study progress locally:', error instanceof Error ? error.message : error)
+    return
+  }
   window.dispatchEvent(new CustomEvent(MOTIVATION_UPDATED_EVENT, { detail: { userId } }))
 }
 
@@ -231,7 +257,7 @@ export function recordMotivationActivity(
   const pending: MotivationState = {
     ...current,
     lifetimeXp: current.lifetimeXp + event.xp,
-    events: [event, ...current.events],
+    events: [event, ...current.events].slice(0, MAX_STORED_EVENTS),
   }
   const after = getMotivationStats(pending)
   const newAchievements = after.unlockedAchievementIds.filter((id) => !before.unlockedAchievementIds.includes(id))

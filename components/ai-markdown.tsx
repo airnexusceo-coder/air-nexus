@@ -25,13 +25,13 @@ function renderInline(value: string): ReactNode[] {
     if (link) {
       const href = safeHref(link[2])
       return href ? (
-        <a key={key} href={href} target="_blank" rel="noreferrer" className="text-orange-300 underline decoration-orange-300/35 underline-offset-2 hover:text-orange-200">
+        <a key={key} href={href} target="_blank" rel="noreferrer" className="text-white underline decoration-white/35 underline-offset-2 hover:text-zinc-300">
           {link[1]}
         </a>
       ) : <Fragment key={key}>{link[1]}</Fragment>
     }
     if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={key} className="rounded-md bg-slate-950/70 px-1.5 py-0.5 font-mono text-[0.88em] text-orange-100">{part.slice(1, -1)}</code>
+      return <code key={key} className="rounded-md bg-slate-950/70 px-1.5 py-0.5 font-mono text-[0.88em] text-zinc-200">{part.slice(1, -1)}</code>
     }
     if ((part.startsWith('**') && part.endsWith('**')) || (part.startsWith('__') && part.endsWith('__'))) {
       return <strong key={key} className="font-semibold text-white">{renderInline(part.slice(2, -2))}</strong>
@@ -67,7 +67,7 @@ function renderBlocks(markdown: string) {
       blocks.push(
         <div key={'code-' + index} className="my-3 overflow-hidden rounded-xl border border-white/10 bg-slate-950/75">
           {language && <div className="border-b border-white/8 px-3 py-1.5 text-[10px] uppercase tracking-wider text-slate-500">{language}</div>}
-          <pre className="scrollbar-thin overflow-x-auto p-3 text-xs leading-relaxed text-orange-50"><code>{code.join('\n')}</code></pre>
+          <pre className="scrollbar-thin overflow-x-auto p-3 text-xs leading-relaxed text-zinc-100"><code>{code.join('\n')}</code></pre>
         </div>,
       )
       continue
@@ -91,7 +91,7 @@ function renderBlocks(markdown: string) {
         items.push(item[1])
         index += 1
       }
-      blocks.push(<ul key={'ul-' + index} className="my-2 list-disc space-y-1 pl-5 marker:text-orange-400">{items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ul>)
+      blocks.push(<ul key={'ul-' + index} className="my-2 list-disc space-y-1 pl-5 marker:text-zinc-400">{items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ul>)
       continue
     }
 
@@ -104,7 +104,7 @@ function renderBlocks(markdown: string) {
         items.push(item[1])
         index += 1
       }
-      blocks.push(<ol key={'ol-' + index} className="my-2 list-decimal space-y-1 pl-5 marker:text-orange-300">{items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ol>)
+      blocks.push(<ol key={'ol-' + index} className="my-2 list-decimal space-y-1 pl-5 marker:text-zinc-300">{items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>)}</ol>)
       continue
     }
 

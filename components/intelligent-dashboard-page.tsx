@@ -321,7 +321,7 @@ function AcademicList({ items, empty, onAdd }: { items: AcademicItem[]; empty: s
     return (
       <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.025] p-4 text-sm text-slate-400">
         <p>{empty}</p>
-        <button type="button" onClick={onAdd} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-orange-300 hover:text-orange-200">
+        <button type="button" onClick={onAdd} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-white hover:text-zinc-300">
           Add study context <ArrowRight className="size-3" />
         </button>
       </div>
@@ -333,7 +333,7 @@ function AcademicList({ items, empty, onAdd }: { items: AcademicItem[]; empty: s
         <article key={`${item.title}-${index}`} className="rounded-2xl border border-white/8 bg-white/[0.035] p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0"><p className="text-sm font-medium text-white">{item.title}</p><p className="mt-1 text-xs text-slate-500">{item.subject}</p></div>
-            <span className="shrink-0 rounded-full bg-orange-400/10 px-2.5 py-1 text-[10px] font-medium text-orange-200">{formatDueDate(item.dueDate)}</span>
+            <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-medium text-zinc-200">{formatDueDate(item.dueDate)}</span>
           </div>
         </article>
       ))}
@@ -460,13 +460,13 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
         </button>
       </div>
 
-      <section className="relative overflow-hidden rounded-3xl border border-orange-300/20 bg-[radial-gradient(circle_at_top_left,rgba(251,146,60,.2),transparent_42%),rgba(255,255,255,.045)] p-6 sm:p-8" aria-labelledby="daily-goal-title">
-        <div className="absolute right-6 top-6 flex size-12 items-center justify-center rounded-2xl bg-orange-400/12 text-orange-200"><Target className="size-6" /></div>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">Today’s study goal</p>
+      <section className="relative overflow-hidden rounded-3xl border border-white/20 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,.1),transparent_42%),rgba(255,255,255,.045)] p-6 sm:p-8" aria-labelledby="daily-goal-title">
+        <div className="absolute right-6 top-6 flex size-12 items-center justify-center rounded-2xl bg-white/12 text-white"><Target className="size-6" /></div>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">Today’s study goal</p>
         <h3 id="daily-goal-title" className="mt-3 max-w-3xl pr-14 text-2xl font-semibold leading-tight text-white sm:text-3xl">{currentBrief.studyGoal}</h3>
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <button type="button" onClick={onContinueStudy} className="primary-action">Continue studying <ArrowRight className="size-4" /></button>
-          <span className={cn('rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider', source === 'ai' ? 'bg-orange-400/10 text-orange-200' : 'bg-white/7 text-slate-400')}>
+          <span className={cn('rounded-full px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider', source === 'ai' ? 'bg-white/10 text-white' : 'bg-white/7 text-slate-400')}>
             {loading ? 'Updating…' : source === 'ai' ? 'Personalised by AirGPT' : 'Activity-based plan'}
           </span>
         </div>
@@ -475,7 +475,7 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
 
       <div className="grid gap-5 xl:grid-cols-2">
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="exams-title">
-          <div className="mb-4 flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-amber-400/10 text-amber-200"><GraduationCap className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-amber-300">Plan ahead</p><h3 id="exams-title" className="font-semibold">Upcoming exams</h3></div></div>
+          <div className="mb-4 flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><GraduationCap className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Plan ahead</p><h3 id="exams-title" className="font-semibold">Upcoming exams</h3></div></div>
           <AcademicList items={currentBrief.exams} empty="No upcoming exam has been mentioned in your AirGPT conversations." onAdd={onContinueStudy} />
         </section>
 
@@ -487,7 +487,7 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
 
       <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="attention-title">
-          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-orange-400/10 text-orange-200"><BrainCircuit className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-orange-300">Focus signal</p><h3 id="attention-title" className="font-semibold">Subjects needing attention</h3></div></div>
+          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><BrainCircuit className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Focus signal</p><h3 id="attention-title" className="font-semibold">Subjects needing attention</h3></div></div>
           <div className="mt-4 space-y-2">
             {currentBrief.attentionSubjects.length > 0 ? currentBrief.attentionSubjects.map((item) => (
               <article key={item.subject} className="rounded-2xl border border-white/8 bg-white/[0.035] p-4"><p className="text-sm font-medium text-white">{item.subject}</p><p className="mt-1 text-xs leading-5 text-slate-400">{item.reason}</p></article>
@@ -496,10 +496,10 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
         </section>
 
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="recommendations-title">
-          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-orange-400/10 text-orange-200"><Sparkles className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-orange-300">Next best actions</p><h3 id="recommendations-title" className="font-semibold">AI recommendations</h3></div></div>
+          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><Sparkles className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Next best actions</p><h3 id="recommendations-title" className="font-semibold">AI recommendations</h3></div></div>
           <ol className="mt-4 space-y-3">
             {currentBrief.recommendations.map((recommendation, index) => (
-              <li key={recommendation} className="flex gap-3 rounded-2xl border border-white/8 bg-white/[0.035] p-4 text-sm leading-6 text-slate-300"><span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-orange-400/10 text-xs font-bold text-orange-200">{index + 1}</span>{recommendation}</li>
+              <li key={recommendation} className="flex gap-3 rounded-2xl border border-white/8 bg-white/[0.035] p-4 text-sm leading-6 text-slate-300"><span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">{index + 1}</span>{recommendation}</li>
             ))}
           </ol>
         </section>
@@ -507,16 +507,16 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
 
       <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="streak-title">
-          <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-orange-300">Study streak</p><h3 id="streak-title" className="mt-1 text-xl font-semibold">{streak} active {streak === 1 ? 'day' : 'days'}</h3></div><span className="flex size-12 items-center justify-center rounded-2xl bg-orange-400/12 text-orange-300"><Flame className="size-6" /></span></div>
+          <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Study streak</p><h3 id="streak-title" className="mt-1 text-xl font-semibold">{streak} active {streak === 1 ? 'day' : 'days'}</h3></div><span className="flex size-12 items-center justify-center rounded-2xl bg-white/12 text-white"><Flame className="size-6" /></span></div>
           <p className="mt-4 text-sm leading-6 text-slate-400">Your streak is calculated from completed tasks and AirGPT study conversations—not a decorative counter.</p>
           <button type="button" onClick={onContinueStudy} className="secondary-action mt-5 w-full">Keep the streak alive</button>
         </section>
 
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="weekly-title">
-          <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-orange-300">Weekly progress</p><h3 id="weekly-title" className="mt-1 font-semibold">{weeklyActions} focused actions</h3></div><TrendingUp className="size-5 text-emerald-300" /></div>
+          <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Weekly progress</p><h3 id="weekly-title" className="mt-1 font-semibold">{weeklyActions} focused actions</h3></div><TrendingUp className="size-5 text-emerald-300" /></div>
           <div className="mt-6 flex h-36 items-end gap-3">
             {activity.map((item) => (
-              <div key={item.date} className="flex h-full flex-1 flex-col items-center justify-end gap-2"><span className="text-[10px] font-medium text-orange-200">{item.value || ''}</span><div className="w-full rounded-t-xl bg-gradient-to-t from-orange-600/70 to-orange-300 transition-all" style={{ height: `${Math.max(8, (item.value / maxActivity) * 100)}%` }} /><span className="text-[10px] text-slate-500">{item.label}</span></div>
+              <div key={item.date} className="flex h-full flex-1 flex-col items-center justify-end gap-2"><span className="text-[10px] font-medium text-zinc-300">{item.value || ''}</span><div className="w-full rounded-t-xl bg-gradient-to-t from-zinc-500/70 to-white transition-all" style={{ height: `${Math.max(8, (item.value / maxActivity) * 100)}%` }} /><span className="text-[10px] text-slate-500">{item.label}</span></div>
             ))}
           </div>
         </section>
@@ -528,11 +528,11 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
       </section>
 
       <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="recent-title">
-        <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-orange-300">Pick up where you left off</p><h3 id="recent-title" className="mt-1 font-semibold">Recent conversations</h3></div><MessageSquareText className="size-5 text-orange-200" /></div>
+        <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Pick up where you left off</p><h3 id="recent-title" className="mt-1 font-semibold">Recent conversations</h3></div><MessageSquareText className="size-5 text-zinc-300" /></div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {recentThreads.length > 0 ? recentThreads.map((thread) => {
             const preview = thread.messages.find((message) => message.role === 'user')?.content ?? 'Continue this AirGPT conversation.'
-            return <button key={thread.id} type="button" onClick={onContinueStudy} className="rounded-2xl border border-white/8 bg-white/[0.035] p-4 text-left transition hover:border-orange-300/20 hover:bg-white/[0.065]"><div className="flex items-start gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-orange-400/10 text-orange-200"><MessageSquareText className="size-4" /></span><div className="min-w-0"><p className="truncate text-sm font-medium text-white">{thread.title}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{preview}</p><p className="mt-2 flex items-center gap-1 text-[10px] text-slate-600"><Clock3 className="size-3" />{parseDate(thread.updatedAt)?.toLocaleDateString([], { day: 'numeric', month: 'short' }) ?? 'Recently'}</p></div></div></button>
+            return <button key={thread.id} type="button" onClick={onContinueStudy} className="rounded-2xl border border-white/8 bg-white/[0.035] p-4 text-left transition hover:border-white/20 hover:bg-white/[0.065]"><div className="flex items-start gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white"><MessageSquareText className="size-4" /></span><div className="min-w-0"><p className="truncate text-sm font-medium text-white">{thread.title}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{preview}</p><p className="mt-2 flex items-center gap-1 text-[10px] text-slate-600"><Clock3 className="size-3" />{parseDate(thread.updatedAt)?.toLocaleDateString([], { day: 'numeric', month: 'short' }) ?? 'Recently'}</p></div></div></button>
           }) : <div className="md:col-span-2 rounded-2xl border border-dashed border-white/10 p-5 text-sm text-slate-400">Your recent AirGPT conversations will appear here automatically.</div>}
         </div>
         <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={onContinueStudy} className="primary-action">Continue studying <ArrowRight className="size-4" /></button><button type="button" onClick={() => onNavigate('Calendar')} className="secondary-action"><CalendarDays className="size-4" />Open calendar</button></div>

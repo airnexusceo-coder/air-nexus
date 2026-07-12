@@ -1,14 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { Bell, Check, Coins, Copy, Crown, Link2, Mail, Settings, ShieldCheck, Sparkles, UserRound, Volume2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Bell, Coins, ShieldCheck, Sparkles, UserRound, Volume2 } from 'lucide-react'
 import { AppSidebar } from '@/components/app-sidebar'
 import { ContextPanel } from '@/components/context-panel'
 import { Workspace } from '@/components/workspace'
 import { MobileBottomNav } from '@/components/mobile-bottom-nav'
 import { Modal } from '@/components/ui/modal'
 import { cn } from '@/lib/utils'
-import { formatPlanExpiry, PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
+import { formatPlanExpiry, PLAN_DETAILS, SECTION_PLAN_REQUIREMENTS, type NexusPlan } from '@/lib/plans'
 import type { AuthSession } from '@/lib/auth/session'
 import {
   canRedeem,
@@ -21,8 +21,9 @@ import {
   type NexusRewardsState,
 } from '@/lib/nexus-points'
 import { getMotivationStats, loadMotivationState, recordMotivationActivity, type MotivationCelebration } from '@/lib/motivation'
+import { avatarGradientFor, getCosmetic, type CosmeticCategory } from '@/lib/cosmetics'
 
-export type AppDialog = 'upgrade' | 'upgrade-required' | 'insufficient-points' | 'profile' | 'share' | 'history' | null
+export type AppDialog = 'upgrade-required' | 'insufficient-points' | 'profile' | null
 export type NoticeTone = 'success' | 'info' | 'warning'
 
 type LocalUserProfile = {
@@ -56,11 +57,6 @@ type StoredUserProfile = LocalUserProfile & {
 
 const PROFILE_STORAGE_KEY = 'airnexus-google-profile'
 const STREAK_REWARD_STORAGE_KEY = 'airnexus-streak-reward-7'
-const historyItems = [
-  { id: 1, label: 'Auto-save', detail: 'Updated launch milestones', time: '2 min ago' },
-  { id: 2, label: 'Parth Nair', detail: 'Edited the executive summary', time: '18 min ago' },
-  { id: 3, label: 'Elena M.', detail: 'Added enterprise LOI targets', time: 'Yesterday' },
-]
 
 type AirGPTAppProps = {
   authUser: AuthSession
@@ -73,21 +69,22 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const streakStorageKey = `${STREAK_REWARD_STORAGE_KEY}:${authUser.id}`
   const [activeSection, setActiveSection] = useState('Documents')
   const [mainChatOpen, setMainChatOpen] = useState(false)
-  const [activeRoom, setActiveRoom] = useState('Product Launch Q4')
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
+  const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<AppDialog>(null)
   const [plan, setPlan] = useState<NexusPlan>('Free')
-  const [selectedPlan, setSelectedPlan] = useState<NexusPlan>('Plus')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const [contextCollapsed, setContextCollapsed] = useState(false)
   const [notices, setNotices] = useState<Array<{ id: number; message: string; tone: NoticeTone }>>([])
-  const [inviteEmail, setInviteEmail] = useState('')
   const [profileName, setProfileName] = useState(authUser.name)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
   const [focusMode, setFocusMode] = useState(false)
   const [nexusPoints, setNexusPoints] = useState(0)
   const [redeemedRewards, setRedeemedRewards] = useState<string[]>([])
+  const [equippedAvatar, setEquippedAvatar] = useState<string | null>(null)
+  const [equippedBadge, setEquippedBadge] = useState<string | null>(null)
   const [planExpiry, setPlanExpiry] = useState<string | null>(null)
   const [pointsShortfall, setPointsShortfall] = useState(0)
   const [autoSpeak, setAutoSpeak] = useState(false)
@@ -101,6 +98,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [connectionCheck, setConnectionCheck] = useState<SchoolConnectionCheck | null>(null)
   const [connectionChecking, setConnectionChecking] = useState(false)
   const [motivationCelebration, setMotivationCelebration] = useState<MotivationCelebration | null>(null)
+  const [hasStripeSubscription, setHasStripeSubscription] = useState(false)
+  const [billingBusy, setBillingBusy] = useState(false)
 
 
   useEffect(() => {
@@ -136,10 +135,11 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       const shouldAwardDaily = stored?.lastDailyLogin !== today
 
       setPlan(nextPlan)
-      setSelectedPlan(nextPlan)
       setPlanExpiry(expired ? null : savedExpiry)
       setRedeemedRewards(stored?.redeemedRewards ?? [])
       setRewardedActions(stored?.rewardedActions ?? [])
+      setEquippedAvatar(stored?.equippedAvatar ?? null)
+      setEquippedBadge(stored?.equippedBadge ?? null)
       setLastDailyLogin(today)
       setNexusPoints(startingPoints + (shouldAwardDaily ? DAILY_LOGIN_REWARD : 0))
       setTransactions([
@@ -161,9 +161,11 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       transactions,
       rewardedActions,
       lastDailyLogin,
+      equippedAvatar,
+      equippedBadge,
     }
     window.localStorage.setItem(rewardsStorageKey, JSON.stringify(state))
-  }, [lastDailyLogin, nexusPoints, plan, planExpiry, redeemedRewards, rewardedActions, rewardsHydrated, rewardsStorageKey, transactions])
+  }, [equippedAvatar, equippedBadge, lastDailyLogin, nexusPoints, plan, planExpiry, redeemedRewards, rewardedActions, rewardsHydrated, rewardsStorageKey, transactions])
 
   useEffect(() => {
     if (!profileHydrated) return
@@ -185,8 +187,93 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       setNotices((current) => current.filter((notice) => notice.id !== id))
     }, 3200)
   }, [])
+
+  const fetchBillingStatus = useCallback(async () => {
+    const response = await fetch('/api/billing/status', { credentials: 'include', cache: 'no-store' })
+    if (!response.ok) return
+    const data = (await response.json()) as { plan: NexusPlan; planExpiresAt: string | null; hasActiveSubscription: boolean }
+    setHasStripeSubscription(data.hasActiveSubscription)
+    // A real Stripe subscription always wins over the local plan (which may
+    // reflect a Nexus-Points redemption, or a stale/tampered local value).
+    // No active subscription just means "nothing to override with" — it
+    // does not downgrade a points-purchased plan back to Free.
+    if (data.hasActiveSubscription) {
+      setPlan(data.plan)
+      setPlanExpiry(data.planExpiresAt)
+    }
+  }, [])
+
+  useEffect(() => {
+    let refetchId: number | null = null
+    const timeoutId = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search)
+      const billingResult = params.get('billing')
+      if (billingResult === 'success') {
+        notify('Subscription activated — thank you!', 'success')
+        // The Stripe webhook that grants the plan usually lands seconds after
+        // the redirect — the immediate fetch below often still reads the
+        // pre-purchase state, so check again once the webhook has had time.
+        refetchId = window.setTimeout(() => void fetchBillingStatus(), 5000)
+      } else if (billingResult === 'cancel') {
+        notify('Checkout was cancelled — no charge was made.', 'info')
+      }
+      if (billingResult) {
+        params.delete('billing')
+        const query = params.toString()
+        window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash)
+      }
+      void fetchBillingStatus()
+    }, 0)
+    return () => {
+      window.clearTimeout(timeoutId)
+      if (refetchId != null) window.clearTimeout(refetchId)
+    }
+  }, [fetchBillingStatus, notify])
+
+  const openBillingPortal = async () => {
+    setBillingBusy(true)
+    try {
+      const response = await fetch('/api/billing/portal', { method: 'POST', credentials: 'include' })
+      const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!response.ok || !data.url) {
+        notify(data.error ?? 'Could not open the billing portal.', 'warning')
+        return
+      }
+      window.location.href = data.url
+    } catch {
+      notify('Could not reach the billing service.', 'warning')
+    } finally {
+      setBillingBusy(false)
+    }
+  }
+
+  const lastSyncedNameRef = useRef(authUser.name)
+  const syncDisplayName = useCallback(() => {
+    const trimmed = profileName.trim()
+    if (!trimmed || trimmed === lastSyncedNameRef.current) return
+    lastSyncedNameRef.current = trimmed
+    fetch('/api/profile', {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: trimmed }),
+    }).catch(() => undefined)
+  }, [profileName])
   const recordStudyActivity = useCallback((activity: { id: string; xp: number; description: string; room?: string }) => {
     const result = recordMotivationActivity(authUser.id, activity)
+    if (result.recorded) {
+      const stats = getMotivationStats(result.state)
+      fetch('/api/profile/stats-sync', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lifetimeXp: result.state.lifetimeXp,
+          currentStreakDays: stats.currentStreak,
+          longestStreakDays: stats.longestStreak,
+        }),
+      }).catch(() => undefined)
+    }
     if (!result.celebration) return
     setMotivationCelebration(result.celebration)
     window.setTimeout(() => {
@@ -197,7 +284,6 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
 
   const requestUpgrade = (feature: string, requiredPlan: Exclude<NexusPlan, 'Free'>) => {
     setUpgradeRequirement({ feature, plan: requiredPlan })
-    setSelectedPlan(requiredPlan)
     setDialog('upgrade-required')
     setSidebarOpen(false)
   }
@@ -208,7 +294,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       setSidebarOpen(false)
       return
     }
-    const requiredPlan = section === 'Analytics' ? 'Plus' : section === 'Integrations' ? 'Premium' : null
+    const requiredPlan = SECTION_PLAN_REQUIREMENTS[section] ?? null
     const rank = { Free: 0, Plus: 1, Premium: 2 } as const
     if (requiredPlan && rank[plan] < rank[requiredPlan]) {
       requestUpgrade(section, requiredPlan)
@@ -239,51 +325,84 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     setContextOpen(true)
   }
 
-  const copyShareLink = async () => {
-    try {
-      await navigator.clipboard.writeText('https://nexuspoint.local/share/q4-product-launch')
-      notify('Workspace link copied', 'success')
-    } catch {
-      notify('Clipboard access is unavailable in this browser', 'warning')
-    }
-  }
-
-  const sendInvite = () => {
-    const email = inviteEmail.trim()
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      notify('Enter a valid email address', 'warning')
+  /** For a Nexus-Points-purchased plan (or already Free) this is purely local, same as it always was. For a real Stripe subscriber, flipping local state alone previously left the subscription live — Stripe kept billing them and the next billing-status refresh silently reverted the change back to their paid plan. Now it actually cancels the subscription first. */
+  const selectFreePlan = async () => {
+    if (hasStripeSubscription) {
+      if (billingBusy) return
+      setBillingBusy(true)
+      try {
+        const response = await fetch('/api/billing/cancel', { method: 'POST', credentials: 'include' })
+        const data = (await response.json().catch(() => ({}))) as { plan?: NexusPlan; hasActiveSubscription?: boolean; error?: string }
+        if (!response.ok || !data.plan) {
+          notify(data.error ?? 'Could not cancel your subscription.', 'warning')
+          return
+        }
+        setPlan(data.plan)
+        setPlanExpiry(null)
+        setHasStripeSubscription(Boolean(data.hasActiveSubscription))
+        setDialog(null)
+        notify('Subscription cancelled — Free plan is now active', 'success')
+      } catch {
+        notify('Could not reach the billing service.', 'warning')
+      } finally {
+        setBillingBusy(false)
+      }
       return
     }
-    notify('Invitation prepared for ' + email, 'success')
-    setInviteEmail('')
-  }
-
-  const selectFreePlan = () => {
     setPlan('Free')
-    setSelectedPlan('Free')
     setPlanExpiry(null)
     setDialog(null)
     notify('Free plan is now active', 'success')
   }
 
-  const activatePaidPlan = (nextPlan: Exclude<NexusPlan, 'Free'>, payment: 'card' | 'points') => {
-    const expiry = new Date()
-    expiry.setDate(expiry.getDate() + 30)
-    const expiryIso = expiry.toISOString()
-    setPlan(nextPlan)
-    setSelectedPlan(nextPlan)
-    setPlanExpiry(expiryIso)
-    setDialog(null)
-    notify(
-      nextPlan + ' activated with ' + (payment === 'points' ? 'Nexus Points' : 'card') + ' until ' + formatPlanExpiry(expiryIso),
-      'success',
-    )
+  /** Real charge — creates a Stripe Checkout Session and redirects. profiles.plan only ever changes from here via the Stripe webhook (lib/billing/customer.ts), never by this function directly. */
+  const purchasePlanWithCard = async (nextPlan: Exclude<NexusPlan, 'Free'>) => {
+    if (billingBusy) return
+    setBillingBusy(true)
+    try {
+      // Already have a live Stripe subscription — switch it in place (updates
+      // price + metadata.plan server-side) instead of starting a second
+      // Checkout Session, which /api/billing/checkout would reject with 409.
+      if (hasStripeSubscription) {
+        const response = await fetch('/api/billing/change-plan', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: nextPlan }),
+        })
+        const data = (await response.json().catch(() => ({}))) as { plan?: NexusPlan; planExpiresAt?: string | null; hasActiveSubscription?: boolean; error?: string }
+        if (!response.ok || !data.plan) {
+          notify(data.error ?? 'Could not change your plan.', 'warning')
+          return
+        }
+        setPlan(data.plan)
+        setPlanExpiry(data.planExpiresAt ?? null)
+        setHasStripeSubscription(Boolean(data.hasActiveSubscription))
+        setDialog(null)
+        notify(`Switched to ${data.plan}`, 'success')
+        return
+      }
+
+      const response = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: nextPlan }),
+      })
+      const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!response.ok || !data.url) {
+        notify(data.error ?? 'Could not start checkout.', 'warning')
+        return
+      }
+      window.location.href = data.url
+    } catch {
+      notify('Could not reach the billing service.', 'warning')
+    } finally {
+      setBillingBusy(false)
+    }
   }
 
-  const purchasePlanWithCard = (nextPlan: Exclude<NexusPlan, 'Free'>) => {
-    activatePaidPlan(nextPlan, 'card')
-  }
-
+  /** Spends the app's own in-app currency, not real money — unrelated to Stripe. Activates locally the same way it always has; a real Stripe subscription (if the user has one) always takes priority over this on the next billing-status refresh. */
   const purchasePlanWithPoints = (nextPlan: Exclude<NexusPlan, 'Free'>) => {
     const cost = PLAN_DETAILS[nextPlan].points
     if (!canRedeem(nexusPoints, cost)) {
@@ -291,14 +410,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       setDialog('insufficient-points')
       return
     }
+    const expiry = new Date()
+    expiry.setDate(expiry.getDate() + 30)
+    const expiryIso = expiry.toISOString()
     setNexusPoints((points) => points - cost)
     setTransactions((current) => [createTransaction('spent', cost, `${nextPlan} plan · 30 days`), ...current])
-    activatePaidPlan(nextPlan, 'points')
-  }
-
-  const completeUpgrade = () => {
-    if (selectedPlan === 'Free') selectFreePlan()
-    else purchasePlanWithCard(selectedPlan)
+    setPlan(nextPlan)
+    setPlanExpiry(expiryIso)
+    setDialog(null)
+    notify(`${nextPlan} activated with Nexus Points until ${formatPlanExpiry(expiryIso)}`, 'success')
   }
 
   const signOut = () => {
@@ -364,35 +484,49 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     setNexusPoints((points) => points - reward.cost)
     setTransactions((current) => [createTransaction('spent', reward.cost, reward.name), ...current])
     setRedeemedRewards((current) => [...current, reward.id])
+    const cosmetic = getCosmetic(reward.id)
+    if (cosmetic?.category === 'avatar') setEquippedAvatar(reward.id)
+    else if (cosmetic?.category === 'badge') setEquippedBadge(reward.id)
     notify(reward.name + ' unlocked', 'success')
   }
+
+  const equipCosmetic = (category: CosmeticCategory, id: string | null) => {
+    if (id && !redeemedRewards.includes(id)) return
+    if (category === 'avatar') setEquippedAvatar(id)
+    else setEquippedBadge(id)
+  }
+
+  const equippedBadgeCosmetic = getCosmetic(equippedBadge)
 
   return (
     <div className={cn('relative flex h-[var(--app-height,100dvh)] w-full overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] lg:h-dvh lg:pb-0', focusMode && 'focus-mode')}>
       <AppSidebar
         active={activeSection}
-        activeRoom={activeRoom}
+        activeRoomId={activeRoomId}
         plan={plan}
         nexusPoints={nexusPoints}
         profileName={profileName}
+        motivationUserId={authUser.id}
+        avatarGradient={avatarGradientFor(equippedAvatar)}
+        badge={getCosmetic(equippedBadge)}
         mobileOpen={sidebarOpen}
         desktopCollapsed={sidebarCollapsed}
         onCloseMobile={() => setSidebarOpen(false)}
         onToggleDesktopCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onNavigate={navigate}
-        onSelectRoom={(room) => {
-          setActiveRoom(room)
+        onSelectRoom={(roomId) => {
+          setActiveRoomId(roomId)
           setActiveSection('Collaboration Rooms')
           setMainChatOpen(false)
           setSidebarOpen(false)
-          notify('Opened ' + room)
+          openContextPanel()
         }}
         onCreateRoom={() => {
           setActiveSection('Collaboration Rooms')
           setMainChatOpen(false)
           notify('New room composer opened', 'success')
         }}
-        onUpgrade={() => setDialog('upgrade')}
+        onUpgrade={() => navigate('Marketplace')}
         onProfile={() => setDialog('profile')}
         onBackToWebsite={() => window.location.assign('/')}
       />
@@ -402,10 +536,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         mainChatOpen={mainChatOpen}
         onOpenMainChat={openMainChat}
         onCloseMainChat={closeMainChat}
+        activeDocId={activeDocId}
+        onOpenDoc={setActiveDocId}
         onOpenSidebar={openSidebarPanel}
         onOpenContext={openContextPanel}
+        onOpenRoom={(roomId) => {
+          setActiveRoomId(roomId)
+          openContextPanel()
+        }}
         onNavigate={navigate}
-        onOpenDialog={setDialog}
         notify={notify}
         profileName={profileName}
         motivationUserId={authUser.id}
@@ -414,11 +553,14 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         planExpiry={planExpiry}
         autoSpeak={autoSpeak}
         redeemedRewards={redeemedRewards}
+        equippedAvatar={equippedAvatar}
+        equippedBadge={equippedBadge}
         transactions={transactions}
         onSelectFree={selectFreePlan}
         onPayWithCard={purchasePlanWithCard}
         onPayWithPoints={purchasePlanWithPoints}
         onRedeemReward={redeemReward}
+        onEquipCosmetic={equipCosmetic}
         onRequestUpgrade={requestUpgrade}
         streakRewardClaimed={streakRewardClaimed}
         onClaimStreakReward={claimStreakReward}
@@ -427,7 +569,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       />
 
       <ContextPanel
-        activeRoom={activeRoom}
+        roomId={activeRoomId}
+        docId={activeDocId}
         mobileOpen={contextOpen}
         desktopCollapsed={contextCollapsed}
         onCloseMobile={() => setContextOpen(false)}
@@ -463,36 +606,6 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         />
       )}
 
-      <Modal open={dialog === 'upgrade'} title="Choose your AirGPT plan" description="Select the plan for this workspace." onClose={() => setDialog(null)} className="max-w-2xl">
-        <div className="grid gap-3 sm:grid-cols-3">
-          {(['Free', 'Plus', 'Premium'] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              aria-pressed={selectedPlan === option}
-              onClick={() => setSelectedPlan(option)}
-              className={cn(
-                'rounded-2xl border p-4 text-left transition',
-                selectedPlan === option
-                  ? 'border-orange-300/50 bg-orange-500/15 shadow-lg shadow-orange-500/10'
-                  : 'border-white/10 bg-white/5 hover:bg-white/10',
-              )}
-            >
-              <div className="flex items-center justify-between">
-                {option === 'Premium' ? <Crown className="size-5 text-amber-300" /> : option === 'Plus' ? <Sparkles className="size-5 text-orange-300" /> : <UserRound className="size-5 text-slate-300" />}
-                {selectedPlan === option && <Check className="size-4 text-emerald-300" />}
-              </div>
-              <p className="mt-4 font-semibold">{option}</p>
-              <p className="mt-1 text-xs text-muted-foreground">{PLAN_DETAILS[option].price}</p>
-              <p className="mt-2 text-[11px] leading-4 text-slate-500">{PLAN_DETAILS[option].summary}</p>
-            </button>
-          ))}
-        </div>
-        <button type="button" onClick={completeUpgrade} className="primary-action mt-5 w-full">
-          {selectedPlan === plan ? 'Keep ' + plan : selectedPlan === 'Premium' ? 'Get Premium' : selectedPlan === 'Plus' ? 'Upgrade to Plus' : 'Switch to Free'}
-        </button>
-      </Modal>
-
       <Modal open={dialog === 'upgrade-required'} title="Upgrade Required" description={upgradeRequirement.feature + ' is available on ' + upgradeRequirement.plan + '.'} onClose={() => setDialog(null)}>
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button type="button" onClick={() => setDialog(null)} className="secondary-action">Maybe Later</button>
@@ -517,30 +630,33 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         </div>
         <button type="button" onClick={() => setDialog(null)} className="secondary-action mt-4 w-full">Back to Marketplace</button>
       </Modal>
-      <Modal open={dialog === 'profile'} title="Profile & workspace settings" description="Your account, plan, rewards, and preferences are saved on this device." onClose={() => setDialog(null)}>
+      <Modal open={dialog === 'profile'} title="Profile & workspace settings" description="Your account, plan, rewards, and preferences are saved on this device." onClose={() => { setDialog(null); syncDisplayName() }}>
         <label className="form-label" htmlFor="profile-name">Display name</label>
         <div className="mt-2 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-          <UserRound className="size-5 text-orange-300" />
+          <UserRound className="size-5 text-zinc-300" />
           <input id="profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
         </div>
         <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-          <span className="flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-orange-400 text-sm font-bold text-white">{profileName.slice(0, 1).toUpperCase()}</span>
+          <span className={cn('flex size-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-sm font-bold text-white', avatarGradientFor(equippedAvatar))}>{profileName.slice(0, 1).toUpperCase()}</span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{profileName}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="truncate text-sm font-medium">{profileName}</p>
+              {equippedBadgeCosmetic && <span className={cn('shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide', equippedBadgeCosmetic.badgeClassName)}>{equippedBadgeCosmetic.badgeLabel}</span>}
+            </div>
             <p className="truncate text-xs text-slate-500">{authUser.email}</p>
-            <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-orange-300">{authUser.role === 'owner' ? 'Owner account' : 'Member account'}</p>
+            <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-300">{authUser.role === 'owner' ? 'Owner account' : 'Member account'}</p>
           </div>
           <button type="button" onClick={signOut} className="rounded-lg px-2.5 py-1.5 text-xs text-slate-400 hover:bg-white/8 hover:text-white">Sign out</button>
         </div>
-        <div className="mt-4 rounded-2xl border border-orange-300/15 bg-orange-400/[0.06] p-4">
+        <div className="mt-4 rounded-2xl border border-white/15 bg-white/[0.06] p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Current plan</p>
-              <p className="mt-1 font-semibold text-orange-100">{plan} · {PLAN_DETAILS[plan].price}</p>
+              <p className="mt-1 font-semibold text-white">{plan} · {PLAN_DETAILS[plan].price}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Current Nexus Points</p>
-              <p className="mt-1 flex items-center justify-end gap-1.5 text-sm font-semibold text-amber-200"><Coins className="size-4" />{nexusPoints.toLocaleString()}</p>
+              <p className="mt-1 flex items-center justify-end gap-1.5 text-sm font-semibold text-white"><Coins className="size-4" />{nexusPoints.toLocaleString()}</p>
             </div>
           </div>
           <div className="mt-4 flex items-center justify-between text-[10px] text-slate-500">
@@ -548,23 +664,30 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
             <span>{nexusPoints.toLocaleString()} / 5,000</span>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/8" role="progressbar" aria-label="Nexus Points progress" aria-valuemin={0} aria-valuemax={5000} aria-valuenow={Math.min(nexusPoints, 5000)}>
-            <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-orange-300" style={{ width: Math.min(100, nexusPoints / 50) + '%' }} />
+            <div className="h-full rounded-full bg-gradient-to-r from-zinc-300 to-white" style={{ width: Math.min(100, nexusPoints / 50) + '%' }} />
           </div>
           <div className="mt-3 flex items-center justify-between rounded-xl bg-white/[0.035] px-3 py-2 text-xs">
             <span className="text-slate-500">Plan expiry</span>
             <span className="font-medium text-slate-200">{formatPlanExpiry(planExpiry)}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setDialog(null)
-              setActiveSection('Marketplace')
-              setMainChatOpen(false)
-            }}
-            className="secondary-action mt-4 w-full"
-          >
-            {plan === 'Premium' ? 'View Marketplace' : 'Upgrade plan'}
-          </button>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                setDialog(null)
+                setActiveSection('Marketplace')
+                setMainChatOpen(false)
+              }}
+              className="secondary-action flex-1"
+            >
+              {plan === 'Premium' ? 'View Marketplace' : 'Upgrade plan'}
+            </button>
+            {hasStripeSubscription && (
+              <button type="button" disabled={billingBusy} onClick={() => void openBillingPortal()} className="secondary-action flex-1 disabled:cursor-wait disabled:opacity-60">
+                {billingBusy ? 'Opening…' : 'Manage billing'}
+              </button>
+            )}
+          </div>
         </div>
         <div className="mt-5 space-y-3">
           <SettingToggle icon={Bell} label="Workspace notifications" checked={notificationsEnabled} onChange={setNotificationsEnabled} />
@@ -607,62 +730,11 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         </button>
       </Modal>
 
-      <Modal open={dialog === 'share'} title="Share strategy brief" description="Invite collaborators or copy a workspace link." onClose={() => setDialog(null)}>
-        <div className="flex gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3">
-            <Mail className="size-4 shrink-0 text-muted-foreground" />
-            <input
-              aria-label="Collaborator email"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') sendInvite()
-              }}
-              placeholder="name@example.com"
-              className="min-w-0 flex-1 bg-transparent py-3 text-sm outline-none"
-            />
-          </div>
-          <button type="button" onClick={sendInvite} className="primary-action px-4">Invite</button>
-        </div>
-        <div className="mt-4 flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-2">
-          <Link2 className="ml-2 size-4 shrink-0 text-orange-300" />
-          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">https://nexuspoint.local/share/q4-product-launch</span>
-          <button type="button" onClick={copyShareLink} aria-label="Copy workspace link" className="interactive-icon">
-            <Copy className="size-4" />
-          </button>
-        </div>
-      </Modal>
-
-      <Modal open={dialog === 'history'} title="Version history" description="Review recent saves and restore a snapshot." onClose={() => setDialog(null)}>
-        <div className="space-y-2">
-          {historyItems.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 rounded-2xl border border-white/8 bg-white/5 p-3">
-              <div className="flex size-9 items-center justify-center rounded-xl bg-orange-500/15 text-orange-200">
-                <Settings className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{item.label}</p>
-                <p className="truncate text-xs text-muted-foreground">{item.detail}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setDialog(null)
-                  notify('Restored snapshot from ' + item.time, 'success')
-                }}
-                className="rounded-lg px-2 py-1 text-xs text-orange-300 hover:bg-orange-300/10"
-              >
-                Restore
-              </button>
-            </div>
-          ))}
-        </div>
-      </Modal>
 
       {motivationCelebration && (
         <div role="status" className="pointer-events-none fixed left-1/2 top-5 z-[125] w-[min(92vw,380px)] -translate-x-1/2">
-          <div className="glass-strong animate-toast-in flex items-center gap-3 rounded-2xl border-orange-300/25 px-4 py-3 shadow-2xl shadow-orange-950/25">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-orange-400/15 text-orange-200"><Sparkles className="size-5" /></span>
+          <div className="glass-strong animate-toast-in flex items-center gap-3 rounded-2xl border-white/25 px-4 py-3 shadow-2xl shadow-black/25">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/15 text-white"><Sparkles className="size-5" /></span>
             <div><p className="text-sm font-semibold text-white">{motivationCelebration.title}</p><p className="mt-0.5 text-xs text-slate-400">{motivationCelebration.detail}</p></div>
           </div>
         </div>
@@ -711,11 +783,11 @@ function SettingToggle({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-white/8 bg-white/5 p-3">
-      <Icon className="size-4 text-orange-300" />
+      <Icon className="size-4 text-zinc-300" />
       <span className="flex-1 text-sm">{label}</span>
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="sr-only" />
-      <span aria-hidden="true" className={cn('flex h-6 w-11 items-center rounded-full p-0.5 transition', checked ? 'bg-orange-500' : 'bg-white/15')}>
-        <span className={cn('size-5 rounded-full bg-white shadow transition-transform', checked && 'translate-x-5')} />
+      <span aria-hidden="true" className={cn('flex h-6 w-11 items-center rounded-full p-0.5 transition', checked ? 'bg-white' : 'bg-white/15')}>
+        <span className={cn('size-5 rounded-full shadow transition-transform', checked ? 'translate-x-5 bg-black' : 'bg-white')} />
       </span>
     </label>
   )
