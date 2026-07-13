@@ -67,8 +67,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const profileStorageKey = `${PROFILE_STORAGE_KEY}:${authUser.id}`
   const rewardsStorageKey = `${NEXUS_REWARDS_STORAGE_KEY}:${authUser.id}`
   const streakStorageKey = `${STREAK_REWARD_STORAGE_KEY}:${authUser.id}`
-  const [activeSection, setActiveSection] = useState('Documents')
-  const [mainChatOpen, setMainChatOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState('AI Chat')
+  const [mainChatOpen, setMainChatOpen] = useState(true)
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<AppDialog>(null)

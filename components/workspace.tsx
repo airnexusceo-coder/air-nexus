@@ -435,7 +435,7 @@ export function Workspace({
     window.setTimeout(() => {
       setChatLandingVisible(false)
       setChatLandingExiting(false)
-    }, 260)
+    }, 620)
   }
 
   const startNewChat = () => {
