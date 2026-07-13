@@ -246,19 +246,6 @@ function parseChatHistory(value: string | null): ChatThread[] {
   }
 }
 
-function createChatThread(id = createId('chat'), messages = copyInitialMessages()): ChatThread {
-  const now = new Date().toISOString()
-  return {
-    id,
-    title: createChatTitle(messages),
-    messages,
-    createdAt: now,
-    updatedAt: now,
-    pinned: false,
-    favorite: false,
-  }
-}
-
 function sortChatThreads(threads: ChatThread[]) {
   return [...threads].sort((a, b) => Number(b.pinned) - Number(a.pinned) || Number(b.favorite) - Number(a.favorite) || b.updatedAt.localeCompare(a.updatedAt))
 }
@@ -359,24 +346,22 @@ export function Workspace({
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
+      // Loads history for the sidebar only — the active chat always starts
+      // fresh (see activeChatId/messages initial state) so entering AI Chat
+      // never silently resumes a previous conversation.
       const stored = parseChatHistory(window.localStorage.getItem(CHAT_HISTORY_STORAGE_KEY))
-      if (stored.length > 0) {
-        setChatHistory(stored)
-        setActiveChatId(stored[0].id)
-        setMessages(stored[0].messages)
-      } else {
-        const starterThread = createChatThread(activeChatId, messages)
-        setChatHistory([starterThread])
-      }
+      setChatHistory(stored)
       setChatHistoryHydrated(true)
     }, 0)
     return () => window.clearTimeout(timeoutId)
-    // Run only once: this restores the most recent local chat history.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
     if (!chatHistoryHydrated) return
+    // Never persist a chat until it has a real message — otherwise every
+    // auto-created "new chat" would show up as a phantom empty entry in
+    // history the moment it's created, before the user has typed anything.
+    if (messages.length === 0) return
     const timeoutId = window.setTimeout(() => {
       const now = new Date().toISOString()
       setChatHistory((current) => {
@@ -821,7 +806,6 @@ export function Workspace({
             draft={draft}
             onDraftChange={setDraft}
             isExiting={chatLandingExiting}
-            onFocusInput={beginChatTransition}
             onSubmit={() => { beginChatTransition(); void sendMessage() }}
             onOpenSidebar={onOpenSidebar}
             onOpenContext={onOpenContext}
@@ -886,7 +870,6 @@ function ChatLanding({
   draft,
   onDraftChange,
   isExiting,
-  onFocusInput,
   onSubmit,
   onOpenSidebar,
   onOpenContext,
@@ -895,7 +878,6 @@ function ChatLanding({
   draft: string
   onDraftChange: (value: string) => void
   isExiting: boolean
-  onFocusInput: () => void
   onSubmit: () => void
   onOpenSidebar: () => void
   onOpenContext: () => void
@@ -925,8 +907,6 @@ function ChatLanding({
             <input
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
-              onFocus={onFocusInput}
-              onMouseDown={onFocusInput}
               placeholder="Ask AirGPT anything…"
               aria-label="Ask AirGPT"
               className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-500"
