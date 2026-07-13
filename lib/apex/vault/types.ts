@@ -58,6 +58,8 @@ export type ApexTarget = {
   status: ApexTargetStatus
   breachesUsedInWindow: number
   breachesMaxInWindow: number
+  targetType?: 'player' | 'bot'
+  difficulty?: 'Training' | 'Standard' | 'Elite'
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +113,7 @@ export type BreachStateDTO = {
   xpAwarded: number
   rewardEnergy: number
   expiresAt: string | null
+  practice?: boolean
 }
 
 export type BreachHistoryEntry = {

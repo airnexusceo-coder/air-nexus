@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, Check } from 'lucide-react'
+import { isAdvancedStrengthDefence } from '@/lib/apex/vault/technology-costs'
 import type { TechnologyDefinition, TechnologyType } from '@/lib/apex/vault/types'
 import { cn } from '@/lib/utils'
 import { readApexError } from './apex-fetch'
@@ -16,10 +17,9 @@ type SystemsLabProps = {
 }
 
 /**
- * Technology catalog + acquisition. Ownership itself is recorded server-side
- * (trusted). The Nexus Points cost check reuses the app's existing
- * `onRedeemReward` client-trusted spend flow — see APEX_HANDOFF.md ("Nexus
- * Points integration") for why: AirGPT has no server NP ledger anywhere yet.
+ * Technology catalog + acquisition. Basic defence setup is included and costs
+ * Core Energy only when installed. Nexus Points unlock advanced-strength
+ * defence systems and breach tools.
  */
 export function SystemsLab({ notify, nexusPoints, onRedeemReward, onBack }: SystemsLabProps) {
   const [tab, setTab] = useState<TechnologyType>('defence')
@@ -39,8 +39,9 @@ export function SystemsLab({ notify, nexusPoints, onRedeemReward, onBack }: Syst
   }, [load])
 
   const acquire = async (tech: TechnologyDefinition) => {
-    if (nexusPoints < tech.npAcquisitionCost) {
-      notify('You need more Nexus Points for this technology.', 'warning')
+    const cost = Math.max(0, tech.npAcquisitionCost)
+    if (cost > 0 && nexusPoints < cost) {
+      notify('You need more Nexus Points for this advanced technology.', 'warning')
       return
     }
     setBusyId(tech.id)
@@ -55,7 +56,8 @@ export function SystemsLab({ notify, nexusPoints, onRedeemReward, onBack }: Syst
         notify(await readApexError(response, 'Could not acquire technology.'), 'warning')
         return
       }
-      onRedeemReward({ id: tech.id, name: tech.name, cost: tech.npAcquisitionCost })
+      if (cost > 0) onRedeemReward({ id: tech.id, name: tech.name, cost })
+      else notify(`${tech.name} is included in your normal Vault setup.`, 'success')
       setTechnologies((current) => current?.map((item) => (item.id === tech.id ? { ...item, owned: true } : item)) ?? current)
     } catch {
       notify('Network error. Please try again.', 'warning')
@@ -74,7 +76,7 @@ export function SystemsLab({ notify, nexusPoints, onRedeemReward, onBack }: Syst
 
       <header>
         <h1 className="text-2xl font-semibold text-white">Systems Lab</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Use Nexus Points to acquire technology. Core Energy powers and maintains it once installed.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Basic defence setup is included. Nexus Points unlock only advanced-strength defences; breach tools can be unlocked without NP.</p>
       </header>
 
       <div className="flex gap-2">
@@ -83,37 +85,44 @@ export function SystemsLab({ notify, nexusPoints, onRedeemReward, onBack }: Syst
       </div>
 
       {!technologies ? (
-        <p className="text-sm text-muted-foreground">Loading catalog…</p>
+        <p className="text-sm text-muted-foreground">Loading catalog...</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {filtered.map((tech) => (
-            <article key={tech.id} className="glass flex flex-col gap-3 rounded-2xl p-4">
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="text-sm font-semibold text-white">{tech.name}</h3>
-                {tech.owned && <span className="flex items-center gap-1 rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/80"><Check className="size-3" /> Owned</span>}
-              </div>
-              <p className="text-xs leading-5 text-muted-foreground">{tech.description}</p>
-              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-white/70">
-                {tech.technologyType === 'defence' ? (
-                  <>
-                    <Field label="Capacity" value={String(tech.capacityCost)} />
-                    <Field label="Startup" value={`◇${tech.startupEnergyCost}`} />
-                    <Field label="Upkeep" value={`◇${tech.upkeepEnergyPerHour}/hr`} />
-                  </>
-                ) : (
-                  <Field label="Activation" value={`◇${tech.activationEnergyCost}`} />
-                )}
-              </dl>
-              <button
-                type="button"
-                disabled={tech.owned || busyId === tech.id}
-                onClick={() => void acquire(tech)}
-                className="primary-action mt-auto justify-center py-2 text-xs disabled:opacity-50"
-              >
-                {tech.owned ? 'Owned' : `Acquire · ✦ ${tech.npAcquisitionCost} NP`}
-              </button>
-            </article>
-          ))}
+          {filtered.map((tech) => {
+            const included = tech.technologyType === 'defence' && tech.npAcquisitionCost === 0
+            const advanced = tech.technologyType === 'defence' && isAdvancedStrengthDefence(tech.slug)
+            return (
+              <article key={tech.id} className="glass flex flex-col gap-3 rounded-2xl p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">{tech.name}</h3>
+                    {included ? <p className="mt-1 text-[10px] uppercase tracking-wide text-emerald-200/80">Normal setup</p> : advanced ? <p className="mt-1 text-[10px] uppercase tracking-wide text-amber-200/80">Advanced strength</p> : null}
+                  </div>
+                  {tech.owned && <span className="flex items-center gap-1 rounded-full border border-white/20 bg-white/5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/80"><Check className="size-3" /> {included ? 'Included' : 'Owned'}</span>}
+                </div>
+                <p className="text-xs leading-5 text-muted-foreground">{tech.description}</p>
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-white/70">
+                  {tech.technologyType === 'defence' ? (
+                    <>
+                      <Field label="Capacity" value={String(tech.capacityCost)} />
+                      <Field label="Startup" value={`CE ${tech.startupEnergyCost}`} />
+                      <Field label="Upkeep" value={`CE ${tech.upkeepEnergyPerHour}/hr`} />
+                    </>
+                  ) : (
+                    <Field label="Activation" value={`CE ${tech.activationEnergyCost}`} />
+                  )}
+                </dl>
+                <button
+                  type="button"
+                  disabled={tech.owned || busyId === tech.id}
+                  onClick={() => void acquire(tech)}
+                  className="primary-action mt-auto justify-center py-2 text-xs disabled:opacity-50"
+                >
+                  {tech.owned ? (included ? 'Included - install in Manage Vault' : 'Owned') : tech.npAcquisitionCost === 0 ? 'Unlock free' : `Acquire - ${tech.npAcquisitionCost} NP`}
+                </button>
+              </article>
+            )
+          })}
         </div>
       )}
     </div>

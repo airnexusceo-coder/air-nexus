@@ -57,13 +57,14 @@ export function ManageVault({ notify, onBack }: ManageVaultProps) {
         }
         if (successMessage) notify(successMessage, 'success')
         setOverview((await response.json()) as VaultOverview)
+        void load()
       } catch {
         notify('Network error. Please try again.', 'warning')
       } finally {
         setBusy(false)
       }
     },
-    [notify],
+    [load, notify],
   )
 
   const defenceAction = (body: Record<string, unknown>, successMessage?: string) =>
@@ -94,7 +95,9 @@ export function ManageVault({ notify, onBack }: ManageVaultProps) {
   const byOrder = [...overview.installedDefences].sort((a, b) => a.defenceOrder - b.defenceOrder)
   const byPriority = [...overview.installedDefences].sort((a, b) => a.energyPriority - b.energyPriority)
   const installedTechIds = new Set(overview.installedDefences.map((d) => d.technologyId))
-  const availableToInstall = technologies.filter((tech) => tech.technologyType === 'defence' && tech.owned && !installedTechIds.has(tech.id))
+  const defenceTechnologies = technologies.filter((tech) => tech.technologyType === 'defence' && !installedTechIds.has(tech.id))
+  const availableToInstall = defenceTechnologies.filter((tech) => tech.owned || tech.npAcquisitionCost === 0)
+  const lockedAdvanced = defenceTechnologies.filter((tech) => !tech.owned && tech.npAcquisitionCost > 0)
   const capacityRemaining = overview.defenceCapacityMax - overview.defenceCapacityUsed
 
   return (
@@ -102,20 +105,20 @@ export function ManageVault({ notify, onBack }: ManageVaultProps) {
       <BackLink onBack={onBack} />
       <header>
         <h1 className="text-2xl font-semibold text-white">Manage Vault</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Core Energy ◇ {overview.coreEnergy.toLocaleString()} · Capacity {overview.defenceCapacityUsed} / {overview.defenceCapacityMax}</p>
+        <p className="mt-1 text-sm text-muted-foreground">Core Energy {overview.coreEnergy.toLocaleString()} - Capacity {overview.defenceCapacityUsed} / {overview.defenceCapacityMax}</p>
       </header>
 
       <section className="glass rounded-3xl p-5">
         <h2 className="text-sm font-semibold text-white">Installed Defence Systems</h2>
         {overview.installedDefences.length === 0 ? (
-          <p className="mt-3 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-muted-foreground">No defence systems installed. Acquire technology in the Systems Lab, then install it here.</p>
+          <p className="mt-3 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-muted-foreground">No defence systems installed. Install a normal setup system below using Core Energy only.</p>
         ) : (
           <ul className="mt-3 flex flex-col gap-2">
             {overview.installedDefences.map((defence) => (
               <li key={defence.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-white">{defence.name}</p>
-                  <p className="text-[11px] text-muted-foreground">Capacity {defence.capacityCost} · Upkeep ◇{defence.upkeepEnergyPerHour}/hr · {defence.isEnabled ? 'Active' : 'Offline'}</p>
+                  <p className="text-[11px] text-muted-foreground">Capacity {defence.capacityCost} - Upkeep CE {defence.upkeepEnergyPerHour}/hr - {defence.isEnabled ? 'Active' : 'Offline'}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <button type="button" disabled={busy} onClick={() => void defenceAction({ action: defence.isEnabled ? 'deactivate' : 'activate', defenceId: defence.id }, defence.isEnabled ? undefined : `${defence.name} reactivated.`)} className="interactive-icon size-8" aria-label={defence.isEnabled ? `Deactivate ${defence.name}` : `Activate ${defence.name}`}>
@@ -133,23 +136,47 @@ export function ManageVault({ notify, onBack }: ManageVaultProps) {
 
       {availableToInstall.length > 0 && (
         <section className="glass rounded-3xl p-5">
-          <h2 className="text-sm font-semibold text-white">Owned, Not Installed</h2>
-          <p className="mt-1 text-xs text-muted-foreground">Capacity remaining {capacityRemaining} / {overview.defenceCapacityMax}. Acquire more technology in the Systems Lab.</p>
+          <h2 className="text-sm font-semibold text-white">Ready to Install</h2>
+          <p className="mt-1 text-xs text-muted-foreground">Capacity remaining {capacityRemaining} / {overview.defenceCapacityMax}. Normal setup systems spend Core Energy only; advanced unlocked systems can also be installed here.</p>
           <ul className="mt-3 flex flex-col gap-2">
-            {availableToInstall.map((tech) => (
+            {availableToInstall.map((tech) => {
+              const included = tech.npAcquisitionCost === 0
+              return (
+                <li key={tech.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-white">{tech.name}</p>
+                      <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/55">{included ? 'Core Energy only' : 'Unlocked advanced'}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Capacity {tech.capacityCost} - Startup CE {tech.startupEnergyCost} - Upkeep CE {tech.upkeepEnergyPerHour}/hr</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || tech.capacityCost > capacityRemaining}
+                    onClick={() => void defenceAction({ action: 'install', technologySlug: tech.slug }, `${tech.name} installed.`)}
+                    className="secondary-action shrink-0 px-3 py-1.5 text-xs disabled:opacity-40"
+                  >
+                    <PlusCircle className="size-3.5" /> Install
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {lockedAdvanced.length > 0 && (
+        <section className="glass rounded-3xl p-5">
+          <h2 className="text-sm font-semibold text-white">Advanced Systems Locked</h2>
+          <p className="mt-1 text-xs text-muted-foreground">These strength upgrades still require Nexus Points in the Systems Lab before installation.</p>
+          <ul className="mt-3 flex flex-col gap-2">
+            {lockedAdvanced.map((tech) => (
               <li key={tech.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-white">{tech.name}</p>
-                  <p className="text-[11px] text-muted-foreground">Capacity {tech.capacityCost} · Startup ◇{tech.startupEnergyCost} · Upkeep ◇{tech.upkeepEnergyPerHour}/hr</p>
+                  <p className="text-[11px] text-muted-foreground">Unlock cost {tech.npAcquisitionCost} NP - then Startup CE {tech.startupEnergyCost}</p>
                 </div>
-                <button
-                  type="button"
-                  disabled={busy || tech.capacityCost > capacityRemaining}
-                  onClick={() => void defenceAction({ action: 'install', technologySlug: tech.slug }, `${tech.name} installed.`)}
-                  className="secondary-action shrink-0 px-3 py-1.5 text-xs disabled:opacity-40"
-                >
-                  <PlusCircle className="size-3.5" /> Install
-                </button>
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Systems Lab</span>
               </li>
             ))}
           </ul>
@@ -165,11 +192,11 @@ export function ManageVault({ notify, onBack }: ManageVaultProps) {
 
       <section className="glass rounded-3xl p-5">
         <h2 className="text-sm font-semibold text-white">Repair Vault</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Integrity {overview.vaultIntegrity}% · ◇250 per 10% restored</p>
+        <p className="mt-1 text-xs text-muted-foreground">Integrity {overview.vaultIntegrity}% - CE 250 per 10% restored</p>
         <div className="mt-3 flex flex-wrap gap-2">
           {REPAIR_STEPS.map((percent) => (
             <button key={percent} type="button" disabled={busy || overview.vaultIntegrity >= 100} onClick={() => void repair(percent)} className="secondary-action px-4 py-1.5 text-xs">
-              +{percent}% · ◇{repairCostForPercent(percent)}
+              +{percent}% - CE {repairCostForPercent(percent)}
             </button>
           ))}
         </div>

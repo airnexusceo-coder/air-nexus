@@ -58,6 +58,9 @@ export function FindATarget({ notify, onBack }: FindATargetProps) {
     )
   }
 
+  const playerTargets = targets?.filter((target) => target.targetType !== 'bot') ?? []
+  const botTargets = targets?.filter((target) => target.targetType === 'bot') ?? []
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <button type="button" onClick={onBack} className="inline-flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-white">
@@ -66,45 +69,99 @@ export function FindATarget({ notify, onBack }: FindATargetProps) {
 
       <header>
         <h1 className="text-2xl font-semibold text-white">Find a Target</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Breach an accepted friend&apos;s Nexus Vault. Their defence configuration stays hidden until you engage.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Breach a friend&apos;s Nexus Vault, or run a practice breach against Apex bots when no players are available.</p>
       </header>
 
       {targets == null ? (
-        <p className="text-sm text-muted-foreground">Loading targets…</p>
+        <p className="text-sm text-muted-foreground">Loading targets...</p>
       ) : targets.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-muted-foreground">
-          No eligible Apex targets yet.<br />Your AirGPT friends can appear here when they enable Apex breaches.
+          No Apex targets are available right now.
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
-          {targets.map((target) => (
-            <div key={target.userId} className="glass rounded-2xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-white">{target.displayName}</p>
-                  <p className="text-[11px] text-muted-foreground">{target.apexRankLabel} · {target.defenceLayerCount} defence layer{target.defenceLayerCount === 1 ? '' : 's'} · Signal: {target.vaultSignal.replace('_', ' ')}</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={target.status !== 'available'}
-                  onClick={() => setPreparing(preparing?.userId === target.userId ? null : target)}
-                  className="secondary-action px-4 py-1.5 text-xs disabled:opacity-40"
-                >
-                  <Radar className="size-3.5" /> {target.status === 'available' ? 'Prepare Breach' : STATUS_LABEL[target.status]}
-                </button>
+        <div className="flex flex-col gap-5">
+          <section className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-white/70">Players</h2>
+                <p className="text-xs text-muted-foreground">Accepted friends with Apex breaches enabled.</p>
               </div>
-
-              {preparing?.userId === target.userId && (
-                <BreachPrepForm
+            </div>
+            {playerTargets.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-sm text-muted-foreground">
+                No player Vaults are available. Practice bots are ready below.
+              </div>
+            ) : (
+              playerTargets.map((target) => (
+                <TargetRow
+                  key={target.userId}
                   target={target}
+                  preparing={preparing}
                   breachTools={breachTools}
                   notify={notify}
+                  onToggle={() => setPreparing(preparing?.userId === target.userId ? null : target)}
                   onStarted={(breachId) => setActiveBreachId(breachId)}
                 />
-              )}
-            </div>
-          ))}
+              ))
+            )}
+          </section>
+
+          {botTargets.length > 0 && (
+            <section className="flex flex-col gap-2">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-white/70">Practice Bots</h2>
+                <p className="text-xs text-muted-foreground">Open to everyone. These runs use the Apex game loop without damaging real player Vaults.</p>
+              </div>
+              {botTargets.map((target) => (
+                <TargetRow
+                  key={target.userId}
+                  target={target}
+                  preparing={preparing}
+                  breachTools={breachTools}
+                  notify={notify}
+                  onToggle={() => setPreparing(preparing?.userId === target.userId ? null : target)}
+                  onStarted={(breachId) => setActiveBreachId(breachId)}
+                />
+              ))}
+            </section>
+          )}
         </div>
+      )}
+    </div>
+  )
+}
+
+function TargetRow({ target, preparing, breachTools, notify, onToggle, onStarted }: { target: ApexTarget; preparing: ApexTarget | null; breachTools: TechnologyDefinition[]; notify: (message: string, tone?: NoticeTone) => void; onToggle: () => void; onStarted: (breachId: string) => void }) {
+  const isPractice = target.targetType === 'bot'
+  return (
+    <div className="glass rounded-2xl p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-white">{target.displayName}</p>
+            {isPractice && <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/55">Bot</span>}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {target.apexRankLabel} {target.difficulty ? `- ${target.difficulty}` : ''} - {target.defenceLayerCount} defence layer{target.defenceLayerCount === 1 ? '' : 's'} - Signal: {target.vaultSignal.replace('_', ' ')}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={target.status !== 'available'}
+          onClick={onToggle}
+          className="secondary-action px-4 py-1.5 text-xs disabled:opacity-40"
+        >
+          <Radar className="size-3.5" /> {target.status === 'available' ? (isPractice ? 'Start Practice' : 'Prepare Breach') : STATUS_LABEL[target.status]}
+        </button>
+      </div>
+
+      {preparing?.userId === target.userId && (
+        <BreachPrepForm
+          target={target}
+          breachTools={breachTools}
+          notify={notify}
+          onStarted={onStarted}
+        />
       )}
     </div>
   )
@@ -114,6 +171,7 @@ function BreachPrepForm({ target, breachTools, notify, onStarted }: { target: Ap
   const [budget, setBudget] = useState(500)
   const [selectedTools, setSelectedTools] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const isPractice = target.targetType === 'bot'
 
   const toggleTool = (slug: string) => {
     setSelectedTools((current) => (current.includes(slug) ? current.filter((s) => s !== slug) : current.length >= 3 ? current : [...current, slug]))
@@ -144,9 +202,11 @@ function BreachPrepForm({ target, breachTools, notify, onStarted }: { target: Ap
   return (
     <div className="mt-4 border-t border-white/8 pt-4">
       <label className="block text-xs text-muted-foreground">
-        Breach Budget (Core Energy committed)
-        <input type="number" min={50} step={50} value={budget} onChange={(event) => setBudget(Number(event.target.value))} className="calculator-input mt-1.5 w-full" />
+        {isPractice ? 'Practice Energy Budget' : 'Breach Budget (Core Energy committed)'}
+        <input type="number" min={isPractice ? 150 : 50} step={50} value={budget} onChange={(event) => setBudget(Number(event.target.value))} className="calculator-input mt-1.5 w-full" />
       </label>
+
+      {isPractice && <p className="mt-2 text-xs text-muted-foreground">Practice bots provide a training loadout automatically. You can equip owned breach tools here, or leave this empty.</p>}
 
       {breachTools.length > 0 && (
         <div className="mt-3">
@@ -167,7 +227,7 @@ function BreachPrepForm({ target, breachTools, notify, onStarted }: { target: Ap
       )}
 
       <button type="button" disabled={busy} onClick={() => void begin()} className="primary-action mt-4 px-5 py-2 text-xs">
-        <Swords className="size-3.5" /> Initiate Breach
+        <Swords className="size-3.5" /> {isPractice ? 'Launch Practice Breach' : 'Initiate Breach'}
       </button>
     </div>
   )

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getBreachState } from '@/lib/apex/vault/breach'
+import { getBotBreachState, isApexBotSessionId } from '@/lib/apex/vault/bots'
 import { handleApexError } from '@/lib/apex/vault/errors'
 import { requireAuth } from '@/lib/airnexus/http'
 
@@ -9,7 +10,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const auth = await requireAuth()
     const { id } = await params
-    const state = await getBreachState(auth, id)
+    const state = isApexBotSessionId(id) ? await getBotBreachState(auth, id) : await getBreachState(auth, id)
     return NextResponse.json(state)
   } catch (error) {
     return handleApexError(error)

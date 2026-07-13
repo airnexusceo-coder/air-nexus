@@ -16,21 +16,26 @@ type BreachShellProps = {
 }
 
 /**
- * The interactive breach experience. Turn-based and server-resolved — every
- * action is one POST to /api/apex/breach/[id]/action; the server computes the
- * outcome (apex_breach_take_action) and this component only renders what
- * comes back. No client-side combat math, no polling, no realtime channel.
+ * The interactive breach experience. Real player breaches are resolved by the
+ * Supabase SQL resolver. Practice bot breaches use signed backend state and do
+ * not mutate any player Vault or ranked rewards.
  */
 export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
+  const [requestBreachId, setRequestBreachId] = useState(breachId)
   const [state, setState] = useState<BreachStateDTO | null>(null)
   const [busy, setBusy] = useState(false)
   const [selectedTool, setSelectedTool] = useState<string | null>(null)
   const eventLogRef = useRef<HTMLDivElement>(null)
 
+
   const load = useCallback(async () => {
-    const response = await fetch(`/api/apex/breach/${breachId}`, { credentials: 'include', cache: 'no-store' })
-    if (response.ok) setState((await response.json()) as BreachStateDTO)
-  }, [breachId])
+    const response = await fetch(`/api/apex/breach/${encodeURIComponent(requestBreachId)}`, { credentials: 'include', cache: 'no-store' })
+    if (response.ok) {
+      const next = (await response.json()) as BreachStateDTO
+      setState(next)
+      if (next.id !== requestBreachId) setRequestBreachId(next.id)
+    }
+  }, [requestBreachId])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => void load(), 0)
@@ -45,7 +50,7 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
     async (action: string, technologySlug?: string) => {
       setBusy(true)
       try {
-        const response = await fetch(`/api/apex/breach/${breachId}/action`, {
+        const response = await fetch(`/api/apex/breach/${encodeURIComponent(requestBreachId)}/action`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
@@ -56,13 +61,11 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
           return
         }
         const next = (await response.json()) as BreachStateDTO
+        setRequestBreachId(next.id)
         setState(next)
         setSelectedTool(null)
         if (next.status !== 'active') {
-          notify(
-            next.result === 'breached' ? `Core Gate breached — +${next.xpAwarded} Clash XP` : next.result === 'retreated' ? 'You retreated from the breach.' : 'The Vault contained your breach.',
-            next.result === 'breached' ? 'success' : 'info',
-          )
+          notify(resultNotice(next), next.result === 'breached' ? 'success' : 'info')
         }
       } catch {
         notify('Network error. Please try again.', 'warning')
@@ -70,14 +73,14 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
         setBusy(false)
       }
     },
-    [breachId, notify],
+    [requestBreachId, notify],
   )
 
   if (!state) {
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <BackLink onExit={onExit} />
-        <p className="text-sm text-muted-foreground">Loading breach…</p>
+        <p className="text-sm text-muted-foreground">Loading breach...</p>
       </div>
     )
   }
@@ -93,7 +96,7 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
       <div className="glass grid grid-cols-3 gap-3 rounded-2xl p-4 text-center">
         <div>
           <p className="form-label">Target</p>
-          <p className="mt-1 text-sm font-semibold text-white">{state.defenderName}</p>
+          <p className="mt-1 text-sm font-semibold text-white">{state.defenderName}{state.practice ? ' Bot' : ''}</p>
         </div>
         <div>
           <p className="form-label">Stage</p>
@@ -105,7 +108,6 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
         </div>
       </div>
 
-      {/* Layer progress */}
       <div className="grid grid-cols-3 gap-3">
         {state.layers.map((layer) => (
           <div key={layer.layerIndex} className={cn('glass rounded-2xl p-3', layer.layerIndex === state.currentLayerIndex && !finished && 'ring-1 ring-white/40')}>
@@ -122,9 +124,9 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
       <div className="glass flex min-h-40 flex-col items-center justify-center gap-3 rounded-3xl p-6">
         <ThinkingLogo isThinking={!finished} className="size-20" />
         {!finished && <p className="text-xs text-white/60">Signal engaged with {currentLayer?.revealed ? currentLayer.name : 'an unidentified layer'}.</p>}
+        {state.practice && <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">Practice Simulation</p>}
       </div>
 
-      {/* Event log */}
       <div ref={eventLogRef} className="glass scrollbar-thin max-h-48 overflow-y-auto rounded-2xl p-4">
         {state.events.length === 0 ? (
           <p className="text-xs text-muted-foreground">No events yet.</p>
@@ -142,9 +144,9 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
       ) : (
         <>
           <div className="grid grid-cols-3 gap-2">
-            <ActionButton icon={<Radar className="size-4" />} label="Scan · ◇10" disabled={busy || currentLayer?.revealed} onClick={() => void act('scan')} />
-            <ActionButton icon={<Crosshair className="size-4" />} label="Probe · ◇20" disabled={busy} onClick={() => void act('probe')} />
-            <ActionButton icon={<Zap className="size-4" />} label="Overload · ◇60" disabled={busy} onClick={() => void act('overload')} />
+            <ActionButton icon={<Radar className="size-4" />} label="Scan - ◇10" disabled={busy || currentLayer?.revealed} onClick={() => void act('scan')} />
+            <ActionButton icon={<Crosshair className="size-4" />} label="Probe - ◇20" disabled={busy} onClick={() => void act('probe')} />
+            <ActionButton icon={<Zap className="size-4" />} label="Overload - ◇60" disabled={busy} onClick={() => void act('overload')} />
           </div>
 
           {state.loadout.length > 0 && (
@@ -180,6 +182,13 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
   )
 }
 
+function resultNotice(state: BreachStateDTO) {
+  if (state.practice) {
+    return state.result === 'breached' ? `Practice Core Gate breached - ${state.xpAwarded} XP preview` : state.result === 'retreated' ? 'You retreated from the practice breach.' : 'The practice Vault contained your breach.'
+  }
+  return state.result === 'breached' ? `Core Gate breached - +${state.xpAwarded} Clash XP` : state.result === 'retreated' ? 'You retreated from the breach.' : 'The Vault contained your breach.'
+}
+
 function ResultPanel({ state, onDone }: { state: BreachStateDTO; onDone: () => void }) {
   const Icon = state.result === 'breached' ? ShieldX : state.result === 'retreated' ? LogOut : ShieldCheck
   const title = state.result === 'breached' ? 'Core Gate Breached' : state.result === 'retreated' ? 'Retreated' : 'Breach Contained'
@@ -187,8 +196,10 @@ function ResultPanel({ state, onDone }: { state: BreachStateDTO; onDone: () => v
     <div className="glass flex flex-col items-center gap-3 rounded-3xl p-6 text-center">
       <Icon className="size-8 text-white" />
       <p className="text-lg font-semibold text-white">{title}</p>
-      {state.result === 'breached' ? (
-        <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP · ◇{state.rewardEnergy} recovered</p>
+      {state.practice ? (
+        <p className="text-sm text-muted-foreground">Practice score: {state.xpAwarded} XP preview. No ranked XP, Core Energy, or player Vault damage was written.</p>
+      ) : state.result === 'breached' ? (
+        <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP - ◇{state.rewardEnergy} recovered</p>
       ) : state.result === 'contained' && state.xpAwarded > 0 ? (
         <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP for the attempt</p>
       ) : (

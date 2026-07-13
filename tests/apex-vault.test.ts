@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { deriveApexRank } from '../lib/apex/config'
 import { repairCostForPercent } from '../lib/apex/vault/config'
 import { antiFarmMultiplier, previewVictoryXp, sanitizeLayerRow, type RawBreachLayerRow } from '../lib/apex/vault/breach-config'
+import { effectiveNexusPointCost, isAdvancedStrengthDefence, isCoreEnergySetupDefence } from '../lib/apex/vault/technology-costs'
 
 // --- deriveApexRank -----------------------------------------------------
 
@@ -70,4 +71,12 @@ assert.equal(brokenButNeverRevealed.name, null, 'breaking a layer does not impli
 const overflowLayer = sanitizeLayerRow({ ...hiddenRow, layer_index: 7, is_revealed: true })
 assert.equal(overflowLayer.label, 'Core Gate', 'an out-of-range layer index falls back to Core Gate rather than throwing or leaking undefined')
 
+// --- Apex technology costs -----------------------------------------------
+
+assert.equal(isCoreEnergySetupDefence('mirage'), true, 'Mirage is part of normal Core Energy-only setup')
+assert.equal(isCoreEnergySetupDefence('counter-trace'), true, 'Counter Trace is part of normal Core Energy-only setup')
+assert.equal(effectiveNexusPointCost('firewall', 'defence', 100), 0, 'basic defence setup ignores old catalog NP costs')
+assert.equal(isAdvancedStrengthDefence('fortress-core'), true, 'Fortress Core is an advanced-strength defence')
+assert.equal(effectiveNexusPointCost('fortress-core', 'defence', 260), 260, 'advanced-strength defences still require Nexus Points')
+assert.equal(effectiveNexusPointCost('breach-key', 'breach', 120), 0, 'breach technologies can be unlocked without Nexus Points')
 console.log('Apex Nexus Vault formula/sanitization tests passed')

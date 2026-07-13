@@ -4,6 +4,7 @@ import { readSupabaseRestJson, supabaseServiceFetch, SupabaseRequestError } from
 import type { ServerAuthSession } from '@/lib/supabase/server'
 import { resolveVaultEconomy, type VaultRow } from './economy'
 import { DEFENCE_CAPACITY, GENERATOR_OUTPUT_PER_LEVEL_PER_HOUR, repairCostForPercent } from './config'
+import { effectiveNexusPointCost, isCoreEnergySetupDefence } from './technology-costs'
 import type { InstalledDefence, VaultOverview, VaultStatus } from './types'
 
 function encode(value: string) {
@@ -80,7 +81,7 @@ async function requireOwnedDefenceTechnology(userId: string, technologySlug: str
   const response = await supabaseServiceFetch(
     `/apex_technologies?slug=eq.${encode(technologySlug)}&technology_type=eq.defence&is_active=eq.true&select=*`,
   )
-  const rows = await readSupabaseRestJson<{ id: string; name: string; capacity_cost: number; startup_energy_cost: number }[]>(response, 'Failed to load technology')
+  const rows = await readSupabaseRestJson<{ id: string; slug: string; name: string; capacity_cost: number; startup_energy_cost: number; np_acquisition_cost: number }[]>(response, 'Failed to load technology')
   const tech = rows[0]
   if (!tech) throw new SupabaseRequestError('Unknown defence technology.', 404)
 
@@ -88,12 +89,21 @@ async function requireOwnedDefenceTechnology(userId: string, technologySlug: str
     `/apex_user_technologies?user_id=eq.${encode(userId)}&technology_id=eq.${encode(tech.id)}&select=technology_id`,
   )
   const owned = await readSupabaseRestJson<unknown[]>(ownedResponse, 'Failed to check ownership')
-  if (owned.length === 0) throw new SupabaseRequestError('You do not own this technology.', 403)
+  if (owned.length === 0) {
+    if (!isCoreEnergySetupDefence(tech.slug) || effectiveNexusPointCost(tech.slug, 'defence', tech.np_acquisition_cost) > 0) {
+      throw new SupabaseRequestError('Unlock this advanced defence in the Systems Lab before installing it.', 403)
+    }
+    const grantResponse = await supabaseServiceFetch('/apex_user_technologies', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId, technology_id: tech.id }),
+    })
+    if (!grantResponse.ok) await readSupabaseRestJson(grantResponse, 'Could not unlock basic defence technology')
+  }
 
   return tech
 }
 
-/** Install an owned defence technology: consumes capacity, pays the one-time startup cost. */
+/** Install a defence technology: basic setup systems only consume Core Energy; advanced systems must be unlocked first. */
 export async function installTechnology(auth: ServerAuthSession, technologySlug: string): Promise<VaultOverview> {
   const userId = auth.user.id
   const tech = await requireOwnedDefenceTechnology(userId, technologySlug)

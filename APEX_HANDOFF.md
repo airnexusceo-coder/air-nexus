@@ -169,10 +169,18 @@ Neither view ever exposes the *other* player's hidden defence chain or breach lo
 
 Nexus Points remain client-side `localStorage` (`lib/nexus-points.ts`), owned by `components/airnexus-app.tsx` — there is still no server-side NP ledger anywhere in AirGPT (a pre-existing platform gap, not Apex-specific). Technology acquisition records ownership server-side (trusted), but the NP cost check reuses the existing client-trusted `onRedeemReward()` flow (same pattern Marketplace already uses). Hardening this needs a real server NP ledger — cross-cutting platform work, out of scope for Apex alone.
 
+## 20a. Apex technology costs
+
+Apex no longer treats every technology as a Nexus Points purchase. Normal defence setup systems (`mirage`, `firewall`, `core-lock`, `ghost-layer`, `counter-trace`) are included and install directly from Manage Vault by spending only their Core Energy startup/upkeep costs. Breach tools can be unlocked without NP. Nexus Points are reserved for advanced-strength defence systems (`core-shield`, `signal-redirect`, `fortress-core`). The app enforces this through `lib/apex/vault/technology-costs.ts`, and migration `0013_apex_basic_defence_setup_costs.sql` aligns the Supabase catalog.
 ## 21. Friend system, targets
 
 Fully reused from `lib/airnexus/social.ts` (the one AirGPT-wide friend graph). `listApexTargets()` (`lib/apex/vault/targets.ts`) layers a public Vault summary (Integrity band → coarse "signal", defence *count* not order or identity, derived rank, breach-availability status honoring `breaches_enabled`/cooldowns/protection) on top of `getAcceptedFriends()` — never exact Core Energy or the defence chain.
 
+## 21a. Practice bots
+
+Apex target discovery now appends three backend-resolved practice bots (`Sentinel-01`, `Cipher Mirror`, `Blackbox Vault`) through `GET /api/apex/targets`. If the Supabase-backed player target query is unavailable because the Apex schema/service role is missing, the route still returns these bot targets so authenticated users can open Apex and play a breach.
+
+Bots are not fake Supabase users. They use signed, compressed practice-session ids handled by `lib/apex/vault/bots.ts` and the existing `/api/apex/breach`, `/api/apex/breach/[id]`, and `/api/apex/breach/[id]/action` routes. Practice breaches reuse the scan/probe/overload/tool game loop, but they do not damage real Vaults and do not write ranked XP, Core Energy, achievements, or breach history.
 ## 22. Subscriptions
 
 Untouched — `lib/plans.ts`, same client-side plan state as the rest of AirGPT. No Apex-specific billing. Premium grants nothing in Apex (no code path checks `plan` for any Apex mutation), matching the requirement that Premium stay cosmetic/QoL-only if ever extended into Apex.

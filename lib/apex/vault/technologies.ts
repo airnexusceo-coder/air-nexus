@@ -2,6 +2,7 @@ import 'server-only'
 
 import { readSupabaseRestJson, supabaseServiceFetch, SupabaseRequestError } from '@/lib/supabase/server'
 import type { ServerAuthSession } from '@/lib/supabase/server'
+import { effectiveNexusPointCost, isCoreEnergySetupDefence } from './technology-costs'
 import type { TechnologyDefinition } from './types'
 
 function encode(value: string) {
@@ -29,7 +30,7 @@ function toDefinition(row: TechnologyRow, owned: boolean): TechnologyDefinition 
     name: row.name,
     technologyType: row.technology_type,
     description: row.description,
-    npAcquisitionCost: row.np_acquisition_cost,
+    npAcquisitionCost: effectiveNexusPointCost(row.slug, row.technology_type, row.np_acquisition_cost),
     capacityCost: row.capacity_cost,
     startupEnergyCost: row.startup_energy_cost,
     upkeepEnergyPerHour: row.upkeep_energy_per_hour,
@@ -53,7 +54,7 @@ export async function listTechnologies(userId: string): Promise<TechnologyDefini
     readSupabaseRestJson<{ technology_id: string }[]>(ownedResponse, 'Failed to load owned technology'),
   ])
   const ownedIds = new Set(owned.map((row) => row.technology_id))
-  return catalog.map((row) => toDefinition(row, ownedIds.has(row.id)))
+  return catalog.map((row) => toDefinition(row, ownedIds.has(row.id) || (row.technology_type === 'defence' && isCoreEnergySetupDefence(row.slug))))
 }
 
 /**
