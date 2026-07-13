@@ -15,6 +15,7 @@ import {
   Download,
   FileInput,
   Gauge,
+  LoaderCircle,
   Lock,
   MessageSquareText,
   Plus,
@@ -47,28 +48,26 @@ type TaskPriority = 'High' | 'Medium' | 'Low'
 type TaskStatus = 'Todo' | 'In Progress' | 'Done'
 
 type StudyTask = {
-  id: number
+  id: string
   title: string
   subject: string
   priority: TaskPriority
   status: TaskStatus
-  due: string
+  dueAt: string | null
 }
 
-const initialTasks: StudyTask[] = [
-  { id: 1, title: 'Finish physics motion worksheet', subject: 'Physics', priority: 'High', status: 'In Progress', due: 'Today, 6:00 PM' },
-  { id: 2, title: 'Draft English persuasive essay', subject: 'English', priority: 'High', status: 'Todo', due: 'Tomorrow' },
-  { id: 3, title: 'Revise quadratic equations', subject: 'Mathematics', priority: 'Medium', status: 'Todo', due: '24 Jun' },
-  { id: 4, title: 'Create biology flashcards', subject: 'Biology', priority: 'Medium', status: 'Done', due: '21 Jun' },
-  { id: 5, title: 'Complete history source analysis', subject: 'History', priority: 'High', status: 'Todo', due: '25 Jun' },
-  { id: 6, title: 'Practise French speaking prompts', subject: 'French', priority: 'Low', status: 'In Progress', due: '26 Jun' },
-  { id: 7, title: 'Review chemistry balancing', subject: 'Chemistry', priority: 'Medium', status: 'Done', due: '20 Jun' },
-  { id: 8, title: 'Plan geography field report', subject: 'Geography', priority: 'Low', status: 'Todo', due: '28 Jun' },
-  { id: 9, title: 'Study trigonometry identities', subject: 'Mathematics', priority: 'High', status: 'In Progress', due: '29 Jun' },
-  { id: 10, title: 'Read chapter six', subject: 'English', priority: 'Low', status: 'Done', due: '19 Jun' },
-  { id: 11, title: 'Prepare design portfolio notes', subject: 'Design', priority: 'Medium', status: 'Todo', due: '30 Jun' },
-  { id: 12, title: 'Complete weekly reflection', subject: 'Wellbeing', priority: 'Low', status: 'Todo', due: 'Friday' },
-]
+function formatDueDate(iso: string | null) {
+  if (!iso) return 'No due date'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'No due date'
+  const now = new Date()
+  const tomorrow = new Date(now)
+  tomorrow.setDate(now.getDate() + 1)
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (date.toDateString() === now.toDateString()) return `Today, ${time}`
+  if (date.toDateString() === tomorrow.toDateString()) return `Tomorrow, ${time}`
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
 
 const priorityStyles: Record<TaskPriority, string> = {
   High: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
@@ -106,35 +105,85 @@ function PageIntro({ eyebrow, title, description, action }: { eyebrow: string; t
 }
 
 function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'notify' | 'onEarnNexusPoints'>) {
-  const [tasks, setTasks] = useState(initialTasks)
+  const [tasks, setTasks] = useState<StudyTask[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<'All' | TaskPriority>('All')
   const [status, setStatus] = useState<'All' | TaskStatus>('All')
   const [adding, setAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [breakdownId, setBreakdownId] = useState<number | null>(null)
+  const [breakdownId, setBreakdownId] = useState<string | null>(null)
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      const response = await fetch('/api/tasks', { credentials: 'include', cache: 'no-store' })
+      if (!response.ok) throw new Error('Could not load your tasks.')
+      const data = await response.json() as { tasks: StudyTask[] }
+      setTasks(data.tasks)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load your tasks.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => void loadTasks(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadTasks])
 
   const filtered = tasks.filter((task) => {
     const matchesQuery = (task.title + ' ' + task.subject).toLowerCase().includes(query.toLowerCase())
     return matchesQuery && (priority === 'All' || task.priority === priority) && (status === 'All' || task.status === status)
   })
 
-  const addTask = () => {
+  const addTask = async () => {
     const title = newTitle.trim()
-    if (!title) return
-    setTasks((current) => [{ id: Date.now(), title, subject: 'General', priority: 'Medium', status: 'Todo', due: 'No due date' }, ...current])
-    setNewTitle('')
-    setAdding(false)
-    notify('Task added to your study plan', 'success')
+    if (!title || saving) return
+    setSaving(true)
+    try {
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      const data = await response.json().catch(() => ({})) as StudyTask & { error?: string }
+      if (!response.ok || !('id' in data)) throw new Error((data as { error?: string }).error ?? 'Could not add task.')
+      setTasks((current) => [data, ...current])
+      setNewTitle('')
+      setAdding(false)
+      notify('Task added to your study plan', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not add task.', 'warning')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const toggleTask = (id: number) => {
+  const toggleTask = async (id: string) => {
     const task = tasks.find((item) => item.id === id)
-    if (task && task.status !== 'Done') {
-      onEarnNexusPoints(10, `Completed task: ${task.title}`, `task-complete-${task.id}`)
+    if (!task) return
+    const nextStatus: TaskStatus = task.status === 'Done' ? 'Todo' : 'Done'
+    setTasks((current) => current.map((item) => item.id === id ? { ...item, status: nextStatus } : item))
+    if (nextStatus === 'Done') onEarnNexusPoints(10, `Completed task: ${task.title}`, `task-complete-${task.id}`)
+    const response = await fetch(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: nextStatus }),
+    })
+    if (!response.ok) {
+      setTasks((current) => current.map((item) => item.id === id ? { ...item, status: task.status } : item))
+      notify('Could not save that change.', 'warning')
     }
-    setTasks((current) => current.map((item) => item.id === id ? { ...item, status: item.status === 'Done' ? 'Todo' : 'Done' } : item))
   }
+
+  const subjectCount = new Set(tasks.map((task) => task.subject)).size
 
   return (
     <div className="space-y-6">
@@ -146,7 +195,7 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <MetricCard label="All tasks" value={String(tasks.length)} detail="Across 8 subjects" icon={CheckCircle2} />
+        <MetricCard label="All tasks" value={String(tasks.length)} detail={`Across ${subjectCount} subject${subjectCount === 1 ? '' : 's'}`} icon={CheckCircle2} />
         <MetricCard label="In progress" value={String(tasks.filter((task) => task.status === 'In Progress').length)} detail="Keep the momentum" icon={Clock3} />
         <MetricCard label="Completed" value={String(tasks.filter((task) => task.status === 'Done').length)} detail="This study cycle" icon={Target} />
       </div>
@@ -157,12 +206,12 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
             autoFocus
             value={newTitle}
             onChange={(event) => setNewTitle(event.target.value)}
-            onKeyDown={(event) => event.key === 'Enter' && addTask()}
+            onKeyDown={(event) => event.key === 'Enter' && void addTask()}
             aria-label="New task title"
             placeholder="What needs to get done?"
             className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm outline-none focus:border-white/40"
           />
-          <button type="button" disabled={!newTitle.trim()} onClick={addTask} className="primary-action">Save task</button>
+          <button type="button" disabled={!newTitle.trim() || saving} onClick={() => void addTask()} className="primary-action disabled:cursor-wait disabled:opacity-60">Save task</button>
         </div>
       )}
 
@@ -176,35 +225,53 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
         <FilterSelect label="Status" value={status} onChange={(value) => setStatus(value as 'All' | TaskStatus)} options={['All', 'Todo', 'In Progress', 'Done']} />
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        {filtered.map((task) => (
-          <article key={task.id} className="glass rounded-2xl p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
-            <div className="flex items-start gap-3">
-              <button type="button" aria-label={(task.status === 'Done' ? 'Mark incomplete: ' : 'Mark complete: ') + task.title} aria-pressed={task.status === 'Done'} onClick={() => toggleTask(task.id)} className={cn('mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg border transition', task.status === 'Done' ? 'border-emerald-300/40 bg-emerald-400/20 text-emerald-200' : 'border-white/15 bg-white/5 text-transparent hover:border-white/40')}>
-                <Check className="size-3.5" />
-              </button>
-              <div className="min-w-0 flex-1">
-                <p className={cn('font-medium text-white', task.status === 'Done' && 'text-slate-500 line-through')}>{task.title}</p>
-                <p className="mt-1 text-xs text-slate-500">{task.subject} · Due {task.due}</p>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className={cn('rounded-full border px-2.5 py-1 text-[11px] font-medium', priorityStyles[task.priority])}>{task.priority}</span>
-              <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-medium', statusStyles[task.status])}>{task.status}</span>
-              <button type="button" aria-expanded={breakdownId === task.id} onClick={() => setBreakdownId((current) => current === task.id ? null : task.id)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
-                <Sparkles className="size-3.5" />AI Breakdown
-              </button>
-            </div>
-            {breakdownId === task.id && (
-              <div className="mt-3 rounded-xl border border-white/15 bg-white/[0.06] p-3 text-xs leading-5 text-slate-300">
-                <p className="font-medium text-white">A simple three-step plan</p>
-                <ol className="mt-1 list-inside list-decimal text-slate-400"><li>Gather the required notes and rubric.</li><li>Complete one focused 25-minute draft.</li><li>Review, improve, and submit.</li></ol>
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
-      {filtered.length === 0 && <EmptyState title="No tasks found" detail="Try clearing a filter or searching for another subject." />}
+      {loading ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[0, 1, 2, 3].map((key) => <div key={key} className="premium-skeleton h-28 rounded-2xl" />)}
+        </div>
+      ) : loadError ? (
+        <div className="glass rounded-2xl p-8 text-center">
+          <LoaderCircle className="mx-auto size-5 text-slate-600" />
+          <p className="mt-3 text-sm text-rose-300">{loadError}</p>
+          <button type="button" onClick={() => void loadTasks()} className="secondary-action mx-auto mt-4">Try again</button>
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {filtered.map((task) => (
+              <article key={task.id} className="glass rounded-2xl p-4 transition hover:border-white/20 hover:bg-white/[0.06]">
+                <div className="flex items-start gap-3">
+                  <button type="button" aria-label={(task.status === 'Done' ? 'Mark incomplete: ' : 'Mark complete: ') + task.title} aria-pressed={task.status === 'Done'} onClick={() => void toggleTask(task.id)} className={cn('mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg border transition', task.status === 'Done' ? 'border-emerald-300/40 bg-emerald-400/20 text-emerald-200' : 'border-white/15 bg-white/5 text-transparent hover:border-white/40')}>
+                    <Check className="size-3.5" />
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className={cn('font-medium text-white', task.status === 'Done' && 'text-slate-500 line-through')}>{task.title}</p>
+                    <p className="mt-1 text-xs text-slate-500">{task.subject} · Due {formatDueDate(task.dueAt)}</p>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className={cn('rounded-full border px-2.5 py-1 text-[11px] font-medium', priorityStyles[task.priority])}>{task.priority}</span>
+                  <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-medium', statusStyles[task.status])}>{task.status}</span>
+                  <button type="button" aria-expanded={breakdownId === task.id} onClick={() => setBreakdownId((current) => current === task.id ? null : task.id)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
+                    <Sparkles className="size-3.5" />AI Breakdown
+                  </button>
+                </div>
+                {breakdownId === task.id && (
+                  <div className="mt-3 rounded-xl border border-white/15 bg-white/[0.06] p-3 text-xs leading-5 text-slate-300">
+                    <p className="font-medium text-white">A simple three-step plan</p>
+                    <ol className="mt-1 list-inside list-decimal text-slate-400"><li>Gather the required notes and rubric.</li><li>Complete one focused 25-minute draft.</li><li>Review, improve, and submit.</li></ol>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+          {filtered.length === 0 && (
+            tasks.length === 0
+              ? <EmptyState title="No tasks yet" detail="Add your first task above to start planning your study work." />
+              : <EmptyState title="No tasks found" detail="Try clearing a filter or searching for another subject." />
+          )}
+        </>
+      )}
     </div>
   )
 }
