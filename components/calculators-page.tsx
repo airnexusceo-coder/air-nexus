@@ -78,8 +78,7 @@ type Assessment = { id: number; name: string; score: string; total: string; weig
 
 function GradeCalculator({ onSave }: { onSave: (tool: string, result: string) => void }) {
   const [assessments, setAssessments] = useState<Assessment[]>([
-    { id: 1, name: 'Research assignment', score: '82', total: '100', weight: '30' },
-    { id: 2, name: 'Mid-year exam', score: '74', total: '100', weight: '25' },
+    { id: 1, name: '', score: '', total: '100', weight: '' },
   ])
   const [target, setTarget] = useState('80')
   const calculated = useMemo(() => calculateGrade(
@@ -132,11 +131,11 @@ function AtarCalculator({ onSave }: { onSave: (tool: string, result: string) => 
   const [examYear, setExamYear] = useState('2025')
   const [subjectSearch, setSubjectSearch] = useState('')
   const [subjects, setSubjects] = useState<AtarSubjectForm[]>([
-    { id: 1, subjectId: 'vce-english', score: '35' },
-    { id: 2, subjectId: 'vce-mathematical-methods', score: '34' },
-    { id: 3, subjectId: 'vce-business-management', score: '33' },
-    { id: 4, subjectId: 'vce-biology', score: '32' },
-    { id: 5, subjectId: 'vce-history-revolutions', score: '30' },
+    { id: 1, subjectId: '', score: '' },
+    { id: 2, subjectId: '', score: '' },
+    { id: 3, subjectId: '', score: '' },
+    { id: 4, subjectId: '', score: '' },
+    { id: 5, subjectId: '', score: '' },
     { id: 6, subjectId: '', score: '' },
   ])
   const requestedYear = examYear.trim() ? Number(examYear) : undefined
@@ -224,7 +223,7 @@ function AtarCalculator({ onSave }: { onSave: (tool: string, result: string) => 
 const graphColors = ['#ffffff', '#a1a1aa', '#71717a', '#38bdf8']
 
 function GraphingCalculator() {
-  const [functions, setFunctions] = useState(['x^2', '2x + 3'])
+  const [functions, setFunctions] = useState([''])
   const [xMin, setXMin] = useState(-10)
   const [xMax, setXMax] = useState(10)
   const [yMin, setYMin] = useState(-10)
@@ -263,7 +262,7 @@ function GraphingCalculator() {
     setXMin(Number((xMiddle - xHalf).toFixed(2))); setXMax(Number((xMiddle + xHalf).toFixed(2)))
     setYMin(Number((yMiddle - yHalf).toFixed(2))); setYMax(Number((yMiddle + yHalf).toFixed(2)))
   }
-  const resetGraph = () => { setFunctions(['x^2', '2x + 3']); setXMin(-10); setXMax(10); setYMin(-10); setYMax(10) }
+  const resetGraph = () => { setFunctions(['']); setXMin(-10); setXMax(10); setYMin(-10); setYMax(10) }
 
   return (
     <section className="glass rounded-3xl p-5 sm:p-6">

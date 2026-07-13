@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Cloud,
@@ -24,6 +25,7 @@ import {
   Target,
   Upload,
   Users,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MotivationPage } from '@/components/motivation-page'
@@ -287,60 +289,167 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
   )
 }
 
-type CalendarEvent = { id: number; day: number; title: string; type: 'Deadline' | 'Exam' | 'Study'; time: string; task?: boolean }
+type CalendarEventType = 'Deadline' | 'Exam' | 'Study'
+type CalendarEventItem = { id: string; title: string; type: CalendarEventType; eventDate: string; time: string; taskId: string | null }
 
-const eventStyles = {
+const eventStyles: Record<CalendarEventType, string> = {
   Deadline: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
   Exam: 'border-white/20 bg-white/10 text-white',
   Study: 'border-white/10 bg-white/5 text-zinc-300',
 }
 
-function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavigate' | 'notify'>) {
-  const [events, setEvents] = useState<CalendarEvent[]>([
-    { id: 1, day: 22, title: 'Physics study sprint', type: 'Study', time: '4:00 PM', task: true },
-    { id: 2, day: 24, title: 'Maths chapter test', type: 'Exam', time: '9:10 AM' },
-    { id: 3, day: 25, title: 'History analysis due', type: 'Deadline', time: '3:15 PM', task: true },
-    { id: 4, day: 27, title: 'Biology revision', type: 'Study', time: '11:00 AM' },
-    { id: 5, day: 30, title: 'Design portfolio due', type: 'Deadline', time: '5:00 PM', task: true },
-  ])
-  const [adding, setAdding] = useState(false)
-  const [eventTitle, setEventTitle] = useState('')
-  const [eventDay, setEventDay] = useState('23')
-  const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const leading = 0
-  const cells = Array.from({ length: 35 }, (_, index) => index - leading + 1)
+const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-  const addEvent = () => {
-    const title = eventTitle.trim()
-    const day = Number(eventDay)
-    if (!title || day < 1 || day > 30) return
-    setEvents((current) => [...current, { id: Date.now(), day, title, type: 'Study', time: 'Any time' }])
-    setEventTitle('')
-    setAdding(false)
-    notify('Study event added to June', 'success')
+function toDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavigate' | 'notify'>) {
+  const today = new Date()
+  const [viewYear, setViewYear] = useState(today.getFullYear())
+  const [viewMonth, setViewMonth] = useState(today.getMonth())
+  const [events, setEvents] = useState<CalendarEventItem[]>([])
+  const [tasks, setTasks] = useState<StudyTask[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [eventTitle, setEventTitle] = useState('')
+  const [eventDate, setEventDate] = useState(() => toDateKey(today))
+  const [eventType, setEventType] = useState<CalendarEventType>('Study')
+  const [eventTime, setEventTime] = useState('')
+  const [eventTaskId, setEventTaskId] = useState('')
+
+  const loadEvents = useCallback(async () => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      const response = await fetch('/api/calendar-events', { credentials: 'include', cache: 'no-store' })
+      if (!response.ok) throw new Error('Could not load your calendar.')
+      const data = await response.json() as { events: CalendarEventItem[] }
+      setEvents(data.events)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load your calendar.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => void loadEvents(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadEvents])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        const response = await fetch('/api/tasks', { credentials: 'include', cache: 'no-store' })
+        if (response.ok) setTasks(((await response.json()) as { tasks: StudyTask[] }).tasks)
+      })()
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
+  const monthLabel = new Date(viewYear, viewMonth, 1).toLocaleDateString([], { month: 'long', year: 'numeric' })
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const firstWeekday = new Date(viewYear, viewMonth, 1).getDay()
+  const leading = (firstWeekday + 6) % 7
+  const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7
+  const cells = Array.from({ length: totalCells }, (_, index) => index - leading + 1)
+  const isViewingCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth()
+  const todayKey = toDateKey(today)
+
+  const eventsOnDay = (day: number) => {
+    const key = toDateKey(new Date(viewYear, viewMonth, day))
+    return events.filter((event) => event.eventDate === key)
   }
+
+  const goToMonth = (delta: number) => {
+    const next = new Date(viewYear, viewMonth + delta, 1)
+    setViewYear(next.getFullYear())
+    setViewMonth(next.getMonth())
+  }
+
+  const addEvent = async () => {
+    const title = eventTitle.trim()
+    if (!title || !eventDate || saving) return
+    setSaving(true)
+    try {
+      const response = await fetch('/api/calendar-events', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, type: eventType, eventDate, time: eventTime, taskId: eventTaskId || undefined }),
+      })
+      const data = await response.json().catch(() => ({})) as CalendarEventItem & { error?: string }
+      if (!response.ok || !('id' in data)) throw new Error((data as { error?: string }).error ?? 'Could not add event.')
+      setEvents((current) => [...current, data].sort((a, b) => a.eventDate.localeCompare(b.eventDate)))
+      setEventTitle('')
+      setEventTime('')
+      setEventTaskId('')
+      setAdding(false)
+      notify('Event added to your calendar', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not add event.', 'warning')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const removeEvent = async (id: string) => {
+    const previous = events
+    setEvents((current) => current.filter((event) => event.id !== id))
+    const response = await fetch(`/api/calendar-events/${id}`, { method: 'DELETE', credentials: 'include' })
+    if (!response.ok) {
+      setEvents(previous)
+      notify('Could not remove that event.', 'warning')
+    }
+  }
+
+  const upcoming = events.filter((event) => event.eventDate >= todayKey).sort((a, b) => a.eventDate.localeCompare(b.eventDate)).slice(0, 8)
 
   return (
     <div className="space-y-6">
-      <PageIntro eyebrow="June 2026" title="Study calendar" description="See deadlines, exam dates, and focused study blocks in one calm view." action={<button type="button" onClick={() => setAdding((open) => !open)} className="primary-action"><Plus className="size-4" />Add event</button>} />
+      <PageIntro eyebrow={monthLabel} title="Study calendar" description="See deadlines, exam dates, and focused study blocks in one calm view." action={<button type="button" onClick={() => setAdding((open) => !open)} className="primary-action"><Plus className="size-4" />Add event</button>} />
       {adding && (
-        <div className="glass grid gap-3 rounded-2xl p-4 sm:grid-cols-[1fr_100px_auto]">
-          <input autoFocus value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && addEvent()} aria-label="Event title" placeholder="Study session or deadline" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
-          <input type="number" min="1" max="30" value={eventDay} onChange={(event) => setEventDay(event.target.value)} aria-label="Day in June" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
-          <button type="button" disabled={!eventTitle.trim()} onClick={addEvent} className="primary-action">Save event</button>
+        <div className="glass grid gap-3 rounded-2xl p-4 sm:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_1fr_auto]">
+          <input autoFocus value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void addEvent()} aria-label="Event title" placeholder="Study session or deadline" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <input type="date" value={eventDate} onChange={(event) => setEventDate(event.target.value)} aria-label="Event date" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <select value={eventType} onChange={(event) => setEventType(event.target.value as CalendarEventType)} aria-label="Event type" className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-sm outline-none focus:border-white/40">
+            {(['Study', 'Exam', 'Deadline'] as const).map((option) => <option key={option} className="bg-slate-900">{option}</option>)}
+          </select>
+          <input value={eventTime} onChange={(event) => setEventTime(event.target.value)} aria-label="Event time" placeholder="Any time" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <button type="button" disabled={!eventTitle.trim() || saving} onClick={() => void addEvent()} className="primary-action disabled:cursor-wait disabled:opacity-60">Save event</button>
+          {tasks.length > 0 && (
+            <select value={eventTaskId} onChange={(event) => setEventTaskId(event.target.value)} aria-label="Link to task" className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-sm text-slate-300 outline-none focus:border-white/40 sm:col-span-2 xl:col-span-5">
+              <option value="" className="bg-slate-900">No linked task</option>
+              {tasks.map((task) => <option key={task.id} value={task.id} className="bg-slate-900">Link to: {task.title}</option>)}
+            </select>
+          )}
         </div>
       )}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <section className="glass overflow-hidden rounded-2xl p-3 sm:p-5" aria-label="June 2026 calendar">
-          <div className="mb-4 flex items-center justify-between px-1"><h3 className="font-semibold">June 2026</h3><span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white">Today: 22 Jun</span></div>
+        <section className="glass overflow-hidden rounded-2xl p-3 sm:p-5" aria-label={`${monthLabel} calendar`}>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 px-1">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => goToMonth(-1)} aria-label="Previous month" className="interactive-icon"><ChevronLeft className="size-4" /></button>
+              <h3 className="font-semibold">{monthLabel}</h3>
+              <button type="button" onClick={() => goToMonth(1)} aria-label="Next month" className="interactive-icon"><ChevronRight className="size-4" /></button>
+            </div>
+            <div className="flex items-center gap-2">
+              {!isViewingCurrentMonth && <button type="button" onClick={() => { setViewYear(today.getFullYear()); setViewMonth(today.getMonth()) }} className="rounded-full bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/15">Today</button>}
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white">Today: {today.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+            </div>
+          </div>
           <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:gap-2 sm:text-xs">{weekdays.map((day) => <div key={day} className="py-2">{day}</div>)}</div>
           <div className="grid grid-cols-7 gap-1 sm:gap-2">
             {cells.map((day, index) => {
-              const dayEvents = events.filter((event) => event.day === day)
-              const inMonth = day >= 1 && day <= 30
+              const inMonth = day >= 1 && day <= daysInMonth
+              const dayEvents = inMonth ? eventsOnDay(day) : []
+              const highlighted = inMonth && isViewingCurrentMonth && day === today.getDate()
               return (
-                <div key={index} className={cn('min-h-16 rounded-xl border p-1.5 sm:min-h-24 sm:p-2', day === 22 ? 'border-white/45 bg-white/10 shadow-lg shadow-white/5' : 'border-white/6 bg-white/[0.025]', !inMonth && 'opacity-20')}>
-                  {inMonth && <span className={cn('inline-flex size-6 items-center justify-center rounded-lg text-xs', day === 22 && 'bg-white font-bold text-slate-950')}>{day}</span>}
+                <div key={index} className={cn('min-h-16 rounded-xl border p-1.5 sm:min-h-24 sm:p-2', highlighted ? 'border-white/45 bg-white/10 shadow-lg shadow-white/5' : 'border-white/6 bg-white/[0.025]', !inMonth && 'opacity-20')}>
+                  {inMonth && <span className={cn('inline-flex size-6 items-center justify-center rounded-lg text-xs', highlighted && 'bg-white font-bold text-slate-950')}>{day}</span>}
                   <div className="mt-1 space-y-1">{dayEvents.slice(0, 2).map((event) => <div key={event.id} title={event.title} className={cn('truncate rounded-md border px-1 py-0.5 text-[8px] sm:text-[10px]', eventStyles[event.type])}>{event.title}</div>)}</div>
                 </div>
               )
@@ -349,12 +458,36 @@ function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavig
         </section>
         <aside className="space-y-3">
           <h3 className="text-sm font-semibold text-white">Upcoming</h3>
-          {events.filter((event) => event.day >= 22).sort((a, b) => a.day - b.day).map((event) => (
-            <article key={event.id} className="glass rounded-2xl p-4">
-              <div className="flex items-start gap-3"><div className="flex size-10 shrink-0 flex-col items-center justify-center rounded-xl bg-white/7"><span className="text-[9px] uppercase text-slate-500">Jun</span><span className="text-sm font-bold">{event.day}</span></div><div className="min-w-0"><p className="text-sm font-medium">{event.title}</p><p className="mt-1 text-xs text-slate-500">{event.type} · {event.time}</p></div></div>
-              {event.task && <button type="button" onClick={() => onNavigate('Tasks')} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-white hover:text-zinc-300">Open linked task <ArrowRight className="size-3" /></button>}
-            </article>
-          ))}
+          {loading ? (
+            <div className="space-y-3">{[0, 1, 2].map((key) => <div key={key} className="premium-skeleton h-20 rounded-2xl" />)}</div>
+          ) : loadError ? (
+            <div className="glass rounded-2xl p-5 text-center">
+              <p className="text-sm text-rose-300">{loadError}</p>
+              <button type="button" onClick={() => void loadEvents()} className="secondary-action mx-auto mt-3">Try again</button>
+            </div>
+          ) : upcoming.length === 0 ? (
+            <EmptyState title="No upcoming events" detail="Add a deadline, exam, or study block above." />
+          ) : (
+            upcoming.map((event) => {
+              const eventDay = new Date(event.eventDate + 'T00:00:00')
+              return (
+                <article key={event.id} className="glass rounded-2xl p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex size-10 shrink-0 flex-col items-center justify-center rounded-xl bg-white/7">
+                      <span className="text-[9px] uppercase text-slate-500">{eventDay.toLocaleDateString([], { month: 'short' })}</span>
+                      <span className="text-sm font-bold">{eventDay.getDate()}</span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{event.title}</p>
+                      <p className="mt-1 text-xs text-slate-500">{event.type} · {event.time}</p>
+                    </div>
+                    <button type="button" aria-label={`Remove ${event.title}`} onClick={() => void removeEvent(event.id)} className="interactive-icon shrink-0 text-slate-500 hover:text-rose-300"><X className="size-3.5" /></button>
+                  </div>
+                  {event.taskId && <button type="button" onClick={() => onNavigate('Tasks')} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-white hover:text-zinc-300">Open linked task <ArrowRight className="size-3" /></button>}
+                </article>
+              )
+            })
+          )}
         </aside>
       </div>
     </div>
