@@ -435,7 +435,7 @@ export function Workspace({
     window.setTimeout(() => {
       setChatLandingVisible(false)
       setChatLandingExiting(false)
-    }, 620)
+    }, 950)
   }
 
   const startNewChat = () => {
@@ -923,10 +923,10 @@ function ChatLanding({
           >
             <Sparkles className="size-5 shrink-0 text-zinc-300" />
             <input
-              autoFocus
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
               onFocus={onFocusInput}
+              onMouseDown={onFocusInput}
               placeholder="Ask AirGPT anything…"
               aria-label="Ask AirGPT"
               className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-500"

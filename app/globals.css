@@ -299,20 +299,25 @@
     transform: scale(1);
     filter: blur(0px);
   }
-  55% {
-    opacity: 0.65;
-    transform: scale(1.015);
-    filter: blur(8px);
+  35% {
+    opacity: 0.85;
+    transform: scale(1.008);
+    filter: blur(4px);
+  }
+  70% {
+    opacity: 0.4;
+    transform: scale(1.03);
+    filter: blur(14px);
   }
   100% {
     opacity: 0;
-    transform: scale(1.05);
-    filter: blur(22px);
+    transform: scale(1.06);
+    filter: blur(26px);
   }
 }
 
 .animate-landing-exit {
-  animation: landing-exit 620ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: landing-exit 950ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .animate-toast-in {
