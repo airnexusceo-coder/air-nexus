@@ -1,9 +1,18 @@
 import { Analytics } from '@vercel/analytics/next'
 import { GeistMono } from 'geist/font/mono'
 import { GeistSans } from 'geist/font/sans'
+import { Inter, Lora } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
 import { ProductionRuntime } from '@/components/production-runtime'
+import { FONT_PREFERENCE_STORAGE_KEY } from '@/lib/font-preference'
 import './globals.css'
+
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
+const lora = Lora({ subsets: ['latin'], variable: '--font-lora', display: 'swap' })
+
+// Applies the stored font preference before first paint, so switching fonts
+// in Settings never causes a flash of the previous font on the next load.
+const FONT_PREFERENCE_SCRIPT = `(function(){try{var v=localStorage.getItem(${JSON.stringify(FONT_PREFERENCE_STORAGE_KEY)});if(v)document.documentElement.setAttribute('data-font',v);}catch(e){}})();`
 
 export const metadata: Metadata = {
   title: 'Air Nexus — Intelligence Without Limits',
@@ -42,8 +51,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${GeistSans.variable} ${GeistMono.variable}`}
+      className={`dark ${GeistSans.variable} ${GeistMono.variable} ${inter.variable} ${lora.variable}`}
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: FONT_PREFERENCE_SCRIPT }} />
+      </head>
       <body className="font-sans antialiased">
         {children}
         <ProductionRuntime />

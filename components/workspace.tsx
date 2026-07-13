@@ -41,6 +41,7 @@ import {
   Plug,
   Plus,
   Search,
+  Settings as SettingsIcon,
   Shield,
   Sparkles,
   Star,
@@ -56,6 +57,7 @@ import { ThinkingLogo } from '@/components/thinking-logo'
 import { AiMarkdown } from '@/components/ai-markdown'
 import { SpeakButton } from '@/components/speak-button'
 import { sanitizeResponse } from '@/lib/ai/sanitize-response'
+import { formatAiTextForDocument } from '@/lib/documents/format-ai-text'
 import { apiUrl, fetchWithRetry } from '@/lib/api-client'
 import { isSpeechCancellation, speakWithOrpheus } from '@/lib/voice/orpheus'
 import { useVoiceInput } from '@/lib/voice/use-voice-input'
@@ -106,6 +108,7 @@ const IntelligentDashboardPage = dynamic(() => import('@/components/intelligent-
 const LessonRecorderPage = dynamic(() => import('@/components/lesson-recorder-page').then((module) => module.LessonRecorderPage), { loading: SectionLoading })
 const MarketplacePage = dynamic(() => import('@/components/marketplace-page').then((module) => module.MarketplacePage), { loading: SectionLoading })
 const MemoryPage = dynamic(() => import('@/components/memory-page').then((module) => module.MemoryPage), { loading: SectionLoading })
+const SettingsPage = dynamic(() => import('@/components/settings-page').then((module) => module.SettingsPage), { loading: SectionLoading })
 const WorkspacePages = dynamic(() => import('@/components/workspace-pages').then((module) => module.WorkspacePages), { loading: SectionLoading })
 
 type WorkspaceProps = {
@@ -761,7 +764,7 @@ export function Workspace({
       notify('You have view-only access to this document.', 'warning')
       return
     }
-    const addition = '<br><br>' + sanitizeResponse(text).split('\n').map((line) => `<p>${line}</p>`).join('')
+    const addition = '<br><br>' + formatAiTextForDocument(text)
     const patchResponse = await fetch(`/api/docs/${docId}`, {
       method: 'PATCH',
       credentials: 'include',
@@ -1474,6 +1477,7 @@ function SectionWorkspace({
     section === 'Leaderboard' ? Trophy :
     section === 'Notifications' ? Bell :
     section === 'Integrations' ? Plug :
+    section === 'Settings' ? SettingsIcon :
     section === 'Marketplace' ? Store :
     section === 'Apex' ? Shield :
     section === 'AI Chat' ? MessageSquare :
@@ -1600,7 +1604,11 @@ function SectionWorkspace({
           <ApexHome notify={notify} nexusPoints={nexusPoints} onRedeemReward={onRedeemReward} />
         )}
 
-        {!['Dashboard', 'Daily Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators', 'Courses', 'Apex'].includes(section) && (
+        {section === 'Settings' && (
+          <SettingsPage />
+        )}
+
+        {!['Dashboard', 'Daily Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">

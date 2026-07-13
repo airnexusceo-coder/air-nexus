@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FilePlus2, LoaderCircle, Mic, Pause, Play, RotateCcw, Square } from 'lucide-react'
 import { AiMarkdown } from '@/components/ai-markdown'
 import { apiUrl } from '@/lib/api-client'
-import { sanitizeResponse } from '@/lib/ai/sanitize-response'
+import { formatAiTextForDocument } from '@/lib/documents/format-ai-text'
 import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
 
@@ -160,7 +160,7 @@ export function LessonRecorderPage({ onNavigate, notify }: LessonRecorderPagePro
       const created = await createResponse.json().catch(() => ({})) as { id?: string; error?: string }
       if (!createResponse.ok || !created.id) throw new Error(created.error ?? 'Could not create a document.')
       const title = `Lesson notes — ${new Date().toLocaleDateString()}`
-      const body = sanitizeResponse(notes).split('\n').map((line) => `<p>${line}</p>`).join('')
+      const body = formatAiTextForDocument(notes)
       const patchResponse = await fetch(`/api/docs/${created.id}`, {
         method: 'PATCH',
         credentials: 'include',

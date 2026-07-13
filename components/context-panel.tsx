@@ -34,6 +34,7 @@ import { ThinkingLogo } from '@/components/thinking-logo'
 import { AiMarkdown } from '@/components/ai-markdown'
 import { SpeakButton } from '@/components/speak-button'
 import { sanitizeResponse } from '@/lib/ai/sanitize-response'
+import { formatAiTextForDocument } from '@/lib/documents/format-ai-text'
 import { apiUrl } from '@/lib/api-client'
 import { isSpeechCancellation, speakWithOrpheus } from '@/lib/voice/orpheus'
 import { useVoiceInput } from '@/lib/voice/use-voice-input'
@@ -398,7 +399,7 @@ export function ContextPanel({
       return
     }
     const current = (await response.json()) as { body: string }
-    const addition = '<br><br>' + sanitizeResponse(text).split('\n').map((line) => `<p>${line}</p>`).join('')
+    const addition = '<br><br>' + formatAiTextForDocument(text)
     const patchResponse = await fetch(`/api/docs/${docId}`, {
       method: 'PATCH',
       credentials: 'include',

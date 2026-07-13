@@ -51,6 +51,18 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* User font preference (Settings page) — overrides the --font-sans set
+   above. Geist has no override here since it's already the default. */
+:root[data-font='inter'] {
+  --font-sans: var(--font-inter), 'Geist Fallback';
+}
+:root[data-font='lora'] {
+  --font-sans: var(--font-lora), ui-serif, serif;
+}
+:root[data-font='system'] {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
 :root {
   color-scheme: dark;
   --background: oklch(0.16 0.005 255);

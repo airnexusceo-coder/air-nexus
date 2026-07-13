@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { apiUrl } from '@/lib/api-client'
-import { sanitizeResponse } from '@/lib/ai/sanitize-response'
+import { formatAiTextForDocument } from '@/lib/documents/format-ai-text'
 import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
 
@@ -418,7 +418,7 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
       })
       const data = await response.json().catch(() => ({})) as { reply?: string; error?: string }
       if (!response.ok || !data.reply) throw new Error(data.error || 'Could not apply that suggestion')
-      const nextBody = sanitizeResponse(data.reply).split('\n').filter((line) => line.trim()).map((line) => `<p>${line}</p>`).join('')
+      const nextBody = formatAiTextForDocument(data.reply)
       if (editorRef.current) editorRef.current.innerHTML = nextBody
       savePatch({ body: nextBody })
       dismissSuggestion(suggestion.id)
@@ -455,7 +455,7 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
   }
 
   const insertWriteDraft = () => {
-    const addition = '<br><br>' + sanitizeResponse(writeDraft).split('\n').filter((line) => line.trim()).map((line) => `<p>${line}</p>`).join('')
+    const addition = '<br><br>' + formatAiTextForDocument(writeDraft)
     const nextBody = (editorRef.current?.innerHTML ?? '') + addition
     if (editorRef.current) editorRef.current.innerHTML = nextBody
     savePatch({ body: nextBody })
