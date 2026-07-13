@@ -103,6 +103,7 @@ const CalculatorsPage = dynamic(() => import('@/components/calculators-page').th
 const DashboardPage = dynamic(() => import('@/components/dashboard-page').then((module) => module.DashboardPage), { loading: SectionLoading })
 const DocsPage = dynamic(() => import('@/components/docs-page').then((module) => module.DocsPage), { loading: SectionLoading })
 const IntelligentDashboardPage = dynamic(() => import('@/components/intelligent-dashboard-page').then((module) => module.IntelligentDashboardPage), { loading: SectionLoading })
+const LessonRecorderPage = dynamic(() => import('@/components/lesson-recorder-page').then((module) => module.LessonRecorderPage), { loading: SectionLoading })
 const MarketplacePage = dynamic(() => import('@/components/marketplace-page').then((module) => module.MarketplacePage), { loading: SectionLoading })
 const MemoryPage = dynamic(() => import('@/components/memory-page').then((module) => module.MemoryPage), { loading: SectionLoading })
 const WorkspacePages = dynamic(() => import('@/components/workspace-pages').then((module) => module.WorkspacePages), { loading: SectionLoading })
@@ -1461,6 +1462,7 @@ function SectionWorkspace({
     section === 'AI Tutor' ? GraduationCap :
     section === 'Flashcards' ? Layers3 :
     section === 'Assignment Workspace' ? ClipboardList :
+    section === 'Record Lesson' ? Mic :
     section === 'Collaboration Rooms' ? Users :
     section === 'People' ? UserSearch :
     section === 'Panic Mode' ? TimerReset :
@@ -1537,6 +1539,10 @@ function SectionWorkspace({
           />
         )}
 
+        {section === 'Record Lesson' && (
+          <LessonRecorderPage onNavigate={onNavigate} notify={notify} />
+        )}
+
         {section === 'Collaboration Rooms' && (
           <CollaborationRoomsSection notify={notify} onOpenRoom={onOpenRoom} />
         )}
@@ -1594,7 +1600,7 @@ function SectionWorkspace({
           <ApexHome notify={notify} nexusPoints={nexusPoints} onRedeemReward={onRedeemReward} />
         )}
 
-        {!['Dashboard', 'Daily Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators', 'Courses', 'Apex'].includes(section) && (
+        {!['Dashboard', 'Daily Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Calculators', 'Courses', 'Apex'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">

@@ -80,6 +80,9 @@ Rules:
   if (action === 'notes') {
     return 'NOTES MODE: turn the supplied material (often a lesson recording transcript) into clear, well-organized study notes. Use Markdown headings for topics, bullet points for key facts and definitions, and bold the most important terms. Preserve everything substantive from the source; do not add information that is not present in it, and do not editorialize about the recording itself.'
   }
+  if (action === 'draft') {
+    return 'DRAFT MODE: write clear, well-structured prose ready to drop directly into the student\'s document. If existing document text was supplied as context, match its tone, subject, and style, and write a continuation or addition rather than repeating it. Return only the requested writing itself — no preamble like "Here is your draft", no meta-commentary, no surrounding quotation marks.'
+  }
   if (action === 'assignment-plan') {
     return `ASSIGNMENT WORKSPACE MODE: build a complete, practical student workspace from the supplied brief. Return valid JSON only with this exact shape:
 {"checklist":[{"title":"specific action","detail":"what done looks like"}],"timeline":[{"milestone":"stage name","targetDate":"YYYY-MM-DD or empty string","detail":"purpose"}],"researchNotes":[{"heading":"research theme","content":"grounded notes, questions, and evidence to find"}],"draft":"a coherent editable first draft in Markdown","references":[{"citation":"citation copied from supplied source details, or Source needed: description","note":"how the source supports the assignment","status":"verified|needs-source"}],"improvementSuggestions":[{"title":"specific improvement","detail":"how to apply it","priority":"high|medium|low"}],"finalReview":[{"criterion":"review criterion","detail":"specific assessment against the current draft","status":"pass|review"}]}

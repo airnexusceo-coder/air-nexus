@@ -13,18 +13,15 @@ import {
   Link2,
   LoaderCircle,
   Menu,
-  Mic,
   MoreHorizontal,
   PanelRightOpen,
-  Pause,
+  PenLine,
   Pencil,
-  Play,
   Plus,
   Printer,
   Search,
   Share2,
   Sparkles,
-  Square,
   Type,
   X,
 } from 'lucide-react'
@@ -43,19 +40,11 @@ type SearchResult = { userId: string; displayName: string }
 type SuggestionCategory = 'clarity' | 'structure' | 'grammar' | 'evidence' | 'style'
 type WritingSuggestion = { id: string; title: string; detail: string; category: SuggestionCategory }
 type DocBackup = { title: string; body: string; checklist: ChecklistItem[]; savedAt: string }
-type RecordState = 'idle' | 'recording' | 'paused' | 'processing'
 
 const MAX_CHECKLIST_ITEMS = 50
 const DEFAULT_BODY = 'Start typing here — AirGPT will suggest ways to improve your writing as you go.'
 const DOC_BACKUP_PREFIX = 'airnexus-doc-backup:'
 const MIN_SUGGESTION_LENGTH = 20
-const MAX_RECORDING_SECONDS = 20 * 60
-
-function formatDuration(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
 
 type DocsPageProps = {
   activeDocId: string | null
@@ -180,15 +169,13 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
   const [suggestions, setSuggestions] = useState<WritingSuggestion[]>([])
   const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   const [suggestionsError, setSuggestionsError] = useState('')
+  const [applyingSuggestionId, setApplyingSuggestionId] = useState<string | null>(null)
 
-  const [recordOpen, setRecordOpen] = useState(false)
-  const [recordState, setRecordState] = useState<RecordState>('idle')
-  const [recordSeconds, setRecordSeconds] = useState(0)
-  const [recordError, setRecordError] = useState('')
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const recordChunksRef = useRef<BlobPart[]>([])
-  const recordTimerRef = useRef<number | null>(null)
+  const [writeOpen, setWriteOpen] = useState(false)
+  const [writePrompt, setWritePrompt] = useState('')
+  const [writeLoading, setWriteLoading] = useState(false)
+  const [writeError, setWriteError] = useState('')
+  const [writeDraft, setWriteDraft] = useState('')
 
   const editorRef = useRef<HTMLDivElement>(null)
   const suppressPollRef = useRef(false)
@@ -205,7 +192,10 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     setResolveError('')
     try {
       const response = await fetch('/api/docs', { credentials: 'include', cache: 'no-store' })
-      if (!response.ok) throw new Error('Could not load your documents.')
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(data.error ?? `Could not load your documents. (HTTP ${response.status})`)
+      }
       const data = (await response.json()) as { docs: DocSummary[] }
       setDocList(data.docs)
       const owned = data.docs.filter((item) => item.role === 'owner').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -404,120 +394,75 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
 
   const dismissSuggestion = (id: string) => setSuggestions((current) => current.filter((item) => item.id !== id))
 
-  // Cleanup: never leave the microphone hot if the page changes while a
-  // lesson recording is in progress.
-  useEffect(() => () => {
-    if (recordTimerRef.current !== null) window.clearInterval(recordTimerRef.current)
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
-  }, [])
-
-  const generateNotesFromTranscript = async (transcript: string) => {
-    const response = await fetch(apiUrl('/api/chat'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: `Turn this lesson recording transcript into clear, structured study notes:\n\n${transcript.slice(0, 20_000)}`,
-        mode: 'auto',
-        action: 'notes',
-        purpose: 'study-generation',
-        history: [],
-        documents: [],
-      }),
-    })
-    const data = await response.json().catch(() => ({})) as { reply?: string; error?: string }
-    if (!response.ok || !data.reply) throw new Error(data.error || 'Could not generate notes')
-    return data.reply
-  }
-
-  const processRecording = async (blob: Blob) => {
-    setRecordState('processing')
-    setRecordError('')
+  // Rewrites the whole document to incorporate one suggestion — there's no
+  // reliable way to patch a single sentence inside contentEditable HTML from
+  // a model reply, so "Apply" is a full, faithful rewrite rather than a
+  // partial diff. The previous version is still recoverable from the local
+  // backup written just before this overwrites it.
+  const applySuggestion = async (suggestion: WritingSuggestion) => {
+    if (isReadOnly || applyingSuggestionId) return
+    setApplyingSuggestionId(suggestion.id)
     try {
-      const body = new FormData()
-      body.set('file', blob, 'lesson-recording.webm')
-      const transcribeResponse = await fetch(apiUrl('/api/transcribe'), { method: 'POST', body })
-      const transcribeData = await transcribeResponse.json().catch(() => ({})) as { text?: string; error?: string }
-      if (!transcribeResponse.ok || !transcribeData.text) throw new Error(transcribeData.error || 'Could not transcribe the recording')
-      const notes = await generateNotesFromTranscript(transcribeData.text)
-      const addition = `<br><br><h3>Lesson notes — ${new Date().toLocaleDateString()}</h3>` + sanitizeResponse(notes).split('\n').map((line) => `<p>${line}</p>`).join('')
-      const nextBody = (editorRef.current?.innerHTML ?? '') + addition
+      const currentText = editorRef.current?.innerText?.trim() ?? ''
+      const response = await fetch(apiUrl('/api/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Rewrite this whole document to apply one specific improvement, keeping everything else as close to the original as possible.\nImprovement to apply: ${suggestion.title} — ${suggestion.detail}\n\nCurrent document:\n${currentText.slice(0, 8_000)}`,
+          mode: 'auto',
+          action: 'draft',
+          purpose: 'planning',
+          history: [],
+          documents: [],
+        }),
+      })
+      const data = await response.json().catch(() => ({})) as { reply?: string; error?: string }
+      if (!response.ok || !data.reply) throw new Error(data.error || 'Could not apply that suggestion')
+      const nextBody = sanitizeResponse(data.reply).split('\n').filter((line) => line.trim()).map((line) => `<p>${line}</p>`).join('')
       if (editorRef.current) editorRef.current.innerHTML = nextBody
       savePatch({ body: nextBody })
-      notify('Lesson notes added to your document', 'success')
-      setRecordOpen(false)
-      setRecordState('idle')
-      setRecordSeconds(0)
+      dismissSuggestion(suggestion.id)
+      notify('Suggestion applied to your document', 'success')
     } catch (error) {
-      setRecordError(error instanceof Error ? error.message : 'Could not process the recording')
-      setRecordState('idle')
+      notify(error instanceof Error ? error.message : 'Could not apply that suggestion.', 'warning')
+    } finally {
+      setApplyingSuggestionId(null)
     }
   }
 
-  const startRecording = async () => {
-    setRecordError('')
+  const generateWriting = async () => {
+    const prompt = writePrompt.trim()
+    if (!prompt || writeLoading) return
+    setWriteLoading(true)
+    setWriteError('')
+    setWriteDraft('')
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaStreamRef.current = stream
-      const recorder = new MediaRecorder(stream)
-      recordChunksRef.current = []
-      recorder.ondataavailable = (event) => { if (event.data.size) recordChunksRef.current.push(event.data) }
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop())
-        mediaStreamRef.current = null
-        const blob = new Blob(recordChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-        void processRecording(blob)
-      }
-      mediaRecorderRef.current = recorder
-      recorder.start()
-      setRecordSeconds(0)
-      setRecordState('recording')
-      recordTimerRef.current = window.setInterval(() => {
-        setRecordSeconds((current) => {
-          const next = current + 1
-          if (next >= MAX_RECORDING_SECONDS) mediaRecorderRef.current?.stop()
-          return next
-        })
-      }, 1000)
-    } catch {
-      setRecordError('Microphone access could not be started. Check your browser permissions and try again.')
+      const currentText = editorRef.current?.innerText?.trim() ?? ''
+      const contextNote = currentText ? `\n\nFor context, here is the document so far:\n${currentText.slice(0, 4_000)}` : ''
+      const response = await fetch(apiUrl('/api/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: `Write this for my document: ${prompt}${contextNote}`, mode: 'auto', action: 'draft', purpose: 'planning', history: [], documents: [] }),
+      })
+      const data = await response.json().catch(() => ({})) as { reply?: string; error?: string }
+      if (!response.ok || !data.reply) throw new Error(data.error || 'Could not write that')
+      setWriteDraft(data.reply)
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : 'Could not write that')
+    } finally {
+      setWriteLoading(false)
     }
   }
 
-  const togglePauseRecording = () => {
-    const recorder = mediaRecorderRef.current
-    if (!recorder) return
-    if (recorder.state === 'recording') {
-      recorder.pause()
-      setRecordState('paused')
-      if (recordTimerRef.current !== null) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null }
-    } else if (recorder.state === 'paused') {
-      recorder.resume()
-      setRecordState('recording')
-      recordTimerRef.current = window.setInterval(() => setRecordSeconds((current) => current + 1), 1000)
-    }
-  }
-
-  const stopRecording = () => {
-    if (recordTimerRef.current !== null) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null }
-    mediaRecorderRef.current?.stop()
-  }
-
-  const cancelRecording = () => {
-    if (recordState === 'processing') return
-    if (recordTimerRef.current !== null) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null }
-    const recorder = mediaRecorderRef.current
-    if (recorder) {
-      recorder.onstop = () => {
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
-        mediaStreamRef.current = null
-      }
-      if (recorder.state !== 'inactive') recorder.stop()
-    }
-    mediaRecorderRef.current = null
-    setRecordState('idle')
-    setRecordSeconds(0)
-    setRecordError('')
-    setRecordOpen(false)
+  const insertWriteDraft = () => {
+    const addition = '<br><br>' + sanitizeResponse(writeDraft).split('\n').filter((line) => line.trim()).map((line) => `<p>${line}</p>`).join('')
+    const nextBody = (editorRef.current?.innerHTML ?? '') + addition
+    if (editorRef.current) editorRef.current.innerHTML = nextBody
+    savePatch({ body: nextBody })
+    notify('Added to your document', 'success')
+    setWriteDraft('')
+    setWritePrompt('')
+    setWriteOpen(false)
   }
 
   const addChecklistItem = () => {
@@ -678,12 +623,12 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
 
         <div className="flex items-center gap-1.5 sm:gap-2">
           {!isReadOnly && (
-            <button type="button" onClick={() => setRecordOpen(true)} className="secondary-action px-3 sm:px-4">
-              <Mic className="size-4" />
-              <span className="hidden sm:inline">Record lesson</span>
+            <button type="button" onClick={() => { setWriteOpen((open) => !open); setSuggestionsOpen(false) }} aria-expanded={writeOpen} className="secondary-action px-3 sm:px-4">
+              <PenLine className="size-4" />
+              <span className="hidden sm:inline">Write with AI</span>
             </button>
           )}
-          <button type="button" onClick={() => { setSuggestionsOpen(true); void getSuggestions() }} disabled={suggestionsLoading} className="secondary-action px-3 sm:px-4 disabled:cursor-wait disabled:opacity-60">
+          <button type="button" onClick={() => { setSuggestionsOpen(true); setWriteOpen(false); void getSuggestions() }} disabled={suggestionsLoading} className="secondary-action px-3 sm:px-4 disabled:cursor-wait disabled:opacity-60">
             <Sparkles className="size-4" />
             <span className="hidden sm:inline">{suggestionsLoading ? 'Thinking…' : 'Suggestions'}</span>
           </button>
@@ -782,6 +727,51 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
                 />
               )}
 
+              {writeOpen && (
+                <section className="glass mt-6 rounded-2xl p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold">
+                      <PenLine className="size-4 text-white/70" />Write with AI
+                    </h3>
+                    <button type="button" onClick={() => setWriteOpen(false)} aria-label="Close write with AI" className="interactive-icon size-7">
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      autoFocus
+                      value={writePrompt}
+                      onChange={(event) => setWritePrompt(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter' && writePrompt.trim()) void generateWriting() }}
+                      placeholder="e.g. Write an introduction about photosynthesis…"
+                      aria-label="What should AirGPT write?"
+                      className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none placeholder:text-slate-600 focus:border-white/30"
+                    />
+                    <button type="button" disabled={!writePrompt.trim() || writeLoading} onClick={() => void generateWriting()} className="primary-action shrink-0 disabled:cursor-not-allowed disabled:opacity-40">
+                      {writeLoading ? <LoaderCircle className="size-4 animate-spin" /> : <PenLine className="size-4" />}
+                      {writeLoading ? 'Writing…' : 'Write'}
+                    </button>
+                  </div>
+                  {writeError && <p className="mt-3 text-xs text-rose-300">{writeError}</p>}
+                  {writeDraft && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                      <p className="text-xs leading-6 text-slate-300 whitespace-pre-wrap">{writeDraft}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button type="button" onClick={insertWriteDraft} className="primary-action px-3 py-1.5 text-xs">
+                          <Plus className="size-3.5" />Insert into document
+                        </button>
+                        <button type="button" onClick={() => void generateWriting()} disabled={writeLoading} className="secondary-action px-3 py-1.5 text-xs disabled:cursor-wait disabled:opacity-60">
+                          Regenerate
+                        </button>
+                        <button type="button" onClick={() => setWriteDraft('')} className="secondary-action px-3 py-1.5 text-xs">
+                          Discard
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </section>
+              )}
+
               {suggestionsOpen && (
                 <section className="glass mt-6 rounded-2xl p-5">
                   <div className="flex items-center justify-between gap-3">
@@ -808,17 +798,30 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
                   ) : (
                     <ul className="mt-4 space-y-2.5">
                       {suggestions.map((item) => (
-                        <li key={item.id} className="glass-subtle flex items-start gap-3 rounded-xl px-4 py-3 text-sm">
-                          <span className={cn('mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', categoryStyles[item.category])}>
-                            {item.category}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium text-white">{item.title}</p>
-                            <p className="mt-1 text-xs leading-5 text-slate-400">{item.detail}</p>
+                        <li key={item.id} className="glass-subtle rounded-xl px-4 py-3 text-sm">
+                          <div className="flex items-start gap-3">
+                            <span className={cn('mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', categoryStyles[item.category])}>
+                              {item.category}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-white">{item.title}</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-400">{item.detail}</p>
+                            </div>
+                            <button type="button" aria-label="Dismiss suggestion" onClick={() => dismissSuggestion(item.id)} className="interactive-icon size-7 shrink-0">
+                              <X className="size-3.5" />
+                            </button>
                           </div>
-                          <button type="button" aria-label="Dismiss suggestion" onClick={() => dismissSuggestion(item.id)} className="interactive-icon size-7 shrink-0">
-                            <X className="size-3.5" />
-                          </button>
+                          {!isReadOnly && (
+                            <button
+                              type="button"
+                              onClick={() => void applySuggestion(item)}
+                              disabled={applyingSuggestionId !== null}
+                              className="mt-2.5 ml-9 inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-white/20 disabled:cursor-wait disabled:opacity-50"
+                            >
+                              {applyingSuggestionId === item.id ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                              {applyingSuggestionId === item.id ? 'Applying…' : 'Apply'}
+                            </button>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -916,54 +919,6 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
           ))}
           {collaborators.length === 0 && <p className="text-xs text-slate-600">Not shared with anyone yet.</p>}
         </div>
-      </Modal>
-
-      <Modal
-        open={recordOpen}
-        title="Record a lesson"
-        description="AirGPT transcribes the recording and adds structured notes to this document."
-        onClose={cancelRecording}
-      >
-        {recordState === 'processing' ? (
-          <div className="flex flex-col items-center gap-3 py-10 text-center">
-            <LoaderCircle className="size-6 animate-spin text-zinc-300" />
-            <p className="text-sm text-slate-400">Transcribing and writing your notes…</p>
-          </div>
-        ) : recordError ? (
-          <div className="py-6 text-center">
-            <p className="text-sm text-rose-300">{recordError}</p>
-            <button type="button" onClick={() => setRecordError('')} className="secondary-action mx-auto mt-4">Try again</button>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-6 py-4 text-center">
-            <div className="relative flex size-20 items-center justify-center">
-              {recordState === 'recording' && <span className="absolute inset-0 animate-ping rounded-full bg-rose-500/20" />}
-              <span className={cn('relative flex size-20 items-center justify-center rounded-full', recordState === 'recording' ? 'bg-rose-500/15 text-rose-300' : 'bg-white/10 text-white')}>
-                <Mic className="size-8" />
-              </span>
-            </div>
-            <p className="font-mono text-2xl font-semibold text-white">{formatDuration(recordSeconds)}</p>
-            <p className="text-xs text-slate-500">
-              {recordState === 'idle' ? 'Ready to record — keep this tab open while you record your lesson.' : recordState === 'paused' ? 'Paused' : 'Recording…'}
-            </p>
-            <div className="flex items-center gap-3">
-              {recordState === 'idle' ? (
-                <button type="button" onClick={() => void startRecording()} className="primary-action">
-                  <Mic className="size-4" />Start recording
-                </button>
-              ) : (
-                <>
-                  <button type="button" onClick={togglePauseRecording} className="secondary-action">
-                    {recordState === 'paused' ? <><Play className="size-4" />Resume</> : <><Pause className="size-4" />Pause</>}
-                  </button>
-                  <button type="button" onClick={stopRecording} className="primary-action">
-                    <Square className="size-4" />Stop &amp; take notes
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
       </Modal>
     </div>
   )

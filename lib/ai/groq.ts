@@ -148,8 +148,8 @@ export async function createTutorReply({
     body: JSON.stringify({
       model,
       messages,
-      temperature: action === 'flashcards' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes' || action.startsWith('assignment-') ? 0.25 : 0.5,
-      max_completion_tokens: action.startsWith('assignment-') ? 6_000 : action === 'flashcards' || action === 'study-coach' || action === 'notes' ? 4_096 : 2_048,
+      temperature: action === 'flashcards' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes' || action === 'draft' || action.startsWith('assignment-') ? 0.25 : 0.5,
+      max_completion_tokens: action.startsWith('assignment-') ? 6_000 : action === 'flashcards' || action === 'study-coach' || action === 'notes' || action === 'draft' ? 4_096 : 2_048,
       stream: false,
     }),
     signal,
@@ -223,8 +223,8 @@ export async function createTutorReplyStream({
     body: JSON.stringify({
       model,
       messages,
-      temperature: action === 'flashcards' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes' || action.startsWith('assignment-') ? 0.25 : 0.5,
-      max_completion_tokens: action.startsWith('assignment-') ? 6_000 : action === 'flashcards' || action === 'study-coach' || action === 'notes' ? 4_096 : 2_048,
+      temperature: action === 'flashcards' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes' || action === 'draft' || action.startsWith('assignment-') ? 0.25 : 0.5,
+      max_completion_tokens: action.startsWith('assignment-') ? 6_000 : action === 'flashcards' || action === 'study-coach' || action === 'notes' || action === 'draft' ? 4_096 : 2_048,
       stream: true,
     }),
     signal,

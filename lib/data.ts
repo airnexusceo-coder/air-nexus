@@ -13,6 +13,7 @@ import {
   BarChart3,
   Trophy,
   Bell,
+  Mic,
   Plug,
   Store,
   Settings,
@@ -69,7 +70,8 @@ export const navGroups: NavGroup[] = [
     items: [
       { label: 'Assignment Workspace', icon: ClipboardList },
       { label: 'Documents', icon: FileText, active: true },
-      { label: 'Tasks', icon: CheckSquare, badge: '12' },
+      { label: 'Record Lesson', icon: Mic },
+      { label: 'Tasks', icon: CheckSquare },
       { label: 'Calendar', icon: Calendar },
       { label: 'Calculators', icon: Calculator },
     ],
