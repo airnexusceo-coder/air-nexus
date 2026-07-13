@@ -25,6 +25,7 @@ import {
   Command,
   ClipboardList,
   Compass,
+  FilePlus2,
   Gauge,
   GraduationCap,
   History,
@@ -168,6 +169,8 @@ type ChatThread = {
 type LocalAttachment = DocumentAttachment
 
 const aiTools = [
+  { id: 'essay-writer', label: 'Essay / Report Writer', prompt: 'Write a well-structured, original essay or report on this topic, with a clear introduction, developed body paragraphs, and a conclusion: ' },
+  { id: 'writing-improve', label: 'Improve My Writing', prompt: 'Improve the clarity, flow, grammar, and structure of the following writing while keeping my meaning and voice intact. Return the improved version in full:\n\n' },
   { id: 'flashcards', label: 'Flashcard Generator', prompt: 'Turn the attached documents or material I provide into grounded active-recall flashcards.' },
   { id: 'quiz', label: 'Quiz Generator', prompt: 'Create an interactive quiz from the attached documents or topic.' },
   { id: 'graph', label: 'Graph Generator', prompt: 'Graph this function: ' },
@@ -185,20 +188,13 @@ const aiTools = [
   { id: 'diagram', label: 'Diagram Generator', prompt: 'Create a clear learning diagram for this topic: ' },
 ]
 
-const initialMessages: MainMessage[] = [
-  {
-    id: 'welcome',
-    role: 'assistant',
-    content:
-      'I’m ready to help with the Q4 launch brief. Ask me to write, research, summarize, or turn the plan into action items.',
-    time: 'Now',
-  },
-]
-
 const MAX_CHAT_HISTORY_ITEMS = 30
 
-function copyInitialMessages() {
-  return initialMessages.map((message) => ({ ...message }))
+// New chats start empty — ChatLanding's greeting screen replaces the old
+// scripted assistant welcome bubble (which had drifted to reference a
+// specific hardcoded brief that no longer exists).
+function copyInitialMessages(): MainMessage[] {
+  return []
 }
 
 function createChatTitle(messages: MainMessage[]) {
@@ -324,6 +320,8 @@ export function Workspace({
   const [isSending, setIsSending] = useState(false)
   const [attachments, setAttachments] = useState<LocalAttachment[]>([])
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [chatLandingVisible, setChatLandingVisible] = useState(true)
+  const [chatLandingExiting, setChatLandingExiting] = useState(false)
 
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -424,6 +422,18 @@ export function Workspace({
     return () => document.removeEventListener('keydown', closeTransientUi)
   }, [])
 
+  // Plays the landing screen's exit animation, then swaps in the full chat
+  // shell — the message send itself (if any) runs in parallel, not gated on
+  // the animation finishing.
+  const beginChatTransition = () => {
+    if (chatLandingExiting || !chatLandingVisible) return
+    setChatLandingExiting(true)
+    window.setTimeout(() => {
+      setChatLandingVisible(false)
+      setChatLandingExiting(false)
+    }, 260)
+  }
+
   const startNewChat = () => {
     if (isSending) {
       notify('Wait for the current response to finish before starting another chat.', 'info')
@@ -435,6 +445,8 @@ export function Workspace({
     setDraft('')
     setAttachments([])
     setToolsOpen(false)
+    setChatLandingVisible(true)
+    setChatLandingExiting(false)
     notify('Started a fresh AI conversation', 'success')
   }
 
@@ -448,6 +460,8 @@ export function Workspace({
     setDraft('')
     setAttachments([])
     setToolsOpen(false)
+    setChatLandingVisible(false)
+    setChatLandingExiting(false)
     notify('Opened ' + thread.title, 'info')
   }
 
@@ -479,6 +493,8 @@ export function Workspace({
         setDraft('')
         setAttachments([])
         setToolsOpen(false)
+        setChatLandingVisible(true)
+        setChatLandingExiting(false)
         composerRef.current?.focus()
         notify('Started a fresh AI conversation', 'success')
         return
@@ -711,6 +727,55 @@ export function Workspace({
     onOpenMainChat()
   }
 
+  // Appends an AI reply to the user's document, resolving (opening or
+  // silently creating) one first if none is open yet — mirrors DocsPage's
+  // own no-manual-creation-step resolution so this works even if the
+  // student never visited Documents this session.
+  const insertToActiveDocument = async (text: string) => {
+    let docId = activeDocId
+    if (!docId) {
+      const listResponse = await fetch('/api/docs', { credentials: 'include', cache: 'no-store' })
+      if (listResponse.ok) {
+        const data = await listResponse.json() as { docs: Array<{ id: string; role: string; updatedAt: string }> }
+        const owned = data.docs.filter((item) => item.role === 'owner').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        docId = owned[0]?.id ?? null
+      }
+      if (!docId) {
+        const createResponse = await fetch('/api/docs', { method: 'POST', credentials: 'include' })
+        const created = await createResponse.json().catch(() => ({})) as { id?: string; error?: string }
+        if (!createResponse.ok || !created.id) {
+          notify(created.error ?? 'Could not reach your document.', 'warning')
+          return
+        }
+        docId = created.id
+      }
+    }
+    const response = await fetch(`/api/docs/${docId}`, { credentials: 'include', cache: 'no-store' })
+    if (!response.ok) {
+      notify('Could not reach the document to insert into.', 'warning')
+      return
+    }
+    const current = await response.json() as { body: string; role: string }
+    if (current.role === 'viewer') {
+      notify('You have view-only access to this document.', 'warning')
+      return
+    }
+    const addition = '<br><br>' + sanitizeResponse(text).split('\n').map((line) => `<p>${line}</p>`).join('')
+    const patchResponse = await fetch(`/api/docs/${docId}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: (current.body || '') + addition }),
+    })
+    if (!patchResponse.ok) {
+      const data = await patchResponse.json().catch(() => ({})) as { error?: string }
+      notify(data.error ?? 'Could not insert into the document.', 'warning')
+      return
+    }
+    if (docId !== activeDocId) onOpenDoc(docId)
+    notify('Added to your document', 'success')
+  }
+
   if (!isDocument) {
     return (
       <SectionWorkspace
@@ -746,6 +811,18 @@ export function Workspace({
   return (
     <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
       {mainChatOpen ? (
+        chatLandingVisible ? (
+          <ChatLanding
+            profileName={profileName}
+            draft={draft}
+            onDraftChange={setDraft}
+            isExiting={chatLandingExiting}
+            onFocusInput={beginChatTransition}
+            onSubmit={() => { beginChatTransition(); void sendMessage() }}
+            onOpenSidebar={onOpenSidebar}
+            onOpenContext={onOpenContext}
+          />
+        ) : (
         <FullPageChat
           draft={draft}
           messages={messages}
@@ -773,7 +850,7 @@ export function Workspace({
           }
           onToggleTools={() => setToolsOpen((open) => !open)}
           onChooseTool={chooseTool}
-          onToggleMicrophone={plan === 'Free' ? () => onRequestUpgrade('Voice Chat', 'Plus') : toggleMicrophone}
+          onToggleMicrophone={toggleMicrophone}
           canUseVoice={plan !== 'Free'}
           onVoiceUpgrade={() => onRequestUpgrade('Text-to-Speech', 'Plus')}
           onSpeechError={(message) => notify(message, 'warning')}
@@ -784,7 +861,9 @@ export function Workspace({
           onToggleFavorite={(id) => toggleChatPreference(id, 'favorite')}
           onToggleChatHistory={() => setChatHistoryCollapsed((collapsed) => !collapsed)}
           onOpenFlashcards={() => onNavigate('Flashcards')}
+          onInsertToDocument={(text) => void insertToActiveDocument(text)}
         />
+        )
       ) : (
         <DocsPage
           activeDocId={activeDocId}
@@ -797,6 +876,67 @@ export function Workspace({
     </main>
   )
 }
+
+function ChatLanding({
+  profileName,
+  draft,
+  onDraftChange,
+  isExiting,
+  onFocusInput,
+  onSubmit,
+  onOpenSidebar,
+  onOpenContext,
+}: {
+  profileName: string
+  draft: string
+  onDraftChange: (value: string) => void
+  isExiting: boolean
+  onFocusInput: () => void
+  onSubmit: () => void
+  onOpenSidebar: () => void
+  onOpenContext: () => void
+}) {
+  const firstName = profileName.trim().split(/\s+/)[0] || 'there'
+  return (
+    <div className={cn('flex min-h-0 flex-1 flex-col', isExiting && 'animate-landing-exit pointer-events-none')}>
+      <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
+        <button type="button" onClick={onOpenSidebar} aria-label="Open navigation" className="interactive-icon lg:hidden">
+          <Menu className="size-5" />
+        </button>
+        <span />
+        <button type="button" onClick={onOpenContext} aria-label="Open context panel" className="interactive-icon xl:hidden">
+          <PanelRightOpen className="size-5" />
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-16">
+        <div className="w-full max-w-2xl text-center">
+          <ThinkingLogo isThinking={false} className="mx-auto size-12" />
+          <h1 className="mt-6 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{firstName}, ready to learn?</h1>
+          <p className="mt-2 text-sm text-slate-400">Ask a question, paste your notes, or tell AirGPT what you&apos;re studying.</p>
+          <form
+            onSubmit={(event) => { event.preventDefault(); if (draft.trim()) onSubmit() }}
+            className="glass-input mt-8 flex items-center gap-2 rounded-2xl px-4 py-3.5 text-left"
+          >
+            <Sparkles className="size-5 shrink-0 text-zinc-300" />
+            <input
+              autoFocus
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              onFocus={onFocusInput}
+              placeholder="Ask AirGPT anything…"
+              aria-label="Ask AirGPT"
+              className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-500"
+            />
+            <button type="submit" disabled={!draft.trim()} aria-label="Send message" className="send-button">
+              <ArrowUp className="size-4" />
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FullPageChat({
   draft,
   messages,
@@ -833,6 +973,7 @@ function FullPageChat({
   onToggleFavorite,
   onToggleChatHistory,
   onOpenFlashcards,
+  onInsertToDocument,
 }: {
   draft: string
   messages: MainMessage[]
@@ -869,6 +1010,7 @@ function FullPageChat({
   onToggleFavorite: (id: string) => void
   onToggleChatHistory: () => void
   onOpenFlashcards: () => void
+  onInsertToDocument: (text: string) => void
 }) {
   const activeThread = chatHistory.find((thread) => thread.id === activeChatId)
   const lastMessage = messages[messages.length - 1]
@@ -915,7 +1057,12 @@ function FullPageChat({
                       <div className="mt-2 flex items-center justify-between gap-2">
                       {message.role === 'assistant' && message.tools && message.tools.length > 0 && <div className="mb-3 flex flex-wrap gap-1.5">{message.tools.map((tool) => <span key={tool} className="tool-activity-chip"><Wand2 className="size-3" />{tool}</span>)}</div>}
                         <p className="text-[10px] opacity-45">{message.model ? `${publicModelName(message.model)} · ` : ''}{streaming ? 'Streaming' : message.time}</p>
-                        {message.role === 'assistant' && message.content && !streaming && (canUseVoice ? <SpeakButton text={sanitizeResponse(message.content)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>)}
+                        {message.role === 'assistant' && message.content && !streaming && (
+                          <span className="flex items-center gap-1">
+                            <button type="button" onClick={() => onInsertToDocument(message.content)} aria-label="Save to document" title="Save to document" className="interactive-icon size-8"><FilePlus2 className="size-3.5" /></button>
+                            {canUseVoice ? <SpeakButton text={sanitizeResponse(message.content)} onError={onSpeechError} /> : <button type="button" onClick={onVoiceUpgrade} aria-label="Upgrade to use text-to-speech" className="interactive-icon size-8"><LockKeyhole className="size-3.5" /></button>}
+                          </span>
+                        )}
                       </div>
                     </div>
                     {message.artifact?.kind === 'quiz' && <QuizCard quiz={message.artifact.quiz} />}

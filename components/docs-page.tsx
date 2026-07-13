@@ -4,30 +4,33 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react
 import {
   Bold,
   Check,
-  ChevronLeft,
+  ChevronDown,
   Code2,
   Crown,
   Download,
   Eye,
-  FilePlus2,
-  FileText,
   Italic,
   Link2,
+  LoaderCircle,
   Menu,
+  Mic,
   MoreHorizontal,
   PanelRightOpen,
+  Pause,
   Pencil,
+  Play,
   Plus,
   Printer,
   Search,
   Share2,
   Sparkles,
-  Trash2,
+  Square,
   Type,
-  Users,
   X,
 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { apiUrl } from '@/lib/api-client'
+import { sanitizeResponse } from '@/lib/ai/sanitize-response'
 import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
 
@@ -37,9 +40,22 @@ type DocSummary = { id: string; title: string; role: DocRole; updatedAt: string;
 type Collaborator = { userId: string; displayName: string; role: 'editor' | 'viewer'; addedAt: string }
 type DocDetail = DocSummary & { body: string; ownerId: string; checklist: ChecklistItem[]; collaborators: Collaborator[] }
 type SearchResult = { userId: string; displayName: string }
+type SuggestionCategory = 'clarity' | 'structure' | 'grammar' | 'evidence' | 'style'
+type WritingSuggestion = { id: string; title: string; detail: string; category: SuggestionCategory }
+type DocBackup = { title: string; body: string; checklist: ChecklistItem[]; savedAt: string }
+type RecordState = 'idle' | 'recording' | 'paused' | 'processing'
 
 const MAX_CHECKLIST_ITEMS = 50
-const DEFAULT_BODY = 'Start typing here, or ask AirGPT to draft this document for you.'
+const DEFAULT_BODY = 'Start typing here — AirGPT will suggest ways to improve your writing as you go.'
+const DOC_BACKUP_PREFIX = 'airnexus-doc-backup:'
+const MIN_SUGGESTION_LENGTH = 20
+const MAX_RECORDING_SECONDS = 20 * 60
+
+function formatDuration(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
 
 type DocsPageProps = {
   activeDocId: string | null
@@ -47,11 +63,6 @@ type DocsPageProps = {
   onOpenSidebar: () => void
   onOpenContext: () => void
   notify: (message: string, tone?: NoticeTone) => void
-}
-
-function slugify(value: string) {
-  const slug = value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
-  return slug || 'document'
 }
 
 function createId(prefix: string) {
@@ -67,21 +78,88 @@ function downloadText(filename: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
-function formatUpdated(iso: string) {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  const today = new Date()
-  if (date.toDateString() === today.toDateString()) return 'Today, ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+function slugify(value: string) {
+  const slug = value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return slug || 'document'
 }
 
 const roleLabel: Record<DocRole, string> = { owner: 'Owner', editor: 'Editor', viewer: 'Viewer' }
 
+const categoryStyles: Record<SuggestionCategory, string> = {
+  clarity: 'bg-sky-400/12 text-sky-200',
+  structure: 'bg-violet-400/12 text-violet-200',
+  grammar: 'bg-rose-400/12 text-rose-200',
+  evidence: 'bg-amber-400/12 text-amber-200',
+  style: 'bg-emerald-400/12 text-emerald-200',
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function cleanText(value: unknown, maxLength: number) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
+}
+
+function parseSuggestions(reply: string): WritingSuggestion[] | null {
+  const normalized = reply.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim()
+  const start = normalized.indexOf('{')
+  const end = normalized.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  let value: unknown
+  try {
+    value = JSON.parse(normalized.slice(start, end + 1))
+  } catch {
+    return null
+  }
+  if (!isRecord(value) || !Array.isArray(value.suggestions)) return null
+  const categories: SuggestionCategory[] = ['clarity', 'structure', 'grammar', 'evidence', 'style']
+  return value.suggestions.flatMap((item): WritingSuggestion[] => {
+    if (!isRecord(item)) return []
+    const title = cleanText(item.title, 120)
+    const detail = cleanText(item.detail, 500)
+    if (!title || !detail) return []
+    const category = categories.includes(item.category as SuggestionCategory) ? item.category as SuggestionCategory : 'style'
+    return [{ id: createId('suggestion'), title, detail, category }]
+  }).slice(0, 8)
+}
+
+function docBackupKey(docId: string) {
+  return `${DOC_BACKUP_PREFIX}${docId}`
+}
+
+/** Best-effort local mirror of the doc, written on every save. Not the source of truth — recovers the draft if the server is briefly unreachable. */
+function readDocBackup(docId: string): DocBackup | null {
+  try {
+    const raw = window.localStorage.getItem(docBackupKey(docId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<DocBackup>
+    if (typeof parsed.title !== 'string' || typeof parsed.body !== 'string') return null
+    return {
+      title: parsed.title,
+      body: parsed.body,
+      checklist: Array.isArray(parsed.checklist) ? parsed.checklist : [],
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : new Date().toISOString(),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeDocBackup(docId: string, backup: Omit<DocBackup, 'savedAt'>) {
+  try {
+    window.localStorage.setItem(docBackupKey(docId), JSON.stringify({ ...backup, savedAt: new Date().toISOString() }))
+  } catch {
+    // Storage full or unavailable — the server save is the durable copy either way.
+  }
+}
+
 export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext, notify }: DocsPageProps) {
-  const [docs, setDocs] = useState<DocSummary[]>([])
-  const [docsLoading, setDocsLoading] = useState(true)
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
-  const [creating, setCreating] = useState(false)
+  const [resolveError, setResolveError] = useState('')
+  const autoOpenAttempted = useRef(false)
+
+  const [docList, setDocList] = useState<DocSummary[]>([])
+  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const [doc, setDoc] = useState<DocDetail | null>(null)
   const [docLoading, setDocLoading] = useState(false)
@@ -98,6 +176,20 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
   const [linkOpen, setLinkOpen] = useState(false)
   const [linkUrl, setLinkUrl] = useState('https://')
 
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [suggestions, setSuggestions] = useState<WritingSuggestion[]>([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [suggestionsError, setSuggestionsError] = useState('')
+
+  const [recordOpen, setRecordOpen] = useState(false)
+  const [recordState, setRecordState] = useState<RecordState>('idle')
+  const [recordSeconds, setRecordSeconds] = useState(0)
+  const [recordError, setRecordError] = useState('')
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const recordChunksRef = useRef<BlobPart[]>([])
+  const recordTimerRef = useRef<number | null>(null)
+
   const editorRef = useRef<HTMLDivElement>(null)
   const suppressPollRef = useRef(false)
   const lastUpdatedAtRef = useRef<string | null>(null)
@@ -107,24 +199,35 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
   const isReadOnly = doc?.role === 'viewer'
   const canShare = doc?.role === 'owner'
 
-  // Library list — only needed while no document is open.
-  useEffect(() => {
-    if (activeDocId) return
-    let cancelled = false
-    const timeoutId = window.setTimeout(() => {
-      setDocsLoading(true)
-      void (async () => {
-        const response = await fetch('/api/docs', { credentials: 'include', cache: 'no-store' })
-        if (cancelled) return
-        if (response.ok) setDocs(((await response.json()) as { docs: DocSummary[] }).docs)
-        setDocsLoading(false)
-      })()
-    }, 0)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timeoutId)
+  // No manual "create document" step: land straight in an editor. Reopen the
+  // most recently updated document you own, or silently start a fresh one.
+  const resolveDoc = useCallback(async () => {
+    setResolveError('')
+    try {
+      const response = await fetch('/api/docs', { credentials: 'include', cache: 'no-store' })
+      if (!response.ok) throw new Error('Could not load your documents.')
+      const data = (await response.json()) as { docs: DocSummary[] }
+      setDocList(data.docs)
+      const owned = data.docs.filter((item) => item.role === 'owner').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      if (owned[0]) {
+        onOpenDoc(owned[0].id)
+        return
+      }
+      const createResponse = await fetch('/api/docs', { method: 'POST', credentials: 'include' })
+      const created = await createResponse.json().catch(() => ({})) as DocSummary & { error?: string }
+      if (!createResponse.ok || !('id' in created)) throw new Error(created.error ?? 'Could not start a new document.')
+      setDocList((current) => [created, ...current])
+      onOpenDoc(created.id)
+    } catch (error) {
+      setResolveError(error instanceof Error ? error.message : 'Could not reach the server.')
     }
-  }, [activeDocId])
+  }, [onOpenDoc])
+
+  useEffect(() => {
+    if (activeDocId || autoOpenAttempted.current) return
+    autoOpenAttempted.current = true
+    void resolveDoc()
+  }, [activeDocId, resolveDoc])
 
   // Load the open document whenever the selection changes.
   useEffect(() => {
@@ -132,6 +235,8 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     const timeoutId = window.setTimeout(() => {
       setMoreOpen(false)
       setShareOpen(false)
+      setSuggestionsOpen(false)
+      setSuggestions([])
       if (!activeDocId) {
         setDoc(null)
         return
@@ -141,6 +246,18 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
         const response = await fetch(`/api/docs/${activeDocId}`, { credentials: 'include', cache: 'no-store' })
         if (cancelled) return
         if (!response.ok) {
+          const backup = readDocBackup(activeDocId)
+          if (backup) {
+            setDoc({ id: activeDocId, title: backup.title, body: backup.body, checklist: backup.checklist, role: 'owner', ownerId: '', updatedAt: backup.savedAt, createdAt: backup.savedAt, collaborators: [] })
+            setTitle(backup.title)
+            setChecklist(backup.checklist)
+            setCollaborators([])
+            lastUpdatedAtRef.current = null
+            if (editorRef.current) editorRef.current.innerHTML = backup.body || DEFAULT_BODY
+            notify('Could not reach the server — showing what was last saved on this device.', 'warning')
+            setDocLoading(false)
+            return
+          }
           notify('Could not open that document.', 'warning')
           onOpenDoc(null)
           setDocLoading(false)
@@ -186,6 +303,11 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
 
   const savePatch = useCallback((patch: { title?: string; body?: string; checklist?: ChecklistItem[] }) => {
     if (!activeDocId || isReadOnly) return
+    writeDocBackup(activeDocId, {
+      title: patch.title ?? title,
+      body: patch.body ?? (editorRef.current?.innerHTML ?? ''),
+      checklist: patch.checklist ?? checklist,
+    })
     void fetch(`/api/docs/${activeDocId}`, {
       method: 'PATCH',
       credentials: 'include',
@@ -194,13 +316,14 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     }).then(async (response) => {
       if (!response.ok) {
         const data = await response.json().catch(() => ({})) as { error?: string }
-        notify(data.error ?? 'Could not save changes.', 'warning')
+        notify(data.error ?? 'Could not save to the server — kept on this device.', 'warning')
         return
       }
       const updated = (await response.json()) as DocSummary
       lastUpdatedAtRef.current = updated.updatedAt
-    }).catch(() => notify('Could not reach the server to save.', 'warning'))
-  }, [activeDocId, isReadOnly, notify])
+      setDocList((current) => current.map((item) => item.id === activeDocId ? { ...item, title: updated.title, updatedAt: updated.updatedAt } : item))
+    }).catch(() => notify('Could not reach the server — kept on this device.', 'warning'))
+  }, [activeDocId, isReadOnly, notify, title, checklist])
 
   const saveBodyDebounced = useCallback(() => {
     if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current)
@@ -235,40 +358,166 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     saveBodyDebounced()
   }
 
-  const createDoc = async () => {
-    if (creating) return
-    setCreating(true)
-    try {
-      const response = await fetch('/api/docs', { method: 'POST', credentials: 'include' })
-      const data = await response.json().catch(() => ({})) as DocSummary & { error?: string }
-      if (!response.ok || !('id' in data)) {
-        notify((data as { error?: string }).error ?? 'Could not create document.', 'warning')
-        return
-      }
-      onOpenDoc(data.id)
-    } catch {
-      notify('Could not reach the server.', 'warning')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const deleteDoc = async (id: string) => {
-    const response = await fetch(`/api/docs/${id}`, { method: 'DELETE', credentials: 'include' })
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({})) as { error?: string }
-      notify(data.error ?? 'Could not delete document.', 'warning')
+  const startNewDraft = async () => {
+    const response = await fetch('/api/docs', { method: 'POST', credentials: 'include' })
+    const data = await response.json().catch(() => ({})) as DocSummary & { error?: string }
+    if (!response.ok || !('id' in data)) {
+      notify((data as { error?: string }).error ?? 'Could not start a new draft.', 'warning')
       return
     }
-    setDocs((current) => current.filter((item) => item.id !== id))
-    setConfirmDeleteId(null)
-    notify('Document deleted', 'success')
+    setDocList((current) => [data, ...current])
+    notify('Started a new draft', 'success')
+    onOpenDoc(data.id)
   }
 
   const exportDoc = () => {
     const body = editorRef.current?.innerText ?? ''
     downloadText(`airgpt-${slugify(title)}.md`, '# ' + title + '\n\n' + body)
-    notify('Document exported', 'success')
+    notify('Article downloaded', 'success')
+  }
+
+  const getSuggestions = async () => {
+    const text = editorRef.current?.innerText?.trim() ?? ''
+    if (text.length < MIN_SUGGESTION_LENGTH) {
+      notify('Write a bit more before asking for suggestions.', 'info')
+      return
+    }
+    setSuggestionsLoading(true)
+    setSuggestionsError('')
+    try {
+      const response = await fetch(apiUrl('/api/chat'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text.slice(0, 8_000), mode: 'auto', action: 'writing-suggestions', history: [], documents: [] }),
+      })
+      const data = await response.json().catch(() => ({})) as { reply?: string; error?: string }
+      if (!response.ok || !data.reply) throw new Error(data.error || 'Could not get suggestions')
+      const parsed = parseSuggestions(data.reply)
+      if (!parsed || parsed.length === 0) throw new Error('AirGPT returned suggestions in an unexpected format')
+      setSuggestions(parsed)
+    } catch (error) {
+      setSuggestionsError(error instanceof Error ? error.message : 'Could not get suggestions')
+    } finally {
+      setSuggestionsLoading(false)
+    }
+  }
+
+  const dismissSuggestion = (id: string) => setSuggestions((current) => current.filter((item) => item.id !== id))
+
+  // Cleanup: never leave the microphone hot if the page changes while a
+  // lesson recording is in progress.
+  useEffect(() => () => {
+    if (recordTimerRef.current !== null) window.clearInterval(recordTimerRef.current)
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+  }, [])
+
+  const generateNotesFromTranscript = async (transcript: string) => {
+    const response = await fetch(apiUrl('/api/chat'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: `Turn this lesson recording transcript into clear, structured study notes:\n\n${transcript.slice(0, 20_000)}`,
+        mode: 'auto',
+        action: 'notes',
+        purpose: 'study-generation',
+        history: [],
+        documents: [],
+      }),
+    })
+    const data = await response.json().catch(() => ({})) as { reply?: string; error?: string }
+    if (!response.ok || !data.reply) throw new Error(data.error || 'Could not generate notes')
+    return data.reply
+  }
+
+  const processRecording = async (blob: Blob) => {
+    setRecordState('processing')
+    setRecordError('')
+    try {
+      const body = new FormData()
+      body.set('file', blob, 'lesson-recording.webm')
+      const transcribeResponse = await fetch(apiUrl('/api/transcribe'), { method: 'POST', body })
+      const transcribeData = await transcribeResponse.json().catch(() => ({})) as { text?: string; error?: string }
+      if (!transcribeResponse.ok || !transcribeData.text) throw new Error(transcribeData.error || 'Could not transcribe the recording')
+      const notes = await generateNotesFromTranscript(transcribeData.text)
+      const addition = `<br><br><h3>Lesson notes — ${new Date().toLocaleDateString()}</h3>` + sanitizeResponse(notes).split('\n').map((line) => `<p>${line}</p>`).join('')
+      const nextBody = (editorRef.current?.innerHTML ?? '') + addition
+      if (editorRef.current) editorRef.current.innerHTML = nextBody
+      savePatch({ body: nextBody })
+      notify('Lesson notes added to your document', 'success')
+      setRecordOpen(false)
+      setRecordState('idle')
+      setRecordSeconds(0)
+    } catch (error) {
+      setRecordError(error instanceof Error ? error.message : 'Could not process the recording')
+      setRecordState('idle')
+    }
+  }
+
+  const startRecording = async () => {
+    setRecordError('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+      const recorder = new MediaRecorder(stream)
+      recordChunksRef.current = []
+      recorder.ondataavailable = (event) => { if (event.data.size) recordChunksRef.current.push(event.data) }
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+        const blob = new Blob(recordChunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+        void processRecording(blob)
+      }
+      mediaRecorderRef.current = recorder
+      recorder.start()
+      setRecordSeconds(0)
+      setRecordState('recording')
+      recordTimerRef.current = window.setInterval(() => {
+        setRecordSeconds((current) => {
+          const next = current + 1
+          if (next >= MAX_RECORDING_SECONDS) mediaRecorderRef.current?.stop()
+          return next
+        })
+      }, 1000)
+    } catch {
+      setRecordError('Microphone access could not be started. Check your browser permissions and try again.')
+    }
+  }
+
+  const togglePauseRecording = () => {
+    const recorder = mediaRecorderRef.current
+    if (!recorder) return
+    if (recorder.state === 'recording') {
+      recorder.pause()
+      setRecordState('paused')
+      if (recordTimerRef.current !== null) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null }
+    } else if (recorder.state === 'paused') {
+      recorder.resume()
+      setRecordState('recording')
+      recordTimerRef.current = window.setInterval(() => setRecordSeconds((current) => current + 1), 1000)
+    }
+  }
+
+  const stopRecording = () => {
+    if (recordTimerRef.current !== null) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null }
+    mediaRecorderRef.current?.stop()
+  }
+
+  const cancelRecording = () => {
+    if (recordState === 'processing') return
+    if (recordTimerRef.current !== null) { window.clearInterval(recordTimerRef.current); recordTimerRef.current = null }
+    const recorder = mediaRecorderRef.current
+    if (recorder) {
+      recorder.onstop = () => {
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+      }
+      if (recorder.state !== 'inactive') recorder.stop()
+    }
+    mediaRecorderRef.current = null
+    setRecordState('idle')
+    setRecordSeconds(0)
+    setRecordError('')
+    setRecordOpen(false)
   }
 
   const addChecklistItem = () => {
@@ -344,7 +593,7 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     setCollaborators((current) => current.filter((c) => c.userId !== userId))
   }
 
-  // --- Library view ---------------------------------------------------
+  // --- Resolving state (auto-selecting/creating a document; near-instant in the common case) ---
 
   if (!activeDocId) {
     return (
@@ -354,65 +603,27 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
             <button type="button" onClick={onOpenSidebar} aria-label="Open navigation" className="interactive-icon lg:hidden">
               <Menu className="size-5" />
             </button>
-            <span className="hidden size-9 items-center justify-center rounded-xl bg-white/10 sm:flex"><FileText className="size-4 text-zinc-200" /></span>
-            <p className="text-sm font-semibold sm:text-[15px]">My Documents</p>
+            <p className="text-sm font-semibold sm:text-[15px]">Documents</p>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <button type="button" disabled={creating} onClick={() => void createDoc()} className="primary-action px-3 sm:px-5 disabled:cursor-wait disabled:opacity-60">
-              <FilePlus2 className="size-4" />
-              <span className="hidden sm:inline">New document</span>
-            </button>
-            <button type="button" onClick={onOpenContext} aria-label="Open context panel" className="interactive-icon xl:hidden">
-              <PanelRightOpen className="size-5" />
-            </button>
-          </div>
+          <button type="button" onClick={onOpenContext} aria-label="Open context panel" className="interactive-icon xl:hidden">
+            <PanelRightOpen className="size-5" />
+          </button>
         </header>
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
-            {docsLoading ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {[0, 1, 2].map((key) => <div key={key} className="premium-skeleton h-32 rounded-2xl" />)}
-              </div>
-            ) : docs.length === 0 ? (
-              <div className="glass rounded-3xl p-10 text-center">
-                <FileText className="mx-auto size-8 text-slate-600" />
-                <p className="mt-3 text-sm font-semibold text-white">No documents yet</p>
-                <p className="mt-1 text-xs text-slate-500">Create your first document, or ask AirGPT to draft one for you.</p>
-                <button type="button" disabled={creating} onClick={() => void createDoc()} className="primary-action mx-auto mt-5 disabled:cursor-wait disabled:opacity-60">
-                  <FilePlus2 className="size-4" />New document
-                </button>
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {docs.map((item) => (
-                  <article key={item.id} className="glass group relative flex flex-col rounded-2xl p-4">
-                    <button type="button" onClick={() => onOpenDoc(item.id)} className="flex flex-1 flex-col items-start text-left">
-                      <span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><FileText className="size-4" /></span>
-                      <p className="mt-3 line-clamp-2 text-sm font-semibold text-white">{item.title}</p>
-                      <p className="mt-1 text-[11px] text-slate-500">Updated {formatUpdated(item.updatedAt)}</p>
-                      {item.role !== 'owner' && (
-                        <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-zinc-300">
-                          <Users className="size-3" />Shared · {roleLabel[item.role]}
-                        </span>
-                      )}
-                    </button>
-                    {item.role === 'owner' && (
-                      confirmDeleteId === item.id ? (
-                        <div className="mt-3 flex gap-2">
-                          <button type="button" onClick={() => void deleteDoc(item.id)} className="flex-1 rounded-lg bg-rose-500 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-rose-600">Confirm delete</button>
-                          <button type="button" onClick={() => setConfirmDeleteId(null)} className="rounded-lg px-2 py-1.5 text-[11px] text-slate-400 hover:bg-white/8">Cancel</button>
-                        </div>
-                      ) : (
-                        <button type="button" aria-label={`Delete ${item.title}`} onClick={() => setConfirmDeleteId(item.id)} className="interactive-icon absolute right-3 top-3 size-7 opacity-0 transition group-hover:opacity-100">
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      )
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          {resolveError ? (
+            <div className="glass max-w-sm rounded-2xl p-6 text-center">
+              <p className="text-sm font-semibold text-white">Could not reach the server</p>
+              <p className="mt-1 text-xs text-slate-500">{resolveError}</p>
+              <button type="button" onClick={() => void resolveDoc()} className="primary-action mx-auto mt-4">
+                Try again
+              </button>
+            </div>
+          ) : (
+            <div className="w-full max-w-2xl px-6">
+              <div className="premium-skeleton h-10 w-2/3 rounded-xl" />
+              <div className="premium-skeleton mt-4 h-40 rounded-2xl" />
+            </div>
+          )}
         </div>
       </div>
     )
@@ -424,26 +635,65 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <header className="glass-subtle relative z-20 flex shrink-0 items-center justify-between gap-3 border-x-0 border-t-0 px-3 py-3 sm:px-5">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <button type="button" onClick={() => onOpenDoc(null)} aria-label="Back to documents" className="interactive-icon">
-            <ChevronLeft className="size-5" />
+          <button type="button" onClick={onOpenSidebar} aria-label="Open navigation" className="interactive-icon lg:hidden">
+            <Menu className="size-5" />
           </button>
-          <div className="min-w-0 leading-tight">
-            <p className="truncate text-sm font-semibold sm:text-[15px]">{title}</p>
-            <p className="hidden text-xs text-muted-foreground sm:block">
-              {doc?.role === 'viewer' ? 'View only' : 'Saved automatically'}
-              <span className="ml-1 inline-block size-1.5 rounded-full bg-emerald-400" />
-            </p>
+          <div className="relative min-w-0">
+            <button type="button" onClick={() => setSwitcherOpen((open) => !open)} aria-expanded={switcherOpen} className="flex min-w-0 items-center gap-1 rounded-lg py-1 pl-1.5 pr-2 text-left hover:bg-white/5">
+              <span className="min-w-0 leading-tight">
+                <span className="block max-w-[46vw] truncate text-sm font-semibold sm:max-w-xs sm:text-[15px]">{title}</span>
+                <span className="hidden text-xs text-muted-foreground sm:block">
+                  {doc?.role === 'viewer' ? 'View only' : 'Saved automatically'}
+                  <span className="ml-1 inline-block size-1.5 rounded-full bg-emerald-400" />
+                </span>
+              </span>
+              <ChevronDown className="size-3.5 shrink-0 text-slate-500" />
+            </button>
+            {switcherOpen && (
+              <div className="menu-popover left-0 top-14 w-72">
+                {docList.length > 1 && (
+                  <div className="max-h-72 overflow-y-auto">
+                    {docList.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => { setSwitcherOpen(false); if (item.id !== activeDocId) onOpenDoc(item.id) }}
+                        className={cn('flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/8', item.id === activeDocId && 'bg-white/8')}
+                      >
+                        <span className="min-w-0 truncate">{item.title}</span>
+                        {item.role !== 'owner' && <span className="shrink-0 text-[10px] text-slate-500">{roleLabel[item.role]}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className={cn(docList.length > 1 && 'mt-1 border-t border-white/10 pt-1')}>
+                  <button type="button" onClick={() => { setSwitcherOpen(false); void startNewDraft() }} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/8">
+                    <Plus className="size-4" />Start a new draft
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <button type="button" onClick={exportDoc} aria-label="Download document" className="interactive-icon hidden sm:flex">
-            <Download className="size-[18px]" />
+          {!isReadOnly && (
+            <button type="button" onClick={() => setRecordOpen(true)} className="secondary-action px-3 sm:px-4">
+              <Mic className="size-4" />
+              <span className="hidden sm:inline">Record lesson</span>
+            </button>
+          )}
+          <button type="button" onClick={() => { setSuggestionsOpen(true); void getSuggestions() }} disabled={suggestionsLoading} className="secondary-action px-3 sm:px-4 disabled:cursor-wait disabled:opacity-60">
+            <Sparkles className="size-4" />
+            <span className="hidden sm:inline">{suggestionsLoading ? 'Thinking…' : 'Suggestions'}</span>
+          </button>
+          <button type="button" onClick={exportDoc} className="primary-action px-3 sm:px-5">
+            <Download className="size-4" />
+            <span className="hidden sm:inline">Download</span>
           </button>
           {canShare && (
-            <button type="button" onClick={() => setShareOpen(true)} className="primary-action px-3 sm:px-5">
-              <Share2 className="size-4" />
-              <span className="hidden sm:inline">Share</span>
+            <button type="button" onClick={() => setShareOpen(true)} aria-label="Share document" className="interactive-icon hidden sm:flex">
+              <Share2 className="size-[18px]" />
             </button>
           )}
           <div className="relative hidden sm:block">
@@ -455,17 +705,6 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
                 <button type="button" onClick={() => { setMoreOpen(false); window.print() }} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/8">
                   <Printer className="size-4 text-zinc-300" />Print
                 </button>
-                {doc?.role === 'owner' && (
-                  confirmDeleteId === activeDocId ? (
-                    <button type="button" onClick={() => void deleteDoc(activeDocId)} className="flex w-full items-center gap-2 rounded-xl bg-rose-500/15 px-3 py-2.5 text-left text-sm text-rose-300 hover:bg-rose-500/25">
-                      <Trash2 className="size-4" />Confirm delete
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => setConfirmDeleteId(activeDocId)} className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm text-rose-300 hover:bg-white/8">
-                      <Trash2 className="size-4" />Delete document
-                    </button>
-                  )
-                )}
               </div>
             )}
           </div>
@@ -541,6 +780,50 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
                   onFormat={runEditorCommand}
                   onAskAi={onOpenContext}
                 />
+              )}
+
+              {suggestionsOpen && (
+                <section className="glass mt-6 rounded-2xl p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold">
+                      <Sparkles className="size-4 text-white/70" />AirGPT suggestions
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => void getSuggestions()} disabled={suggestionsLoading} className="secondary-action px-3 py-1.5 text-xs disabled:cursor-wait disabled:opacity-60">
+                        {suggestionsLoading ? 'Thinking…' : 'Refresh'}
+                      </button>
+                      <button type="button" onClick={() => setSuggestionsOpen(false)} aria-label="Close suggestions" className="interactive-icon size-7">
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  {suggestionsLoading && suggestions.length === 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {[0, 1, 2].map((key) => <div key={key} className="premium-skeleton h-14 rounded-xl" />)}
+                    </div>
+                  ) : suggestionsError ? (
+                    <p className="mt-3 text-xs text-rose-300">{suggestionsError}</p>
+                  ) : suggestions.length === 0 ? (
+                    <p className="mt-3 text-xs text-slate-500">No suggestions yet — write a bit more, then refresh.</p>
+                  ) : (
+                    <ul className="mt-4 space-y-2.5">
+                      {suggestions.map((item) => (
+                        <li key={item.id} className="glass-subtle flex items-start gap-3 rounded-xl px-4 py-3 text-sm">
+                          <span className={cn('mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', categoryStyles[item.category])}>
+                            {item.category}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-white">{item.title}</p>
+                            <p className="mt-1 text-xs leading-5 text-slate-400">{item.detail}</p>
+                          </div>
+                          <button type="button" aria-label="Dismiss suggestion" onClick={() => dismissSuggestion(item.id)} className="interactive-icon size-7 shrink-0">
+                            <X className="size-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
               )}
 
               <div className="mt-10 flex items-center justify-between gap-3">
@@ -633,6 +916,54 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
           ))}
           {collaborators.length === 0 && <p className="text-xs text-slate-600">Not shared with anyone yet.</p>}
         </div>
+      </Modal>
+
+      <Modal
+        open={recordOpen}
+        title="Record a lesson"
+        description="AirGPT transcribes the recording and adds structured notes to this document."
+        onClose={cancelRecording}
+      >
+        {recordState === 'processing' ? (
+          <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <LoaderCircle className="size-6 animate-spin text-zinc-300" />
+            <p className="text-sm text-slate-400">Transcribing and writing your notes…</p>
+          </div>
+        ) : recordError ? (
+          <div className="py-6 text-center">
+            <p className="text-sm text-rose-300">{recordError}</p>
+            <button type="button" onClick={() => setRecordError('')} className="secondary-action mx-auto mt-4">Try again</button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-6 py-4 text-center">
+            <div className="relative flex size-20 items-center justify-center">
+              {recordState === 'recording' && <span className="absolute inset-0 animate-ping rounded-full bg-rose-500/20" />}
+              <span className={cn('relative flex size-20 items-center justify-center rounded-full', recordState === 'recording' ? 'bg-rose-500/15 text-rose-300' : 'bg-white/10 text-white')}>
+                <Mic className="size-8" />
+              </span>
+            </div>
+            <p className="font-mono text-2xl font-semibold text-white">{formatDuration(recordSeconds)}</p>
+            <p className="text-xs text-slate-500">
+              {recordState === 'idle' ? 'Ready to record — keep this tab open while you record your lesson.' : recordState === 'paused' ? 'Paused' : 'Recording…'}
+            </p>
+            <div className="flex items-center gap-3">
+              {recordState === 'idle' ? (
+                <button type="button" onClick={() => void startRecording()} className="primary-action">
+                  <Mic className="size-4" />Start recording
+                </button>
+              ) : (
+                <>
+                  <button type="button" onClick={togglePauseRecording} className="secondary-action">
+                    {recordState === 'paused' ? <><Play className="size-4" />Resume</> : <><Pause className="size-4" />Pause</>}
+                  </button>
+                  <button type="button" onClick={stopRecording} className="primary-action">
+                    <Square className="size-4" />Stop &amp; take notes
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )

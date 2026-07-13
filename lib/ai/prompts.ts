@@ -77,6 +77,9 @@ Rules:
   if (action === 'feedback') {
     return 'FEEDBACK MODE: evaluate the learner\'s latest attempt against the active practice question or quiz. Mark what is correct, identify any misconception, give the smallest useful correction or hint, and ask for a retry when appropriate. Finish with a lesson recap.'
   }
+  if (action === 'notes') {
+    return 'NOTES MODE: turn the supplied material (often a lesson recording transcript) into clear, well-organized study notes. Use Markdown headings for topics, bullet points for key facts and definitions, and bold the most important terms. Preserve everything substantive from the source; do not add information that is not present in it, and do not editorialize about the recording itself.'
+  }
   if (action === 'assignment-plan') {
     return `ASSIGNMENT WORKSPACE MODE: build a complete, practical student workspace from the supplied brief. Return valid JSON only with this exact shape:
 {"checklist":[{"title":"specific action","detail":"what done looks like"}],"timeline":[{"milestone":"stage name","targetDate":"YYYY-MM-DD or empty string","detail":"purpose"}],"researchNotes":[{"heading":"research theme","content":"grounded notes, questions, and evidence to find"}],"draft":"a coherent editable first draft in Markdown","references":[{"citation":"citation copied from supplied source details, or Source needed: description","note":"how the source supports the assignment","status":"verified|needs-source"}],"improvementSuggestions":[{"title":"specific improvement","detail":"how to apply it","priority":"high|medium|low"}],"finalReview":[{"criterion":"review criterion","detail":"specific assessment against the current draft","status":"pass|review"}]}
@@ -107,6 +110,15 @@ Rules:
 - Adjust revision plans only for subjects or plans present in the evidence. An empty revisionAdjustments array is valid.
 - If no subject is supported, use Study planning for one setup session and leave recommendedSubjects empty.
 - Do not use Markdown fences or add text outside the JSON.`
+  }
+  if (action === 'writing-suggestions') {
+    return `WRITING SUGGESTIONS MODE: review the student's in-progress draft and return concise, actionable suggestions to improve it. Return valid JSON only with this exact shape:
+{"suggestions":[{"title":"short label for the suggestion","detail":"specific, actionable advice tied to this draft","category":"clarity|structure|grammar|evidence|style"}]}
+Rules:
+- Ground every suggestion in the actual supplied text — reference specific words, sentences, or paragraphs. Never give generic advice that could apply to any piece of writing.
+- Give 3-6 suggestions, ordered by impact (most important first).
+- If the draft is too short (a sentence or less) to meaningfully critique, return exactly one suggestion encouraging the student to keep writing before requesting feedback again.
+- Do not rewrite the whole draft. Do not use Markdown fences or add text outside the JSON.`
   }
   if (action === 'flashcards') {
     return `FLASHCARD MODE: build active-recall flashcards for the request. If notes or documents were supplied, use only facts found in them and ground every card in that material. If none were supplied, use accurate general knowledge about the requested topic instead. Return valid JSON only with this exact shape:

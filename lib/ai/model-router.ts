@@ -26,7 +26,7 @@ export function selectGroqTextModel({
 }) {
   if (purpose === 'document-analysis' || hasDocuments) return GROQ_MODEL_ROLES.documentAnalysis
   if (purpose === 'study-generation' || purpose === 'planning') return GROQ_MODEL_ROLES.studyGeneration
-  if (action === 'quiz' || action === 'flashcards' || action === 'graph' || action === 'assignment-plan' || action === 'assignment-review' || action === 'study-coach') {
+  if (action === 'quiz' || action === 'flashcards' || action === 'graph' || action === 'assignment-plan' || action === 'assignment-review' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes') {
     return GROQ_MODEL_ROLES.studyGeneration
   }
   return GROQ_MODEL_ROLES.conversation

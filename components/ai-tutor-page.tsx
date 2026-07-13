@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { AiMarkdown } from '@/components/ai-markdown'
 import { QuizCard } from '@/components/study/quiz-card'
+import { Modal } from '@/components/ui/modal'
 import { apiUrl } from '@/lib/api-client'
 import { DOCUMENT_ACCEPT, readDocument } from '@/lib/documents/client'
 import { TUTOR_MODES, type TutorAction, type TutorHistoryMessage, type TutorMode } from '@/lib/ai/tutor-types'
@@ -32,7 +33,6 @@ import { cn } from '@/lib/utils'
 type TutorMessage = TutorHistoryMessage & {
   id: string
   createdAt: string
-  quiz?: Quiz
 }
 
 type AiTutorPageProps = {
@@ -102,6 +102,12 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
   const [awaitingAnswer, setAwaitingAnswer] = useState(false)
   const [tutorError, setTutorError] = useState('')
 
+  const [practiceTestOpen, setPracticeTestOpen] = useState(false)
+  const [practiceTestLoading, setPracticeTestLoading] = useState(false)
+  const [practiceTestError, setPracticeTestError] = useState('')
+  const [practiceTestQuiz, setPracticeTestQuiz] = useState<Quiz | null>(null)
+  const [practiceTestTopic, setPracticeTestTopic] = useState('')
+
   const [notes, setNotes] = useState('')
   const [cardCount, setCardCount] = useState(10)
   const [deck, setDeck] = useState<FlashcardDeck | null>(() => loadSavedDeck())
@@ -141,18 +147,13 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
       })
       const data = await response.json() as { reply?: string; error?: string }
       if (!response.ok || !data.reply) throw new Error(data.error || 'The tutor could not respond')
-      // A quiz renders as an interactive test, not a text bubble, whenever
-      // the reply actually parses — if the model didn't return valid JSON,
-      // fall back to showing the raw reply so the lesson never just breaks.
-      const quiz = action === 'quiz' ? parseQuiz(data.reply) : null
       setMessages((current) => [...current, {
         id: createId('tutor'),
         role: 'assistant',
-        content: quiz ? `Here's your mini quiz: ${quiz.title}` : data.reply as string,
+        content: data.reply as string,
         createdAt: new Date().toISOString(),
-        quiz: quiz ?? undefined,
       }])
-      setAwaitingAnswer(action === 'practice' || (action === 'quiz' && !quiz))
+      setAwaitingAnswer(action === 'practice')
     } catch (error) {
       setTutorError(error instanceof Error ? error.message : 'The tutor could not respond')
     } finally {
@@ -161,12 +162,56 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
   }
 
   const runLessonAction = (action: TutorAction) => {
-    const prompts: Record<'hint' | 'practice' | 'quiz', string> = {
+    const prompts: Record<'hint' | 'practice', string> = {
       hint: 'Give me the next useful hint for the problem or topic we are currently working on. Do not reveal the complete answer yet.',
       practice: 'Give me one practice question at the right difficulty based on this lesson. Wait for my answer before giving feedback.',
-      quiz: 'Start a short mini quiz based on this lesson. Ask the questions first and wait for my answers.',
     }
-    if (action === 'hint' || action === 'practice' || action === 'quiz') void sendTutorMessage(prompts[action], action)
+    if (action === 'hint' || action === 'practice') void sendTutorMessage(prompts[action], action)
+  }
+
+  const hasLessonContext = messages.some((message) => message.role === 'user')
+
+  const generatePracticeTest = async (topic?: string) => {
+    setPracticeTestLoading(true)
+    setPracticeTestError('')
+    const history = messages
+      .filter((message) => message.id !== 'tutor-welcome')
+      .slice(-MAX_TUTOR_HISTORY)
+      .map(({ role, content }) => ({ role, content }))
+    const promptText = topic ? `Create a short practice test on: ${topic}` : 'Create a short practice test based on this lesson so far.'
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(apiUrl('/api/chat'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: promptText, mode, action: 'quiz', purpose: 'tutoring', history, documents: [], isPlus: true }),
+        })
+        const data = await response.json() as { reply?: string; error?: string }
+        if (!response.ok || !data.reply) throw new Error(data.error || 'Could not generate a practice test')
+        const quiz = parseQuiz(data.reply)
+        if (quiz) {
+          setPracticeTestQuiz(quiz)
+          setPracticeTestLoading(false)
+          return
+        }
+        if (attempt === 1) throw new Error('AirGPT could not build a valid practice test. Try again.')
+      } catch (error) {
+        if (attempt === 1) {
+          setPracticeTestError(error instanceof Error ? error.message : 'Could not generate a practice test')
+          setPracticeTestLoading(false)
+          return
+        }
+      }
+    }
+  }
+
+  const openPracticeTest = () => {
+    setPracticeTestOpen(true)
+    setPracticeTestQuiz(null)
+    setPracticeTestError('')
+    setPracticeTestTopic('')
+    if (hasLessonContext) void generatePracticeTest()
   }
 
   const handleTutorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -291,8 +336,8 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
               <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Lesson tools</p>
               <div className="mt-3 grid gap-2">
                 <button type="button" disabled={loading} onClick={() => runLessonAction('hint')} className="secondary-action justify-start"><Lightbulb className="size-4" />Give me a hint</button>
-                <button type="button" disabled={loading} onClick={() => runLessonAction('practice')} className="secondary-action justify-start"><Target className="size-4" />Practice question</button>
-                <button type="button" disabled={loading} onClick={() => runLessonAction('quiz')} className="secondary-action justify-start"><BookOpenCheck className="size-4" />Mini quiz</button>
+                <button type="button" disabled={loading} onClick={() => runLessonAction('practice')} className="secondary-action justify-start"><Target className="size-4" />Quick check</button>
+                <button type="button" disabled={practiceTestLoading} onClick={openPracticeTest} className="secondary-action justify-start"><BookOpenCheck className="size-4" />Practice test</button>
               </div>
             </section>
 
@@ -307,13 +352,9 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
             <div className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
               {messages.map((message) => (
                 <article key={message.id} className={cn('flex', message.role === 'user' ? 'justify-end' : 'justify-start')}>
-                  {message.quiz ? (
-                    <QuizCard quiz={message.quiz} />
-                  ) : (
-                    <div className={cn('max-w-[88%] rounded-3xl px-5 py-4 text-sm leading-7', message.role === 'user' ? 'message-self rounded-br-lg text-white' : 'border border-white/8 bg-white/[0.045] text-slate-200')}>
-                      {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
-                    </div>
-                  )}
+                  <div className={cn('max-w-[88%] rounded-3xl px-5 py-4 text-sm leading-7', message.role === 'user' ? 'message-self rounded-br-lg text-white' : 'border border-white/8 bg-white/[0.045] text-slate-200')}>
+                    {message.role === 'assistant' ? <AiMarkdown>{message.content}</AiMarkdown> : <p className="whitespace-pre-wrap">{message.content}</p>}
+                  </div>
                 </article>
               ))}
               {loading && <div className="flex items-center gap-3 text-sm text-slate-500"><LoaderCircle className="size-4 animate-spin text-zinc-300" />Your tutor is planning the next teaching step…</div>}
@@ -359,6 +400,60 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
           </section>
         </div>
       )}
+
+      <Modal
+        open={practiceTestOpen}
+        title="Practice test"
+        description="A short graded test AirGPT builds from your lesson."
+        onClose={() => setPracticeTestOpen(false)}
+        className="max-w-2xl"
+      >
+        {practiceTestLoading ? (
+          <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <LoaderCircle className="size-6 animate-spin text-zinc-300" />
+            <p className="text-sm text-slate-400">Building your test…</p>
+          </div>
+        ) : practiceTestError ? (
+          <div className="py-6 text-center">
+            <p className="text-sm text-rose-300">{practiceTestError}</p>
+            <button type="button" onClick={() => void generatePracticeTest(practiceTestTopic || undefined)} className="primary-action mx-auto mt-4">
+              Try again
+            </button>
+          </div>
+        ) : practiceTestQuiz ? (
+          <div className="space-y-4">
+            <QuizCard quiz={practiceTestQuiz} />
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={practiceTestTopic}
+                onChange={(event) => setPracticeTestTopic(event.target.value)}
+                placeholder="Test me on something specific…"
+                aria-label="Practice test topic"
+                className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none placeholder:text-slate-600 focus:border-white/30"
+              />
+              <button type="button" onClick={() => void generatePracticeTest(practiceTestTopic || undefined)} className="secondary-action shrink-0">
+                <RefreshCw className="size-4" />New test
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-400">What would you like to be tested on?</p>
+            <input
+              autoFocus
+              value={practiceTestTopic}
+              onChange={(event) => setPracticeTestTopic(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter' && practiceTestTopic.trim()) void generatePracticeTest(practiceTestTopic) }}
+              placeholder="e.g. Photosynthesis, quadratic equations, World War I causes…"
+              aria-label="Practice test topic"
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none placeholder:text-slate-600 focus:border-white/30"
+            />
+            <button type="button" disabled={!practiceTestTopic.trim()} onClick={() => void generatePracticeTest(practiceTestTopic)} className="primary-action w-full disabled:cursor-not-allowed disabled:opacity-40">
+              <BookOpenCheck className="size-4" />Generate test
+            </button>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
