@@ -46,7 +46,7 @@ export type PublicProfile = {
   userId: string
   displayName: string
   apexXp: number
-  lifetimeXp: number
+  lifetimePoints: number
   currentStreakDays: number
   longestStreakDays: number
   statsSyncedAt: string | null
@@ -136,29 +136,37 @@ type SearchProfileRow = {
 }
 
 /** Player search — the only path to a non-friend's profile. Never returns email; see airnexus_search_profiles in migration 0007. */
-export async function searchProfiles(auth: ServerAuthSession, query: string): Promise<ProfileSearchResult[]> {
-  const trimmed = typeof query === 'string' ? query.trim() : ''
-  if (trimmed.length < 2) throw new SupabaseRequestError('Enter at least 2 characters to search.', 400)
-  const response = await supabaseRestFetch(auth.accessToken, '/rpc/airnexus_search_profiles', {
+/**
+ * Exact-match-only email lookup — replaces the old fuzzy display_name search.
+ * A student can only be found by someone who already knows their full email,
+ * the same trust model as airnexus_send_friend_request; there is no way to
+ * browse or enumerate students by typing a partial real name.
+ */
+export async function findProfileByEmail(auth: ServerAuthSession, email: string): Promise<ProfileSearchResult | null> {
+  const trimmed = typeof email === 'string' ? email.trim() : ''
+  if (!/^\S+@\S+\.\S+$/.test(trimmed)) throw new SupabaseRequestError('Enter a valid email address.', 400)
+  const response = await supabaseRestFetch(auth.accessToken, '/rpc/airnexus_find_profile_by_email', {
     method: 'POST',
-    body: JSON.stringify({ p_query: trimmed }),
+    body: JSON.stringify({ p_email: trimmed }),
   })
   const rows = await readSupabaseRestJson<SearchProfileRow[]>(response, 'Search failed')
-  return rows.map((row) => ({
+  const row = rows[0]
+  if (!row) return null
+  return {
     userId: row.user_id,
     displayName: row.display_name,
     apexXp: row.apex_xp,
     isFriend: row.is_friend,
     isFollowing: row.is_following,
     friendshipStatus: row.friendship_status as ProfileSearchResult['friendshipStatus'],
-  }))
+  }
 }
 
 type PublicProfileRow = {
   user_id: string
   display_name: string
   apex_xp: number
-  lifetime_xp: number
+  lifetime_points: number
   current_streak_days: number
   longest_streak_days: number
   stats_synced_at: string | null
@@ -183,7 +191,7 @@ export async function getPublicProfile(auth: ServerAuthSession, targetUserId: st
     userId: row.user_id,
     displayName: row.display_name,
     apexXp: row.apex_xp,
-    lifetimeXp: row.lifetime_xp,
+    lifetimePoints: row.lifetime_points,
     currentStreakDays: row.current_streak_days,
     longestStreakDays: row.longest_streak_days,
     statsSyncedAt: row.stats_synced_at,

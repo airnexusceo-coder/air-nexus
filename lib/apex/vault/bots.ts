@@ -83,6 +83,19 @@ const MAX_BOT_EVENTS = 14
 
 const BOT_TARGETS: BotTargetDefinition[] = [
   {
+    id: `${APEX_BOT_ID_PREFIX}drift-node`,
+    displayName: 'Drift Node',
+    rankLabel: 'Orientation Vault',
+    difficulty: 'Training',
+    vaultSignal: 'weakening',
+    layers: [
+      { slug: 'mirage', name: 'Drift Mirage', strength: 42 },
+      { slug: 'ghost-layer', name: 'Faint Ghost Layer', strength: 55 },
+      { slug: 'core-gate', name: 'Drift Core Gate', strength: 68 },
+    ],
+    defaultLoadout: ['true-signal', 'deep-scan', 'signal-probe'],
+  },
+  {
     id: `${APEX_BOT_ID_PREFIX}sentinel-01`,
     displayName: 'Sentinel-01',
     rankLabel: 'Training Vault',
@@ -94,6 +107,19 @@ const BOT_TARGETS: BotTargetDefinition[] = [
       { slug: 'core-gate', name: 'Sentinel Core Gate', strength: 90 },
     ],
     defaultLoadout: ['true-signal', 'phase-signal', 'signal-probe'],
+  },
+  {
+    id: `${APEX_BOT_ID_PREFIX}glass-warden`,
+    displayName: 'Glass Warden',
+    rankLabel: 'Bronze Simulation',
+    difficulty: 'Standard',
+    vaultSignal: 'stable',
+    layers: [
+      { slug: 'firewall', name: 'Warden Firewall', strength: 68 },
+      { slug: 'core-lock', name: 'Glass Core Lock', strength: 85 },
+      { slug: 'core-gate', name: 'Warden Core Gate', strength: 105 },
+    ],
+    defaultLoadout: ['phase-signal', 'breach-key', 'signal-probe'],
   },
   {
     id: `${APEX_BOT_ID_PREFIX}cipher-mirror`,
@@ -109,6 +135,19 @@ const BOT_TARGETS: BotTargetDefinition[] = [
     defaultLoadout: ['deep-scan', 'breach-key', 'overclock'],
   },
   {
+    id: `${APEX_BOT_ID_PREFIX}wraith-circuit`,
+    displayName: 'Wraith Circuit',
+    rankLabel: 'Platinum Simulation',
+    difficulty: 'Standard',
+    vaultSignal: 'weakening',
+    layers: [
+      { slug: 'mirage', name: 'Wraith Mirage', strength: 88 },
+      { slug: 'core-shield', name: 'Circuit Core Shield', strength: 102 },
+      { slug: 'fortress-core', name: 'Wraith Fortress Core', strength: 130 },
+    ],
+    defaultLoadout: ['true-signal', 'overclock', 'signal-fork'],
+  },
+  {
     id: `${APEX_BOT_ID_PREFIX}blackbox-vault`,
     displayName: 'Blackbox Vault',
     rankLabel: 'Gold Simulation',
@@ -120,6 +159,19 @@ const BOT_TARGETS: BotTargetDefinition[] = [
       { slug: 'fortress-core', name: 'Fortress Core', strength: 155 },
     ],
     defaultLoadout: ['overclock', 'signal-fork', 'emergency-extract'],
+  },
+  {
+    id: `${APEX_BOT_ID_PREFIX}obsidian-sentinel`,
+    displayName: 'Obsidian Sentinel',
+    rankLabel: 'Diamond Simulation',
+    difficulty: 'Elite',
+    vaultSignal: 'unstable',
+    layers: [
+      { slug: 'core-shield', name: 'Obsidian Shield', strength: 120 },
+      { slug: 'firewall', name: 'Static Firewall', strength: 138 },
+      { slug: 'core-gate', name: 'Obsidian Core Gate', strength: 172 },
+    ],
+    defaultLoadout: ['overclock', 'phase-signal', 'emergency-extract'],
   },
 ]
 

@@ -50,20 +50,20 @@ const achievementIcons: Record<string, ComponentType<{ className?: string }>> = 
 export function MotivationPage({ userId, profileName, notify }: MotivationPageProps) {
   const [state, setState] = useState<MotivationState>(createMotivationState)
   const [editingGoals, setEditingGoals] = useState(false)
-  const [dailyGoal, setDailyGoal] = useState(state.dailyGoalXp)
-  const [weeklyGoal, setWeeklyGoal] = useState(state.weeklyGoalXp)
+  const [dailyGoal, setDailyGoal] = useState(state.dailyGoalPoints)
+  const [weeklyGoal, setWeeklyGoal] = useState(state.weeklyGoalPoints)
   const [rooms, setRooms] = useState<RoomSummary[]>([])
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null)
   const [activeRoom, setActiveRoom] = useState<RoomDetail | null>(null)
-  const [memberStats, setMemberStats] = useState<Map<string, { lifetimeXp: number; syncedAt: string | null }>>(new Map())
+  const [memberStats, setMemberStats] = useState<Map<string, { lifetimePoints: number; syncedAt: string | null }>>(new Map())
 
   useEffect(() => {
     const refresh = (event?: Event) => {
       if (event instanceof CustomEvent && event.detail?.userId !== userId) return
       const next = loadMotivationState(userId)
       setState(next)
-      setDailyGoal(next.dailyGoalXp)
-      setWeeklyGoal(next.weeklyGoalXp)
+      setDailyGoal(next.dailyGoalPoints)
+      setWeeklyGoal(next.weeklyGoalPoints)
     }
     refresh()
     window.addEventListener(MOTIVATION_UPDATED_EVENT, refresh)
@@ -111,10 +111,10 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
         const entries = await Promise.all(otherMembers.map(async (member) => {
           const response = await fetch(`/api/social/profile/${member.userId}`, { credentials: 'include', cache: 'no-store' })
           if (!response.ok) return null
-          const data = (await response.json()) as { profile: { lifetimeXp: number; statsSyncedAt: string | null } }
-          return [member.userId, { lifetimeXp: data.profile.lifetimeXp, syncedAt: data.profile.statsSyncedAt }] as const
+          const data = (await response.json()) as { profile: { lifetimePoints: number; statsSyncedAt: string | null } }
+          return [member.userId, { lifetimePoints: data.profile.lifetimePoints, syncedAt: data.profile.statsSyncedAt }] as const
         }))
-        if (!cancelled) setMemberStats(new Map(entries.filter((entry): entry is readonly [string, { lifetimeXp: number; syncedAt: string | null }] => entry !== null)))
+        if (!cancelled) setMemberStats(new Map(entries.filter((entry): entry is readonly [string, { lifetimePoints: number; syncedAt: string | null }] => entry !== null)))
       })()
     }, 0)
     return () => {
@@ -140,7 +140,7 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300/80">Calm progress</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">Your momentum</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Small, useful study actions build XP. No endless pop-ups, penalties, or pressure.</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Small, useful study actions build Nexus Points. No endless pop-ups, penalties, or pressure.</p>
         </div>
         <button type="button" onClick={() => setEditingGoals((open) => !open)} className="secondary-action self-start sm:self-auto">
           {editingGoals ? <X className="size-4" /> : <Pencil className="size-4" />}
@@ -150,8 +150,8 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
 
       {editingGoals && (
         <section className="glass grid gap-4 rounded-2xl p-5 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-          <GoalInput label="Daily XP goal" value={dailyGoal} min={10} max={500} onChange={setDailyGoal} />
-          <GoalInput label="Weekly XP goal" value={weeklyGoal} min={50} max={3000} onChange={setWeeklyGoal} />
+          <GoalInput label="Daily Nexus Points goal" value={dailyGoal} min={10} max={500} onChange={setDailyGoal} />
+          <GoalInput label="Weekly Nexus Points goal" value={weeklyGoal} min={50} max={3000} onChange={setWeeklyGoal} />
           <button type="button" onClick={saveGoals} className="primary-action"><Check className="size-4" />Save goals</button>
         </section>
       )}
@@ -163,15 +163,15 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
               <span className="flex size-11 items-center justify-center rounded-2xl bg-white/12 text-white"><Sparkles className="size-5" /></span>
               <div><p className="text-xs text-slate-500">Current level</p><h3 className="text-2xl font-bold">Level {stats.level}</h3></div>
             </div>
-            <p className="mt-5 text-sm text-slate-300"><span className="font-semibold text-white">{state.lifetimeXp.toLocaleString()} XP</span> earned through completed study actions.</p>
+            <p className="mt-5 text-sm text-slate-300"><span className="font-semibold text-white">{state.lifetimePoints.toLocaleString()} Nexus Points</span> earned through completed study actions.</p>
             <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white/8" aria-label={`${Math.round(stats.levelProgress)}% to level ${stats.level + 1}`}>
               <div className="h-full rounded-full bg-gradient-to-r from-zinc-300 to-white transition-[width] duration-700" style={{ width: `${stats.levelProgress}%` }} />
             </div>
-            <div className="mt-2 flex justify-between text-xs text-slate-500"><span>{stats.levelXp} XP into this level</span><span>{stats.nextLevelXp - stats.levelXp} XP to level {stats.level + 1}</span></div>
+            <div className="mt-2 flex justify-between text-xs text-slate-500"><span>{stats.levelPoints} points into this level</span><span>{stats.nextLevelPoints - stats.levelPoints} points to level {stats.level + 1}</span></div>
           </div>
           <div className="grid grid-cols-3 gap-3">
-            <ProgressRing label="Today" value={stats.dailyXp} goal={state.dailyGoalXp} progress={stats.dailyProgress} />
-            <ProgressRing label="This week" value={stats.weeklyXp} goal={state.weeklyGoalXp} progress={stats.weeklyProgress} />
+            <ProgressRing label="Today" value={stats.dailyPoints} goal={state.dailyGoalPoints} progress={stats.dailyProgress} />
+            <ProgressRing label="This week" value={stats.weeklyPoints} goal={state.weeklyGoalPoints} progress={stats.weeklyProgress} />
             <ProgressRing label="Streak" value={stats.currentStreak} goal={Math.max(7, stats.currentStreak)} progress={Math.min(100, (stats.currentStreak / 7) * 100)} suffix="d" />
           </div>
         </div>
@@ -201,7 +201,7 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
 
         <section className="glass rounded-2xl p-5">
           <div className="flex items-center justify-between gap-3">
-            <div><h3 className="font-semibold">Study streak</h3><p className="mt-1 text-xs text-slate-500">A rest day never removes earned XP.</p></div>
+            <div><h3 className="font-semibold">Study streak</h3><p className="mt-1 text-xs text-slate-500">A rest day never removes earned Nexus Points.</p></div>
             <span className="flex size-11 items-center justify-center rounded-2xl bg-white/12 text-white"><Flame className="size-5" /></span>
           </div>
           <div className="mt-6 grid grid-cols-2 gap-3">
@@ -209,13 +209,13 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
             <StatTile label="Personal best" value={`${stats.longestStreak} days`} />
           </div>
           <div className="mt-5 border-t border-white/7 pt-5">
-            <h4 className="text-sm font-medium">Recent XP</h4>
+            <h4 className="text-sm font-medium">Recent Nexus Points</h4>
             {recentEvents.length > 0 ? (
               <div className="mt-3 space-y-3">{recentEvents.map((event) => (
                 <div key={event.id} className="flex items-center gap-3 text-sm">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-200"><Zap className="size-3.5" /></span>
                   <span className="min-w-0 flex-1 truncate text-slate-300">{event.description}</span>
-                  <span className="font-medium text-emerald-200">+{event.xp}</span>
+                  <span className="font-medium text-emerald-200">+{event.points}</span>
                 </div>
               ))}</div>
             ) : <p className="mt-3 text-xs leading-5 text-slate-500">Complete a task or finish an AI study turn to begin.</p>}
@@ -237,7 +237,7 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
             <span className="flex size-8 items-center justify-center rounded-lg bg-white/12 text-sm font-bold text-white">1</span>
             <span className="flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-white to-zinc-300 text-sm font-bold text-black">{profileName.slice(0, 1).toUpperCase()}</span>
             <div className="min-w-0 flex-1"><p className="truncate font-medium">{profileName} <span className="ml-1 text-xs text-zinc-300">You</span></p><p className="text-xs text-slate-500">Local score</p></div>
-            <div className="text-right"><p className="font-semibold text-white">{state.lifetimeXp.toLocaleString()}</p><p className="text-[10px] text-slate-500">XP</p></div>
+            <div className="text-right"><p className="font-semibold text-white">{state.lifetimePoints.toLocaleString()}</p><p className="text-[10px] text-slate-500">Points</p></div>
           </div>
           {activeRoom?.members.filter((member) => member.userId !== userId).map((member) => {
             const stats = memberStats.get(member.userId)
@@ -251,7 +251,7 @@ export function MotivationPage({ userId, profileName, notify }: MotivationPagePr
                   <p className="text-xs text-slate-600">{synced ? 'Self-reported score' : 'Awaiting shared progress'}</p>
                 </div>
                 {synced ? (
-                  <div className="text-right"><p className="font-semibold text-white">{stats.lifetimeXp.toLocaleString()}</p><p className="text-[10px] text-slate-500">XP</p></div>
+                  <div className="text-right"><p className="font-semibold text-white">{stats.lifetimePoints.toLocaleString()}</p><p className="text-[10px] text-slate-500">Points</p></div>
                 ) : (
                   <span className="text-xs text-slate-600">Not synced</span>
                 )}
@@ -281,7 +281,7 @@ function ProgressRing({ label, value, goal, progress, suffix = '' }: { label: st
         <span className="absolute inset-0 flex items-center justify-center text-sm font-bold">{value}{suffix}</span>
       </div>
       <p className="mt-2 text-xs font-medium text-slate-300">{label}</p>
-      <p className="mt-0.5 text-[10px] text-slate-600">{suffix ? `${Math.min(value, goal)}/${goal} days` : `${value}/${goal} XP`}</p>
+      <p className="mt-0.5 text-[10px] text-slate-600">{suffix ? `${Math.min(value, goal)}/${goal} days` : `${value}/${goal} points`}</p>
     </div>
   )
 }

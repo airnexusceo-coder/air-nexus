@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock3,
   Flame,
+  Gift,
   GraduationCap,
   LoaderCircle,
   MessageSquareText,
@@ -18,6 +19,7 @@ import {
   TrendingUp,
 } from 'lucide-react'
 import { apiUrl } from '@/lib/api-client'
+import { getMotivationStats, loadMotivationState, MOTIVATION_UPDATED_EVENT, type MotivationStats } from '@/lib/motivation'
 import type { NexusTransaction } from '@/lib/nexus-points'
 import { cn } from '@/lib/utils'
 
@@ -86,7 +88,10 @@ type CachedBrief = {
 
 type IntelligentDashboardPageProps = {
   profileName: string
+  motivationUserId: string
   transactions: NexusTransaction[]
+  streakRewardClaimed: boolean
+  onClaimStreakReward: () => void
   onContinueStudy: () => void
   onNavigate: (section: string) => void
   notify: (message: string, tone?: 'success' | 'info' | 'warning') => void
@@ -341,7 +346,7 @@ function AcademicList({ items, empty, onAdd }: { items: AcademicItem[]; empty: s
   )
 }
 
-export function IntelligentDashboardPage({ profileName, transactions, onContinueStudy, onNavigate, notify }: IntelligentDashboardPageProps) {
+export function IntelligentDashboardPage({ profileName, motivationUserId, transactions, streakRewardClaimed, onClaimStreakReward, onContinueStudy, onNavigate, notify }: IntelligentDashboardPageProps) {
   const [now, setNow] = useState(() => new Date())
   const [threads, setThreads] = useState<DashboardThread[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
@@ -349,11 +354,26 @@ export function IntelligentDashboardPage({ profileName, transactions, onContinue
   const [loading, setLoading] = useState(false)
   const [source, setSource] = useState<'ai' | 'activity'>('activity')
   const [error, setError] = useState('')
+  const [motivationStats, setMotivationStats] = useState<MotivationStats | null>(null)
 
   useEffect(() => {
     const updateClock = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(updateClock)
   }, [])
+
+  useEffect(() => {
+    const refresh = (event?: Event) => {
+      if (event instanceof CustomEvent && event.detail?.userId !== motivationUserId) return
+      setMotivationStats(getMotivationStats(loadMotivationState(motivationUserId)))
+    }
+    refresh()
+    window.addEventListener(MOTIVATION_UPDATED_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener(MOTIVATION_UPDATED_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [motivationUserId])
 
   useEffect(() => {
     const loadHistory = () => {
@@ -510,6 +530,20 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
           <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-300">Study streak</p><h3 id="streak-title" className="mt-1 text-xl font-semibold">{streak} active {streak === 1 ? 'day' : 'days'}</h3></div><span className="flex size-12 items-center justify-center rounded-2xl bg-white/12 text-white"><Flame className="size-6" /></span></div>
           <p className="mt-4 text-sm leading-6 text-slate-400">Your streak is calculated from completed tasks and AirGPT study conversations—not a decorative counter.</p>
           <button type="button" onClick={onContinueStudy} className="secondary-action mt-5 w-full">Keep the streak alive</button>
+          {motivationStats && (
+            <div className="mt-4 rounded-2xl border border-white/15 bg-white/[0.06] p-3">
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-white"><Gift className="size-3.5" />7-day reward · +150 Nexus Points</p>
+              <p className="mt-1 text-[11px] text-slate-500">Based on your {motivationStats.currentStreak}-day Nexus Points streak.</p>
+              <button
+                type="button"
+                onClick={onClaimStreakReward}
+                disabled={streakRewardClaimed || motivationStats.currentStreak < 7}
+                className="secondary-action mt-3 w-full text-xs"
+              >
+                {streakRewardClaimed ? 'Reward claimed' : motivationStats.currentStreak < 7 ? `${7 - motivationStats.currentStreak} days to unlock` : 'Claim reward'}
+              </button>
+            </div>
+          )}
         </section>
 
         <section className="glass rounded-3xl p-5 sm:p-6" aria-labelledby="weekly-title">

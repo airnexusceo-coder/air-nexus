@@ -2,7 +2,7 @@ import 'server-only'
 
 import { readSupabaseRestJson, supabaseRestFetch, supabaseServiceFetch, SupabaseRequestError } from '@/lib/supabase/server'
 import type { ServerAuthSession } from '@/lib/supabase/server'
-import type { RoomDetail, RoomRole, RoomSummary } from './types'
+import type { RoomChannelDTO, RoomDetail, RoomRole, RoomSummary } from './types'
 
 /**
  * Real Collaboration Rooms — replaces the hardcoded fake rooms/collaborators
@@ -17,9 +17,12 @@ export function encode(value: string) {
 type RoomMemberRow = { user_id: string; role: string; joined_at: string }
 
 /**
- * Confirms the caller is a member of the room and returns the full member
- * list. RLS ("read fellow room members") means a non-member's query returns
- * zero rows rather than an error — that's exactly the membership check.
+ * Confirms the caller has access to the room and returns the member list.
+ * RLS ("read fellow room members") means a non-member's query returns zero
+ * rows — that's normally exactly the membership check. Open "system" rooms
+ * (one per subject, nobody explicitly joins) legitimately have zero member
+ * rows too, so an empty result falls back to checking the room itself
+ * (also RLS-gated) before treating it as "not found".
  */
 export async function requireRoomMembership(auth: ServerAuthSession, roomId: string): Promise<RoomMemberRow[]> {
   if (typeof roomId !== 'string' || !roomId) throw new SupabaseRequestError('Room id required.', 400)
@@ -28,7 +31,11 @@ export async function requireRoomMembership(auth: ServerAuthSession, roomId: str
     `/room_members?room_id=eq.${encode(roomId)}&select=user_id,role,joined_at&order=joined_at.asc`,
   )
   const rows = await readSupabaseRestJson<RoomMemberRow[]>(response, 'Failed to load room')
-  if (rows.length === 0) throw new SupabaseRequestError('Room not found.', 404)
+  if (rows.length === 0) {
+    const roomResponse = await supabaseRestFetch(auth.accessToken, `/rooms?id=eq.${encode(roomId)}&select=id,is_system`)
+    const roomRows = await readSupabaseRestJson<{ id: string; is_system: boolean }[]>(roomResponse, 'Failed to load room')
+    if (!roomRows[0]?.is_system) throw new SupabaseRequestError('Room not found.', 404)
+  }
   return rows
 }
 
@@ -51,12 +58,12 @@ export async function getRoomName(roomId: string): Promise<string> {
   return rows[0]?.name ?? 'a room'
 }
 
-type RoomRow = { id: string; name: string; created_at: string; room_members: { user_id: string; role: string }[] }
+type RoomRow = { id: string; name: string; created_at: string; is_system: boolean; room_members: { user_id: string; role: string }[] }
 
 export async function listMyRooms(auth: ServerAuthSession): Promise<RoomSummary[]> {
   const response = await supabaseRestFetch(
     auth.accessToken,
-    '/rooms?select=id,name,created_at,room_members(user_id,role)&order=created_at.desc',
+    '/rooms?select=id,name,created_at,is_system,room_members(user_id,role)&order=is_system.desc,created_at.desc',
   )
   const rows = await readSupabaseRestJson<RoomRow[]>(response, 'Failed to load rooms')
   return rows.map((row) => ({
@@ -65,6 +72,7 @@ export async function listMyRooms(auth: ServerAuthSession): Promise<RoomSummary[
     role: (row.room_members.find((m) => m.user_id === auth.user.id)?.role as RoomRole | undefined) ?? 'member',
     memberCount: row.room_members.length,
     createdAt: row.created_at,
+    isSystem: row.is_system,
   }))
 }
 
@@ -79,26 +87,32 @@ export async function createRoom(auth: ServerAuthSession, name: string): Promise
   )
   const room = Array.isArray(value) ? value[0] : value
   if (!room) throw new SupabaseRequestError('Could not create room.', 502)
-  return { id: room.id, name: room.name, role: 'owner', memberCount: 1, createdAt: room.created_at }
+  return { id: room.id, name: room.name, role: 'owner', memberCount: 1, createdAt: room.created_at, isSystem: false }
 }
 
 export async function getRoomDetail(auth: ServerAuthSession, roomId: string): Promise<RoomDetail> {
   const memberRows = await requireRoomMembership(auth, roomId)
-  const roomResponse = await supabaseRestFetch(auth.accessToken, `/rooms?id=eq.${encode(roomId)}&select=id,name`)
-  const roomRows = await readSupabaseRestJson<{ id: string; name: string }[]>(roomResponse, 'Failed to load room')
+  const [roomResponse, channelsResponse] = await Promise.all([
+    supabaseRestFetch(auth.accessToken, `/rooms?id=eq.${encode(roomId)}&select=id,name,is_system`),
+    supabaseRestFetch(auth.accessToken, `/room_channels?room_id=eq.${encode(roomId)}&select=id,name,position&order=position.asc`),
+  ])
+  const roomRows = await readSupabaseRestJson<{ id: string; name: string; is_system: boolean }[]>(roomResponse, 'Failed to load room')
   const room = roomRows[0]
   if (!room) throw new SupabaseRequestError('Room not found.', 404)
+  const channelRows = await readSupabaseRestJson<{ id: string; name: string; position: number }[]>(channelsResponse, 'Failed to load room channels')
 
   const names = await resolveDisplayNames(memberRows.map((m) => m.user_id))
   return {
     id: room.id,
     name: room.name,
+    isSystem: room.is_system,
     members: memberRows.map((m) => ({
       userId: m.user_id,
       displayName: names.get(m.user_id) ?? 'AirNexus student',
       role: m.role as RoomRole,
       joinedAt: m.joined_at,
     })),
+    channels: channelRows.map((c): RoomChannelDTO => ({ id: c.id, name: c.name, position: c.position })),
   }
 }
 

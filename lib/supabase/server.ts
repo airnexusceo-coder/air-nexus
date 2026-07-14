@@ -93,10 +93,13 @@ function parseSupabaseSession(value: unknown): SupabaseSessionResponse {
 
 function userNameFromMetadata(user: SupabaseUser) {
   const metadata = isRecord(user.user_metadata) ? user.user_metadata : {}
+  const username = typeof metadata.username === 'string' ? metadata.username.trim() : ''
+  // full_name/name are read only for accounts created before the username-based
+  // signup change — new signups never set these.
   const fullName = typeof metadata.full_name === 'string' ? metadata.full_name.trim() : ''
   const name = typeof metadata.name === 'string' ? metadata.name.trim() : ''
   const email = typeof user.email === 'string' ? user.email : ''
-  return fullName || name || email.split('@')[0] || 'AirNexus student'
+  return username || fullName || name || email.split('@')[0] || 'AirNexus student'
 }
 
 export function sessionFromSupabaseUser(value: unknown): AuthSession | null {
@@ -127,10 +130,10 @@ export async function signInWithSupabasePassword(email: string, password: string
   return data
 }
 
-export async function signUpWithSupabasePassword(name: string, email: string, password: string) {
+export async function signUpWithSupabasePassword(username: string, email: string, password: string) {
   const response = await supabaseFetch('/auth/v1/signup', {
     method: 'POST',
-    body: JSON.stringify({ email, password, data: { full_name: name } }),
+    body: JSON.stringify({ email, password, data: { username } }),
   })
   const data = parseSupabaseSession(await readJson(response))
   if (!response.ok) throw new SupabaseRequestError(authErrorMessage(data, 'Supabase sign-up failed'), response.status)

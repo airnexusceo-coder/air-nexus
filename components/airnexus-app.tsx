@@ -259,29 +259,6 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       body: JSON.stringify({ displayName: trimmed }),
     }).catch(() => undefined)
   }, [profileName])
-  const recordStudyActivity = useCallback((activity: { id: string; xp: number; description: string; room?: string }) => {
-    const result = recordMotivationActivity(authUser.id, activity)
-    if (result.recorded) {
-      const stats = getMotivationStats(result.state)
-      fetch('/api/profile/stats-sync', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lifetimeXp: result.state.lifetimeXp,
-          currentStreakDays: stats.currentStreak,
-          longestStreakDays: stats.longestStreak,
-        }),
-      }).catch(() => undefined)
-    }
-    if (!result.celebration) return
-    setMotivationCelebration(result.celebration)
-    window.setTimeout(() => {
-      setMotivationCelebration((current) => current === result.celebration ? null : current)
-    }, 4200)
-  }, [authUser.id])
-
-
   const requestUpgrade = (feature: string, requiredPlan: Exclude<NexusPlan, 'Free'>) => {
     setUpgradeRequirement({ feature, plan: requiredPlan })
     setDialog('upgrade-required')
@@ -466,13 +443,34 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     window.localStorage.setItem(streakStorageKey, 'claimed')
     notify('7-day streak reward claimed: +150 Nexus Points', 'success')
   }
+  /** The single earning path for the app's one currency — every study action (tasks, AI sessions, focus sprints) grants real, spendable Nexus Points, and the same amount also feeds lib/motivation.ts's level/streak/achievement tracking. There is no separate "XP" pool that goes nowhere. */
   const earnNexusPoints = (amount: number, description: string, actionId: string) => {
     if (rewardedActions.includes(actionId) || !Number.isFinite(amount) || amount <= 0) return
     setRewardedActions((current) => [...current, actionId])
     setNexusPoints((points) => points + amount)
     setTransactions((current) => [createTransaction('earned', amount, description), ...current])
     notify(`+${amount} Nexus Points · ${description}`, 'success')
-    recordStudyActivity({ id: actionId, xp: Math.max(10, amount), description })
+
+    const result = recordMotivationActivity(authUser.id, { id: actionId, points: amount, description })
+    if (result.recorded) {
+      const stats = getMotivationStats(result.state)
+      fetch('/api/profile/stats-sync', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lifetimePoints: result.state.lifetimePoints,
+          currentStreakDays: stats.currentStreak,
+          longestStreakDays: stats.longestStreak,
+        }),
+      }).catch(() => undefined)
+    }
+    if (result.celebration) {
+      setMotivationCelebration(result.celebration)
+      window.setTimeout(() => {
+        setMotivationCelebration((current) => current === result.celebration ? null : current)
+      }, 4200)
+    }
   }
 
   const redeemReward = (reward: { id: string; name: string; cost: number }) => {
@@ -565,7 +563,6 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         streakRewardClaimed={streakRewardClaimed}
         onClaimStreakReward={claimStreakReward}
         onEarnNexusPoints={earnNexusPoints}
-        onRecordStudyActivity={recordStudyActivity}
       />
 
       <ContextPanel
@@ -579,6 +576,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         isPlus={plan !== 'Free'}
         autoSpeak={autoSpeak}
         onRequestUpgrade={requestUpgrade}
+        onEarnNexusPoints={earnNexusPoints}
       />
 
       <MobileBottomNav

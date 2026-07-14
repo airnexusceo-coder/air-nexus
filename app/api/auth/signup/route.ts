@@ -36,17 +36,19 @@ function publicAuthError(error: unknown) {
 
 export async function POST(request: Request) {
   const body = await readBody(request)
-  const name = typeof body.name === 'string' ? body.name.trim() : ''
+  const username = typeof body.username === 'string' ? body.username.trim() : ''
   const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
   const password = typeof body.password === 'string' ? body.password : ''
   const remember = body.remember !== false
 
-  if (!name) return NextResponse.json({ error: 'Enter your name.' }, { status: 400 })
+  if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
+    return NextResponse.json({ error: 'Choose a username: 3-20 characters, letters, numbers, and underscores only.' }, { status: 400 })
+  }
   if (!/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 })
   if (password.length < 8) return NextResponse.json({ error: 'Password must be at least 8 characters.' }, { status: 400 })
 
   try {
-    const supabaseSession = await signUpWithSupabasePassword(name, email, password)
+    const supabaseSession = await signUpWithSupabasePassword(username, email, password)
     if (typeof supabaseSession.access_token !== 'string') {
       return NextResponse.json({
         pendingVerification: true,

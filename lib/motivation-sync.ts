@@ -16,12 +16,12 @@ function encode(value: string) {
  * dishonesty.
  */
 export async function syncMotivationStats(auth: ServerAuthSession, input: MotivationSyncInput): Promise<void> {
-  const { lifetimeXp, currentStreakDays, longestStreakDays } = clampMotivationSyncInput(input)
+  const { lifetimePoints, currentStreakDays, longestStreakDays } = clampMotivationSyncInput(input)
 
   const response = await supabaseRestFetch(auth.accessToken, `/profiles?user_id=eq.${encode(auth.user.id)}`, {
     method: 'PATCH',
     body: JSON.stringify({
-      lifetime_xp: lifetimeXp,
+      lifetime_points: lifetimePoints,
       current_streak_days: currentStreakDays,
       longest_streak_days: longestStreakDays,
       stats_synced_at: new Date().toISOString(),

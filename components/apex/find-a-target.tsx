@@ -12,6 +12,7 @@ type NoticeTone = 'success' | 'info' | 'warning'
 type FindATargetProps = {
   notify: (message: string, tone?: NoticeTone) => void
   onBack: () => void
+  onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
 }
 
 const STATUS_LABEL: Record<ApexTargetStatus, string> = {
@@ -21,7 +22,7 @@ const STATUS_LABEL: Record<ApexTargetStatus, string> = {
   limit_reached: 'Daily limit reached',
 }
 
-export function FindATarget({ notify, onBack }: FindATargetProps) {
+export function FindATarget({ notify, onBack, onEarnNexusPoints }: FindATargetProps) {
   const [targets, setTargets] = useState<ApexTarget[] | null>(null)
   const [breachTools, setBreachTools] = useState<TechnologyDefinition[]>([])
   const [preparing, setPreparing] = useState<ApexTarget | null>(null)
@@ -49,6 +50,7 @@ export function FindATarget({ notify, onBack }: FindATargetProps) {
       <BreachShell
         breachId={activeBreachId}
         notify={notify}
+        onEarnNexusPoints={onEarnNexusPoints}
         onExit={() => {
           setActiveBreachId(null)
           setPreparing(null)

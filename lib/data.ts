@@ -19,7 +19,6 @@ import {
   Settings,
   GraduationCap,
   Layers3,
-  Sparkles,
   Brain,
   Shield,
   UserSearch,
@@ -49,7 +48,6 @@ export const navGroups: NavGroup[] = [
     title: 'Overview',
     items: [
       { label: 'Dashboard', icon: LayoutDashboard },
-      { label: 'Daily Dashboard', icon: Sparkles },
       { label: 'Analytics', icon: BarChart3 },
     ],
   },

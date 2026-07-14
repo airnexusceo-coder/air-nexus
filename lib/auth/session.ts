@@ -48,7 +48,7 @@ export async function signInWithPassword(input: { email: string; password: strin
   return body.session
 }
 
-export async function signUpWithPassword(input: { name: string; email: string; password: string; remember: boolean }) {
+export async function signUpWithPassword(input: { username: string; email: string; password: string; remember: boolean }) {
   const response = await fetch(apiUrl('/api/auth/signup'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

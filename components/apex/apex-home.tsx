@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { Bell, ChevronRight, Coins, Compass, History, Info, Lock, Radar, Settings2, Shield, ShieldAlert, ShieldCheck, Swords, Trophy, Wrench, Zap } from 'lucide-react'
 import { deriveApexRank } from '@/lib/apex/config'
-import type { ApexTarget, DefenderActivityEntry, InstalledDefence, VaultOverview } from '@/lib/apex/vault/types'
+import type { ApexTarget, DefenderActivityEntry, InstalledDefence, TechnologyDefinition, VaultOverview } from '@/lib/apex/vault/types'
 import { cn } from '@/lib/utils'
 import { NexusMark } from '@/components/brand/nexus-mark'
 import { VaultCoreVisual } from './vault-core-visual'
@@ -19,6 +19,7 @@ export type ApexHomeProps = {
   notify: (message: string, tone?: NoticeTone) => void
   nexusPoints: number
   onRedeemReward: (reward: { id: string; name: string; cost: number }) => void
+  onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
 }
 
 type View = 'home' | 'manage' | 'lab' | 'targets' | 'history'
@@ -43,33 +44,35 @@ const ACTION_TILES: ActionTileConfig[] = [
   { view: 'manage', label: 'Loadouts', detail: 'Save and equip breach loadouts', icon: Swords },
 ]
 
-const ARSENAL = [
-  { label: 'Signal Probe', count: 12, icon: Radar },
-  { label: 'Breach Key', count: 8, icon: Lock },
-  { label: 'Phase Signal', count: 9, icon: Zap },
-  { label: 'True Signal', count: 6, icon: ShieldCheck },
-  { label: 'Overclock', count: 5, icon: Trophy },
-  { label: 'Deep Scan', count: 11, icon: Compass },
-  { label: 'Emergency Extract', count: 3, icon: ChevronRight },
-  { label: 'Signal Fork', count: 7, icon: Swords },
-]
+const ARSENAL_ICONS: Record<string, LucideIcon> = {
+  'signal-probe': Radar,
+  'breach-key': Lock,
+  'phase-signal': Zap,
+  'true-signal': ShieldCheck,
+  overclock: Trophy,
+  'deep-scan': Compass,
+  'emergency-extract': ChevronRight,
+  'signal-fork': Swords,
+}
 
-export function ApexHome({ notify, nexusPoints, onRedeemReward }: ApexHomeProps) {
+export function ApexHome({ notify, nexusPoints, onRedeemReward, onEarnNexusPoints }: ApexHomeProps) {
   const [view, setView] = useState<View>('home')
   const [overview, setOverview] = useState<VaultWithMode | null>(null)
   const [progression, setProgression] = useState<ApexProgression | null>(null)
   const [alerts, setAlerts] = useState<DefenderActivityEntry[]>([])
   const [targets, setTargets] = useState<ApexTarget[]>([])
+  const [breachTech, setBreachTech] = useState<TechnologyDefinition[]>([])
   const [state, setState] = useState<LoadState>('loading')
 
   const load = useCallback(async () => {
     try {
-      const [vaultResponse, profileResponse, historyResponse, activityResponse, targetsResponse] = await Promise.all([
+      const [vaultResponse, profileResponse, historyResponse, activityResponse, targetsResponse, technologiesResponse] = await Promise.all([
         fetch('/api/apex/vault', { credentials: 'include', cache: 'no-store' }),
         fetch('/api/apex/profile', { credentials: 'include', cache: 'no-store' }),
         fetch('/api/apex/breach/history', { credentials: 'include', cache: 'no-store' }),
         fetch('/api/apex/activity', { credentials: 'include', cache: 'no-store' }),
         fetch('/api/apex/targets', { credentials: 'include', cache: 'no-store' }),
+        fetch('/api/apex/technologies', { credentials: 'include', cache: 'no-store' }),
       ])
       if (vaultResponse.status === 401) return setState('auth')
       if (vaultResponse.status === 503) return setState('unconfigured')
@@ -79,6 +82,7 @@ export function ApexHome({ notify, nexusPoints, onRedeemReward }: ApexHomeProps)
       if (historyResponse.ok) await historyResponse.json()
       if (activityResponse.ok) setAlerts(((await activityResponse.json()) as { activity: DefenderActivityEntry[] }).activity.slice(0, 4))
       if (targetsResponse.ok) setTargets(((await targetsResponse.json()) as { targets: ApexTarget[] }).targets.slice(0, 5))
+      if (technologiesResponse.ok) setBreachTech(((await technologiesResponse.json()) as { technologies: TechnologyDefinition[] }).technologies.filter((tech) => tech.technologyType === 'breach'))
       setState('ready')
     } catch {
       setState('error')
@@ -98,7 +102,7 @@ export function ApexHome({ notify, nexusPoints, onRedeemReward }: ApexHomeProps)
 
   if (view === 'manage') return <ApexShell tabs={<TabBar view={view} onChange={changeView} />}><ManageVault notify={notify} onBack={goHome} /></ApexShell>
   if (view === 'lab') return <ApexShell tabs={<TabBar view={view} onChange={changeView} />}><SystemsLab notify={notify} nexusPoints={nexusPoints} onRedeemReward={onRedeemReward} onBack={goHome} /></ApexShell>
-  if (view === 'targets') return <ApexShell tabs={<TabBar view={view} onChange={changeView} />}><FindATarget notify={notify} onBack={goHome} /></ApexShell>
+  if (view === 'targets') return <ApexShell tabs={<TabBar view={view} onChange={changeView} />}><FindATarget notify={notify} onBack={goHome} onEarnNexusPoints={onEarnNexusPoints} /></ApexShell>
   if (view === 'history') return <ApexShell tabs={<TabBar view={view} onChange={changeView} />}><BreachHistory onBack={() => setView('home')} /></ApexShell>
 
   const rank = progression ? deriveApexRank(progression.xp) : null
@@ -123,7 +127,7 @@ export function ApexHome({ notify, nexusPoints, onRedeemReward }: ApexHomeProps)
               </div>
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
                 <DefenseChain defences={overview.installedDefences} />
-                <BreachArsenal onLab={() => setView('lab')} />
+                <BreachArsenal technologies={breachTech} onLab={() => setView('lab')} />
               </div>
               <ActionRail actions={ACTION_TILES} onChange={changeView} />
             </>
@@ -139,16 +143,16 @@ function TopStatBar({ overview, progression, nexusPoints, rankLabel }: { overvie
   return (
     <div className="rounded-lg border border-white/12 bg-black/55 px-3 py-2 backdrop-blur-md">
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        <TopStat icon={Coins} label="Nexus Points" value={formatNumber(nexusPoints || 12450)} detail="+220 /h" />
+        <TopStat icon={Coins} label="Nexus Points" value={formatNumber(nexusPoints)} />
         <TopStat icon={Zap} label="Core Energy" value={`${formatPercent(corePercent)}%`} detail={`${overview.netEnergyFlowPerHour >= 0 ? '+' : ''}${overview.netEnergyFlowPerHour} /h`} />
-        <TopStat icon={Trophy} label="Apex XP" value={`${formatNumber(progression?.xp ?? 0)} XP`} detail="+560 /h" />
+        <TopStat icon={Trophy} label="Apex XP" value={`${formatNumber(progression?.xp ?? 0)} XP`} />
         <TopRankStat rankLabel={rankLabel ?? 'Unranked'} xp={progression?.xp ?? 0} nextXp={nextXp} />
       </div>
     </div>
   )
 }
 
-function TopStat({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: string; value: string; detail: string }) {
+function TopStat({ icon: Icon, label, value, detail }: { icon: LucideIcon; label: string; value: string; detail?: string }) {
   return (
     <div className="flex min-h-12 items-center gap-3 border-white/10 px-2 md:border-r md:last:border-r-0">
       <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/[0.06]"><Icon className="size-4 text-white/85" /></span>
@@ -156,7 +160,7 @@ function TopStat({ icon: Icon, label, value, detail }: { icon: LucideIcon; label
         <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">{label}</span>
         <span className="block truncate text-sm font-semibold tabular-nums text-white">{value}</span>
       </span>
-      <span className="text-[11px] tabular-nums text-white/55">{detail}</span>
+      {detail && <span className="text-[11px] tabular-nums text-white/55">{detail}</span>}
     </div>
   )
 }
@@ -256,7 +260,7 @@ function RightColumn({ targets, alerts, onTargets, onHistory }: { targets: ApexT
       </Panel>
       <Panel className="p-4">
         <PanelHeader icon={Bell} title="Breach Alerts" actionLabel="View All" onAction={onHistory} />
-        <ul className="mt-4 flex flex-col gap-2">{alerts.length === 0 ? <EmptyRow>No alerts yet.</EmptyRow> : alerts.slice(0, 3).map((alert, index) => <AlertRow key={alert.id} alert={alert} index={index} />)}</ul>
+        <ul className="mt-4 flex flex-col gap-2">{alerts.length === 0 ? <EmptyRow>No alerts yet.</EmptyRow> : alerts.slice(0, 3).map((alert) => <AlertRow key={alert.id} alert={alert} />)}</ul>
       </Panel>
     </div>
   )
@@ -279,9 +283,9 @@ function SignalBars({ signal }: { signal: ApexTarget['vaultSignal'] }) {
   return <span className="flex h-5 items-end gap-0.5" aria-label={signal.replace('_', ' ')}>{[1, 2, 3, 4, 5].map((bar) => <span key={bar} className={cn('w-1 rounded-sm bg-white', bar <= active ? 'opacity-90' : 'opacity-20')} style={{ height: `${bar * 3 + 3}px` }} />)}</span>
 }
 
-function AlertRow({ alert, index }: { alert: DefenderActivityEntry; index: number }) {
+function AlertRow({ alert }: { alert: DefenderActivityEntry }) {
   const warning = alert.result !== 'contained'
-  const time = alert.completedAt ? relativeTime(alert.completedAt) : index === 0 ? '2m ago' : 'Now'
+  const time = alert.completedAt ? relativeTime(alert.completedAt) : 'Recently'
   return (
     <li className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2.5">
       {warning ? <ShieldAlert className="size-6 text-white/80" /> : <ShieldCheck className="size-6 text-white/80" />}
@@ -315,11 +319,15 @@ function ChainCard({ defence, index, isLast }: { defence: InstalledDefence; inde
   )
 }
 
-function BreachArsenal({ onLab }: { onLab: () => void }) {
+function BreachArsenal({ technologies, onLab }: { technologies: TechnologyDefinition[]; onLab: () => void }) {
   return (
     <Panel className="p-4">
       <div className="flex items-center justify-between gap-3"><div><h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Swords className="size-4" /> Breach Arsenal</h2><p className="mt-1 text-[11px] text-white/48">Attack technologies and tools</p></div><button type="button" onClick={onLab} className="min-h-8 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-white/70">Systems Lab</button></div>
-      <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-4">{ARSENAL.map((item) => { const Icon = item.icon; return <div key={item.label} className="flex min-h-[70px] items-center gap-3 rounded-lg border border-white/10 bg-black/45 p-3"><Icon className="size-6 shrink-0 text-white/82" /><span className="min-w-0 flex-1"><span className="block text-[10px] font-semibold uppercase leading-3 text-white/72">{item.label}</span><span className="mt-1 block text-[10px] text-white/48">x{item.count}</span></span></div> })}</div>
+      {technologies.length === 0 ? (
+        <p className="mt-4 text-xs text-white/48">No breach technologies loaded yet.</p>
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-4">{technologies.map((tech) => { const Icon = ARSENAL_ICONS[tech.slug] ?? Swords; return <div key={tech.slug} className={cn('flex min-h-[70px] items-center gap-3 rounded-lg border border-white/10 bg-black/45 p-3', !tech.owned && 'opacity-40')}><Icon className="size-6 shrink-0 text-white/82" /><span className="min-w-0 flex-1"><span className="block text-[10px] font-semibold uppercase leading-3 text-white/72">{tech.name}</span><span className="mt-1 block text-[10px] text-white/48">{tech.owned ? 'Owned' : 'Locked'}</span></span></div> })}</div>
+      )}
     </Panel>
   )
 }

@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     const auth = await requireAuth()
     const body = await readBody(request)
     await syncMotivationStats(auth, {
-      lifetimeXp: Number(body.lifetimeXp),
+      lifetimePoints: Number(body.lifetimePoints),
       currentStreakDays: Number(body.currentStreakDays),
       longestStreakDays: Number(body.longestStreakDays),
     })

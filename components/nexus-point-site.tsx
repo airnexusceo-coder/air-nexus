@@ -257,9 +257,9 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
       if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter a valid email address.')
       if (!password) throw new Error('Password is required.')
       if (mode === 'signup') {
-        const name = String(data.get('name') ?? '').trim()
-        if (!name) throw new Error('Enter your name.')
-        await signUpWithPassword({ name, email, password, remember })
+        const username = String(data.get('username') ?? '').trim()
+        if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) throw new Error('Choose a username: 3-20 characters, letters, numbers, and underscores only.')
+        await signUpWithPassword({ username, email, password, remember })
       } else {
         await signInWithPassword({ email, password, remember })
       }
@@ -272,7 +272,7 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   }
 
   return <section className="relative mx-auto flex min-h-[calc(100vh-160px)] max-w-[1440px] items-center justify-center px-5 py-16"><div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,255,255,.08),transparent_38%)]" /><div className="nexus-card relative w-full max-w-md p-7 sm:p-9"><NexusLogo className="size-11" /><p className="mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-300">{mode === 'login' ? 'Secure sign in' : 'Join Air Nexus'}</p><h1 className="mt-2 text-3xl font-semibold">{mode === 'login' ? 'Continue to AirGPT' : 'Create your account'}</h1><p className="mt-2 text-sm leading-6 text-zinc-500">Supabase Auth protects your workspace and memory. AirNexus only uses server-verified account IDs.</p>
-    <form onSubmit={submit} className="mt-6">{mode === 'signup' && <label className="block text-xs text-zinc-400">Full name<input name="name" required className="nexus-field mt-2" placeholder="Your name" autoComplete="name" /></label>}<label className={mode === 'signup' ? 'mt-5 block text-xs text-zinc-400' : 'block text-xs text-zinc-400'}>Email<input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" /></label><label className="mt-5 block text-xs text-zinc-400">Password<input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>
+    <form onSubmit={submit} className="mt-6">{mode === 'signup' && <label className="block text-xs text-zinc-400">Username<input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="nexus-field mt-2" placeholder="e.g. study_wolf23" autoComplete="username" /><span className="mt-1.5 block text-[10px] text-zinc-600">3-20 characters, letters, numbers, and underscores only — not your real name.</span></label>}<label className={mode === 'signup' ? 'mt-5 block text-xs text-zinc-400' : 'block text-xs text-zinc-400'}>Email<input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" /></label><label className="mt-5 block text-xs text-zinc-400">Password<input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>
       <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Sign in'}<ArrowRight className="size-4" /></button></form>
     <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-white" /><span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep this Supabase session on this device.</span></span></label>
     {error && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}

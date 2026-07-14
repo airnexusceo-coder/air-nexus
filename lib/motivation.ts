@@ -2,7 +2,7 @@ export const MOTIVATION_UPDATED_EVENT = 'airnexus:motivation-updated'
 
 export type MotivationEvent = {
   id: string
-  xp: number
+  points: number
   description: string
   createdAt: string
   room?: string
@@ -10,9 +10,9 @@ export type MotivationEvent = {
 
 export type MotivationState = {
   version: 1
-  lifetimeXp: number
-  dailyGoalXp: number
-  weeklyGoalXp: number
+  lifetimePoints: number
+  dailyGoalPoints: number
+  weeklyGoalPoints: number
   events: MotivationEvent[]
   unlockedAchievements: string[]
 }
@@ -26,11 +26,11 @@ export type MotivationAchievement = {
 
 export type MotivationStats = {
   level: number
-  levelXp: number
-  nextLevelXp: number
+  levelPoints: number
+  nextLevelPoints: number
   levelProgress: number
-  dailyXp: number
-  weeklyXp: number
+  dailyPoints: number
+  weeklyPoints: number
   dailyProgress: number
   weeklyProgress: number
   currentStreak: number
@@ -44,7 +44,7 @@ export type MotivationCelebration = {
 }
 
 export const MOTIVATION_ACHIEVEMENTS: MotivationAchievement[] = [
-  { id: 'first-step', title: 'First Step', description: 'Earn your first 10 XP', badge: 'Starter' },
+  { id: 'first-step', title: 'First Step', description: 'Earn your first 10 Nexus Points', badge: 'Starter' },
   { id: 'daily-goal', title: 'Daily Momentum', description: 'Reach a daily study goal', badge: 'Goal Getter' },
   { id: 'weekly-goal', title: 'Strong Week', description: 'Reach a weekly study goal', badge: 'Week Builder' },
   { id: 'streak-3', title: 'Three-Day Rhythm', description: 'Study for 3 days in a row', badge: 'Momentum' },
@@ -56,15 +56,15 @@ export const MOTIVATION_ACHIEVEMENTS: MotivationAchievement[] = [
 
 const DEFAULT_STATE: MotivationState = {
   version: 1,
-  lifetimeXp: 0,
-  dailyGoalXp: 40,
-  weeklyGoalXp: 200,
+  lifetimePoints: 0,
+  dailyGoalPoints: 40,
+  weeklyGoalPoints: 200,
   events: [],
   unlockedAchievements: [],
 }
 
-const XP_PER_LEVEL = 200
-/** Bounds the locally-stored event log. lifetimeXp and unlockedAchievements are each persisted as their own running-total field (not re-derived from the full event history), so trimming old events never loses XP or un-earns a badge — the one accuracy tradeoff is that a longestStreak set further back than this many events can become invisible, which is a far better failure mode than the unbounded array eventually hitting the browser's localStorage quota and throwing on every future write. */
+const POINTS_PER_LEVEL = 200
+/** Bounds the locally-stored event log. lifetimePoints and unlockedAchievements are each persisted as their own running-total field (not re-derived from the full event history), so trimming old events never loses points or un-earns a badge — the one accuracy tradeoff is that a longestStreak set further back than this many events can become invisible, which is a far better failure mode than the unbounded array eventually hitting the browser's localStorage quota and throwing on every future write. */
 const MAX_STORED_EVENTS = 1000
 
 export function motivationStorageKey(userId: string) {
@@ -79,9 +79,9 @@ function validEvent(value: unknown): value is MotivationEvent {
   if (!value || typeof value !== 'object') return false
   const event = value as Partial<MotivationEvent>
   return typeof event.id === 'string'
-    && typeof event.xp === 'number'
-    && Number.isFinite(event.xp)
-    && event.xp > 0
+    && typeof event.points === 'number'
+    && Number.isFinite(event.points)
+    && event.points > 0
     && typeof event.description === 'string'
     && typeof event.createdAt === 'string'
 }
@@ -91,14 +91,14 @@ export function parseMotivationState(raw: string | null): MotivationState {
   try {
     const value = JSON.parse(raw) as Partial<MotivationState>
     const events = Array.isArray(value.events) ? value.events.filter(validEvent) : []
-    const eventXp = events.reduce((sum, event) => sum + event.xp, 0)
+    const eventPoints = events.reduce((sum, event) => sum + event.points, 0)
     return {
       version: 1,
-      lifetimeXp: typeof value.lifetimeXp === 'number' && Number.isFinite(value.lifetimeXp)
-        ? Math.max(eventXp, Math.round(value.lifetimeXp))
-        : eventXp,
-      dailyGoalXp: clampGoal(value.dailyGoalXp, 40, 10, 500),
-      weeklyGoalXp: clampGoal(value.weeklyGoalXp, 200, 50, 3000),
+      lifetimePoints: typeof value.lifetimePoints === 'number' && Number.isFinite(value.lifetimePoints)
+        ? Math.max(eventPoints, Math.round(value.lifetimePoints))
+        : eventPoints,
+      dailyGoalPoints: clampGoal(value.dailyGoalPoints, 40, 10, 500),
+      weeklyGoalPoints: clampGoal(value.weeklyGoalPoints, 200, 50, 3000),
       events,
       unlockedAchievements: Array.isArray(value.unlockedAchievements)
         ? value.unlockedAchievements.filter((id): id is string => typeof id === 'string')
@@ -168,9 +168,9 @@ function achievementIds(state: MotivationState, stats: Omit<MotivationStats, 'un
   const completedTasks = state.events.filter((event) => event.description.toLowerCase().startsWith('completed task')).length
   const aiSessions = state.events.filter((event) => event.description.toLowerCase().includes('ai study')).length
   const earned = [
-    state.lifetimeXp >= 10 && 'first-step',
-    stats.dailyXp >= state.dailyGoalXp && 'daily-goal',
-    stats.weeklyXp >= state.weeklyGoalXp && 'weekly-goal',
+    state.lifetimePoints >= 10 && 'first-step',
+    stats.dailyPoints >= state.dailyGoalPoints && 'daily-goal',
+    stats.weeklyPoints >= state.weeklyGoalPoints && 'weekly-goal',
     stats.longestStreak >= 3 && 'streak-3',
     stats.longestStreak >= 7 && 'streak-7',
     completedTasks >= 5 && 'tasks-5',
@@ -182,46 +182,46 @@ function achievementIds(state: MotivationState, stats: Omit<MotivationStats, 'un
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-/** Real per-weekday XP totals for the current week (Monday-start, matching startOfWeek), for charting actual study activity instead of invented numbers. */
-export function getWeeklyXpBreakdown(state: MotivationState, now = new Date()): Array<{ day: string; xp: number }> {
+/** Real per-weekday Nexus Points totals for the current week (Monday-start, matching startOfWeek), for charting actual study activity instead of invented numbers. */
+export function getWeeklyPointsBreakdown(state: MotivationState, now = new Date()): Array<{ day: string; points: number }> {
   const start = startOfWeek(now)
   const totals = WEEKDAY_LABELS.map((day, index) => {
     const date = new Date(start)
     date.setDate(date.getDate() + index)
-    return { day, key: localDateKey(date), xp: 0 }
+    return { day, key: localDateKey(date), points: 0 }
   })
   for (const event of state.events) {
     const key = localDateKey(new Date(event.createdAt))
     const bucket = totals.find((entry) => entry.key === key)
-    if (bucket) bucket.xp += event.xp
+    if (bucket) bucket.points += event.points
   }
-  return totals.map(({ day, xp }) => ({ day, xp }))
+  return totals.map(({ day, points }) => ({ day, points }))
 }
 
 export function getMotivationStats(state: MotivationState, now = new Date()): MotivationStats {
   const today = localDateKey(now)
   const weekStart = startOfWeek(now).getTime()
-  const dailyXp = state.events.reduce((sum, event) => localDateKey(new Date(event.createdAt)) === today ? sum + event.xp : sum, 0)
-  const weeklyXp = state.events.reduce((sum, event) => new Date(event.createdAt).getTime() >= weekStart ? sum + event.xp : sum, 0)
-  const level = Math.floor(state.lifetimeXp / XP_PER_LEVEL) + 1
-  const levelXp = state.lifetimeXp % XP_PER_LEVEL
+  const dailyPoints = state.events.reduce((sum, event) => localDateKey(new Date(event.createdAt)) === today ? sum + event.points : sum, 0)
+  const weeklyPoints = state.events.reduce((sum, event) => new Date(event.createdAt).getTime() >= weekStart ? sum + event.points : sum, 0)
+  const level = Math.floor(state.lifetimePoints / POINTS_PER_LEVEL) + 1
+  const levelPoints = state.lifetimePoints % POINTS_PER_LEVEL
   const streak = streaks(state.events, now)
   const base = {
     level,
-    levelXp,
-    nextLevelXp: XP_PER_LEVEL,
-    levelProgress: Math.min(100, (levelXp / XP_PER_LEVEL) * 100),
-    dailyXp,
-    weeklyXp,
-    dailyProgress: Math.min(100, (dailyXp / state.dailyGoalXp) * 100),
-    weeklyProgress: Math.min(100, (weeklyXp / state.weeklyGoalXp) * 100),
+    levelPoints,
+    nextLevelPoints: POINTS_PER_LEVEL,
+    levelProgress: Math.min(100, (levelPoints / POINTS_PER_LEVEL) * 100),
+    dailyPoints,
+    weeklyPoints,
+    dailyProgress: Math.min(100, (dailyPoints / state.dailyGoalPoints) * 100),
+    weeklyProgress: Math.min(100, (weeklyPoints / state.weeklyGoalPoints) * 100),
     currentStreak: streak.current,
     longestStreak: streak.longest,
   }
   return { ...base, unlockedAchievementIds: achievementIds(state, base) }
 }
 
-/** Never lets a storage failure (quota exceeded, private-browsing restrictions) throw into the calling UI action — XP recording degrades to "not saved this time" instead of crashing whatever triggered it (task completion, chat reply, etc.). */
+/** Never lets a storage failure (quota exceeded, private-browsing restrictions) throw into the calling UI action — points recording degrades to "not saved this time" instead of crashing whatever triggered it (task completion, chat reply, etc.). */
 function writeState(userId: string, state: MotivationState) {
   try {
     window.localStorage.setItem(motivationStorageKey(userId), JSON.stringify(state))
@@ -239,24 +239,24 @@ export function loadMotivationState(userId: string) {
 
 export function recordMotivationActivity(
   userId: string,
-  activity: { id: string; xp: number; description: string; room?: string },
+  activity: { id: string; points: number; description: string; room?: string },
 ): { state: MotivationState; celebration: MotivationCelebration | null; recorded: boolean } {
   const current = loadMotivationState(userId)
-  if (!activity.id || !Number.isFinite(activity.xp) || activity.xp <= 0 || current.events.some((event) => event.id === activity.id)) {
+  if (!activity.id || !Number.isFinite(activity.points) || activity.points <= 0 || current.events.some((event) => event.id === activity.id)) {
     return { state: current, celebration: null, recorded: false }
   }
 
   const before = getMotivationStats(current)
   const event: MotivationEvent = {
     id: activity.id,
-    xp: Math.round(activity.xp),
+    points: Math.round(activity.points),
     description: activity.description,
     createdAt: new Date().toISOString(),
     room: activity.room,
   }
   const pending: MotivationState = {
     ...current,
-    lifetimeXp: current.lifetimeXp + event.xp,
+    lifetimePoints: current.lifetimePoints + event.points,
     events: [event, ...current.events].slice(0, MAX_STORED_EVENTS),
   }
   const after = getMotivationStats(pending)
@@ -266,7 +266,7 @@ export function recordMotivationActivity(
 
   let celebration: MotivationCelebration | null = null
   if (after.level > before.level) {
-    celebration = { title: `Level ${after.level} reached`, detail: `Your steady work added ${event.xp} XP.` }
+    celebration = { title: `Level ${after.level} reached`, detail: `Your steady work added ${event.points} Nexus Points.` }
   } else if (newAchievements.length > 0) {
     const achievement = MOTIVATION_ACHIEVEMENTS.find((item) => item.id === newAchievements[0])
     if (achievement) celebration = { title: achievement.title, detail: `Badge unlocked: ${achievement.badge}` }
@@ -274,12 +274,12 @@ export function recordMotivationActivity(
   return { state: next, celebration, recorded: true }
 }
 
-export function updateMotivationGoals(userId: string, dailyGoalXp: number, weeklyGoalXp: number) {
+export function updateMotivationGoals(userId: string, dailyGoalPoints: number, weeklyGoalPoints: number) {
   const current = loadMotivationState(userId)
   const next = {
     ...current,
-    dailyGoalXp: clampGoal(dailyGoalXp, current.dailyGoalXp, 10, 500),
-    weeklyGoalXp: clampGoal(weeklyGoalXp, current.weeklyGoalXp, 50, 3000),
+    dailyGoalPoints: clampGoal(dailyGoalPoints, current.dailyGoalPoints, 10, 500),
+    weeklyGoalPoints: clampGoal(weeklyGoalPoints, current.weeklyGoalPoints, 50, 3000),
   }
   writeState(userId, next)
   return next

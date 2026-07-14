@@ -13,7 +13,7 @@ type PublicProfile = {
   userId: string
   displayName: string
   apexXp: number
-  lifetimeXp: number
+  lifetimePoints: number
   currentStreakDays: number
   longestStreakDays: number
   statsSyncedAt: string | null
@@ -148,7 +148,7 @@ export function ProfileView({ userId, notify, onNavigate, onBack }: ProfileViewP
 
       <div className="grid gap-3 sm:grid-cols-3">
         <StatCard icon={<Trophy className="size-4" />} label="Clash XP" value={profile.apexXp.toLocaleString()} note={rank.label} />
-        <StatCard icon={<Award className="size-4" />} label="Lifetime XP" value={profile.lifetimeXp.toLocaleString()} note={profile.statsSyncedAt ? 'Self-reported' : 'Not synced yet'} />
+        <StatCard icon={<Award className="size-4" />} label="Lifetime Nexus Points" value={profile.lifetimePoints.toLocaleString()} note={profile.statsSyncedAt ? 'Self-reported' : 'Not synced yet'} />
         <StatCard icon={<Flame className="size-4" />} label="Study streak" value={`${profile.currentStreakDays}d`} note={`Best: ${profile.longestStreakDays}d · self-reported`} />
       </div>
 
@@ -157,7 +157,7 @@ export function ProfileView({ userId, notify, onNavigate, onBack }: ProfileViewP
           <h2 className="text-xs font-semibold uppercase tracking-wide text-white/50">Compare — you vs {profile.displayName}</h2>
           <p className="mt-1 text-[11px] text-white/40">Self-reported study stats only — your Apex Clash XP/rank is on your Dashboard.</p>
           <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
-            <CompareStat label="Lifetime XP" mine={myState.lifetimeXp} theirs={profile.lifetimeXp} />
+            <CompareStat label="Lifetime Nexus Points" mine={myState.lifetimePoints} theirs={profile.lifetimePoints} />
             <CompareStat label="Current streak" mine={myStats.currentStreak} theirs={profile.currentStreakDays} suffix="d" />
             <CompareStat label="Best streak" mine={myStats.longestStreak} theirs={profile.longestStreakDays} suffix="d" />
           </div>

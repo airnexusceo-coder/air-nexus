@@ -6,6 +6,7 @@ export type RoomSummary = {
   role: RoomRole
   memberCount: number
   createdAt: string
+  isSystem: boolean
 }
 
 export type RoomMemberDTO = {
@@ -15,15 +16,24 @@ export type RoomMemberDTO = {
   joinedAt: string
 }
 
+export type RoomChannelDTO = {
+  id: string
+  name: string
+  position: number
+}
+
 export type RoomDetail = {
   id: string
   name: string
+  isSystem: boolean
   members: RoomMemberDTO[]
+  channels: RoomChannelDTO[]
 }
 
 export type RoomMessageDTO = {
   id: string
   roomId: string
+  channelId: string | null
   senderId: string
   senderName: string
   body: string

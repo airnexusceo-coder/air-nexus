@@ -64,6 +64,7 @@ type ContextPanelProps = {
   isPlus: boolean
   autoSpeak: boolean
   onRequestUpgrade: (feature: string, requiredPlan: 'Plus' | 'Premium') => void
+  onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
 }
 
 type DocContext = { title: string; body: string; role: 'owner' | 'editor' | 'viewer' }
@@ -135,9 +136,11 @@ export function ContextPanel({
   isPlus,
   autoSpeak,
   onRequestUpgrade,
+  onEarnNexusPoints,
 }: ContextPanelProps) {
   const [tab, setTab] = useState<PanelTab>('chat')
   const [roomDetail, setRoomDetail] = useState<RoomDetail | null>(null)
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(null)
   const [docContext, setDocContext] = useState<DocContext | null>(null)
   const [collabMessages, setCollabMessages] = useState<RoomMessageDTO[]>([])
   const [roomTasks, setRoomTasks] = useState<RoomTaskDTO[]>([])
@@ -187,25 +190,33 @@ export function ContextPanel({
     let cancelled = false
     const timeoutId = window.setTimeout(() => {
       setRoomDetail(null)
+      setActiveChannelId(null)
       setCollabMessages([])
       setRoomTasks([])
       lastMessageTimeRef.current = null
       if (!roomId) return
 
       void (async () => {
-        const [detailResponse, messagesResponse, tasksResponse] = await Promise.all([
+        const [detailResponse, tasksResponse] = await Promise.all([
           fetch(`/api/rooms/${roomId}`, { credentials: 'include', cache: 'no-store' }),
-          fetch(`/api/rooms/${roomId}/messages`, { credentials: 'include', cache: 'no-store' }),
           fetch(`/api/rooms/${roomId}/tasks`, { credentials: 'include', cache: 'no-store' }),
         ])
         if (cancelled) return
-        if (detailResponse.ok) setRoomDetail((await detailResponse.json()) as RoomDetail)
-        if (messagesResponse.ok) {
-          const data = (await messagesResponse.json()) as { messages: RoomMessageDTO[] }
-          setCollabMessages(data.messages)
-          lastMessageTimeRef.current = data.messages.at(-1)?.createdAt ?? null
+        let channelId: string | null = null
+        if (detailResponse.ok) {
+          const detail = (await detailResponse.json()) as RoomDetail
+          setRoomDetail(detail)
+          channelId = detail.channels[0]?.id ?? null
+          setActiveChannelId(channelId)
         }
         if (tasksResponse.ok) setRoomTasks(((await tasksResponse.json()) as { tasks: RoomTaskDTO[] }).tasks)
+
+        const channelQuery = channelId ? `?channelId=${encodeURIComponent(channelId)}` : ''
+        const messagesResponse = await fetch(`/api/rooms/${roomId}/messages${channelQuery}`, { credentials: 'include', cache: 'no-store' })
+        if (cancelled || !messagesResponse.ok) return
+        const data = (await messagesResponse.json()) as { messages: RoomMessageDTO[] }
+        setCollabMessages(data.messages)
+        lastMessageTimeRef.current = data.messages.at(-1)?.createdAt ?? null
       })()
     }, 0)
     return () => {
@@ -213,6 +224,17 @@ export function ContextPanel({
       window.clearTimeout(timeoutId)
     }
   }, [roomId])
+
+  const selectChannel = useCallback(async (channelId: string) => {
+    if (!roomId || channelId === activeChannelId) return
+    setActiveChannelId(channelId)
+    setCollabMessages([])
+    const response = await fetch(`/api/rooms/${roomId}/messages?channelId=${encodeURIComponent(channelId)}`, { credentials: 'include', cache: 'no-store' })
+    if (!response.ok) return
+    const data = (await response.json()) as { messages: RoomMessageDTO[] }
+    setCollabMessages(data.messages)
+    lastMessageTimeRef.current = data.messages.at(-1)?.createdAt ?? null
+  }, [roomId, activeChannelId])
 
   // Read-only doc context for the AI tab — re-fetched whenever the open
   // document changes or the user switches back into the AI tab, so a
@@ -244,8 +266,11 @@ export function ContextPanel({
     const id = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       void (async () => {
-        const since = lastMessageTimeRef.current ? `?since=${encodeURIComponent(lastMessageTimeRef.current)}` : ''
-        const response = await fetch(`/api/rooms/${roomId}/messages${since}`, { credentials: 'include', cache: 'no-store' })
+        const params = new URLSearchParams()
+        if (lastMessageTimeRef.current) params.set('since', lastMessageTimeRef.current)
+        if (activeChannelId) params.set('channelId', activeChannelId)
+        const query = params.toString()
+        const response = await fetch(`/api/rooms/${roomId}/messages${query ? `?${query}` : ''}`, { credentials: 'include', cache: 'no-store' })
         if (!response.ok) return
         const data = (await response.json()) as { messages: RoomMessageDTO[] }
         if (data.messages.length === 0) return
@@ -254,7 +279,7 @@ export function ContextPanel({
       })()
     }, 5000)
     return () => window.clearInterval(id)
-  }, [tab, roomId])
+  }, [tab, roomId, activeChannelId])
 
   const filteredMessages = activeMessages.filter((message) =>
     (message.author + ' ' + message.text).toLowerCase().includes(query.toLowerCase()),
@@ -290,7 +315,7 @@ export function ContextPanel({
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: content }),
+          body: JSON.stringify({ body: content, channelId: activeChannelId }),
         })
         if (!response.ok) {
           const data = await response.json().catch(() => null) as { error?: string } | null
@@ -430,6 +455,7 @@ export function ContextPanel({
     if (!roomId) return
     const nextStatus = task.status === 'done' ? 'todo' : 'done'
     setRoomTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: nextStatus } : item))
+    if (nextStatus === 'done') onEarnNexusPoints(10, `Completed room task: ${task.title}`, `room-task-${task.id}`)
     const response = await fetch(`/api/rooms/${roomId}/tasks/${task.id}`, {
       method: 'PATCH',
       credentials: 'include',
@@ -443,7 +469,7 @@ export function ContextPanel({
       setRoomTasks((current) => current.map((item) => item.id === task.id ? task : item))
       notify('Could not update task.', 'warning')
     }
-  }, [roomId, notify])
+  }, [roomId, notify, onEarnNexusPoints])
 
   const addTask = useCallback(async () => {
     const title = newTaskTitle.trim()
@@ -586,7 +612,7 @@ export function ContextPanel({
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {tab === 'chat' && (
           roomId && roomDetail ? (
-            <ChatView room={roomDetail} messages={filteredMessages} loading={loading} messagesEndRef={messagesEndRef} />
+            <ChatView room={roomDetail} messages={filteredMessages} loading={loading} messagesEndRef={messagesEndRef} activeChannelId={activeChannelId} onSelectChannel={(channelId) => void selectChannel(channelId)} />
           ) : (
             <EmptyState label="You're not in any rooms yet. Create or open one from Collaboration Rooms." />
           )
@@ -736,11 +762,15 @@ function ChatView({
   messages,
   loading,
   messagesEndRef,
+  activeChannelId,
+  onSelectChannel,
 }: {
   room: RoomDetail
   messages: ChatMessage[]
   loading: boolean
   messagesEndRef: React.RefObject<HTMLDivElement | null>
+  activeChannelId: string | null
+  onSelectChannel: (channelId: string) => void
 }) {
   return (
     <div className="space-y-4">
@@ -748,9 +778,29 @@ function ChatView({
         <span className="flex size-9 items-center justify-center rounded-xl bg-white/15 font-semibold">#</span>
         <div className="min-w-0 leading-tight">
           <p className="truncate text-sm font-medium">{room.name}</p>
-          <p className="text-xs text-muted-foreground">{room.members.length} member{room.members.length === 1 ? '' : 's'}</p>
+          <p className="text-xs text-muted-foreground">
+            {room.isSystem ? 'Open to everyone' : `${room.members.length} member${room.members.length === 1 ? '' : 's'}`}
+          </p>
         </div>
       </div>
+      {room.channels.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {room.channels.map((channel) => (
+            <button
+              key={channel.id}
+              type="button"
+              onClick={() => onSelectChannel(channel.id)}
+              aria-pressed={activeChannelId === channel.id}
+              className={cn(
+                'shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+                activeChannelId === channel.id ? 'border-white/30 bg-white/15 text-white' : 'border-white/8 bg-white/[0.03] text-muted-foreground hover:bg-white/8',
+              )}
+            >
+              {channel.name}
+            </button>
+          ))}
+        </div>
+      )}
       {messages.length === 0 ? (
         <EmptyState label="No messages yet. Say hello." />
       ) : (

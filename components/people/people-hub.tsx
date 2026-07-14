@@ -24,13 +24,13 @@ export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
   const [tab, setTab] = useState<Tab>('search')
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
 
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[] | null>(null)
+  const [emailQuery, setEmailQuery] = useState('')
+  const [lookedUpEmail, setLookedUpEmail] = useState('')
+  const [result, setResult] = useState<SearchResult | null | undefined>(undefined)
   const [searching, setSearching] = useState(false)
 
   const [friends, setFriends] = useState<FriendRow[] | null>(null)
   const [requests, setRequests] = useState<RequestRow[] | null>(null)
-  const [addEmail, setAddEmail] = useState('')
 
   const loadFriends = useCallback(async () => {
     const response = await fetch('/api/social/friends', { credentials: 'include', cache: 'no-store' })
@@ -50,25 +50,26 @@ export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
     return () => window.clearTimeout(timeoutId)
   }, [loadFriends, loadRequests])
 
-  const runSearch = useCallback(async () => {
-    const trimmed = query.trim()
-    if (trimmed.length < 2) {
-      notify('Enter at least 2 characters to search.', 'info')
+  const lookupByEmail = useCallback(async () => {
+    const trimmed = emailQuery.trim()
+    if (!/^\S+@\S+\.\S+$/.test(trimmed)) {
+      notify('Enter a valid email address.', 'info')
       return
     }
     setSearching(true)
     try {
-      const response = await fetch(`/api/social/search?q=${encodeURIComponent(trimmed)}`, { credentials: 'include', cache: 'no-store' })
+      const response = await fetch(`/api/social/search?email=${encodeURIComponent(trimmed)}`, { credentials: 'include', cache: 'no-store' })
       if (!response.ok) {
         const data = await response.json().catch(() => null) as { error?: string } | null
         notify(data?.error ?? 'Search failed.', 'warning')
         return
       }
-      setResults(((await response.json()) as { results: SearchResult[] }).results)
+      setLookedUpEmail(trimmed)
+      setResult(((await response.json()) as { result: SearchResult | null }).result)
     } finally {
       setSearching(false)
     }
-  }, [query, notify])
+  }, [emailQuery, notify])
 
   const sendRequest = async (email: string) => {
     const response = await fetch('/api/social/friends', {
@@ -83,7 +84,7 @@ export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
       return
     }
     notify('Friend request sent', 'success')
-    setAddEmail('')
+    setResult((current) => current ? { ...current, friendshipStatus: 'pending' } : current)
     void loadRequests()
   }
 
@@ -134,40 +135,25 @@ export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
         <div className="flex flex-col gap-4">
           <div className="flex gap-2">
             <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') void runSearch() }}
-              placeholder="Search by name…"
+              type="email"
+              value={emailQuery}
+              onChange={(event) => setEmailQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void lookupByEmail() }}
+              placeholder="Find a student by their email…"
               className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/50"
             />
-            <button type="button" disabled={searching} onClick={() => void runSearch()} className="primary-action px-4 text-xs">
-              <Search className="size-3.5" /> Search
+            <button type="button" disabled={searching || !emailQuery.trim()} onClick={() => void lookupByEmail()} className="primary-action px-4 text-xs">
+              <Search className="size-3.5" /> Find
             </button>
           </div>
+          <p className="text-xs text-muted-foreground">Students can only be found by their exact email — not by name — to keep real names private.</p>
 
-          <div className="glass rounded-2xl p-4">
-            <p className="text-xs font-semibold text-white/60">Add by email</p>
-            <div className="mt-2 flex gap-2">
-              <input
-                value={addEmail}
-                onChange={(event) => setAddEmail(event.target.value)}
-                placeholder="friend@school.edu"
-                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs outline-none focus:border-white/50"
-              />
-              <button type="button" disabled={!addEmail.trim()} onClick={() => void sendRequest(addEmail)} className="secondary-action px-3 py-2 text-[11px]">Send request</button>
-            </div>
-          </div>
-
-          {results == null ? (
-            <p className="text-sm text-muted-foreground">Search for a display name to find other students.</p>
-          ) : results.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-muted-foreground">No students found for &quot;{query.trim()}&quot;.</p>
+          {result === undefined ? (
+            <p className="text-sm text-muted-foreground">Enter a student&apos;s full email address to find them.</p>
+          ) : result === null ? (
+            <p className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-muted-foreground">No student found for &quot;{lookedUpEmail}&quot;.</p>
           ) : (
-            <ul className="flex flex-col gap-2">
-              {results.map((result) => (
-                <SearchResultRow key={result.userId} result={result} onOpen={() => setSelectedUserId(result.userId)} />
-              ))}
-            </ul>
+            <SearchResultRow result={result} onOpen={() => setSelectedUserId(result.userId)} onAddFriend={() => void sendRequest(lookedUpEmail)} />
           )}
         </div>
       )}
@@ -236,23 +222,25 @@ export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
   )
 }
 
-function SearchResultRow({ result, onOpen }: { result: SearchResult; onOpen: () => void }) {
+function SearchResultRow({ result, onOpen, onAddFriend }: { result: SearchResult; onOpen: () => void; onAddFriend: () => void }) {
   const rank = deriveApexRank(result.apexXp)
   const relationship = deriveFriendshipState(result.isFriend, result.friendshipStatus)
   return (
-    <li>
-      <button type="button" onClick={onOpen} className="glass flex w-full items-center gap-3 rounded-2xl p-4 text-left hover:bg-white/8">
+    <li className="glass flex items-center gap-3 rounded-2xl p-4">
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3 text-left">
         <Avatar name={result.displayName} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-white">{result.displayName}</p>
           <p className="text-[11px] text-muted-foreground">{rank.label} · {result.apexXp.toLocaleString()} Clash XP</p>
         </div>
-        {relationship === 'friends' ? (
-          <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-300"><UserCheck className="size-3" /> Friends</span>
-        ) : relationship === 'pending' ? (
-          <span className="rounded-full bg-white/10 px-2.5 py-1 text-[10px] text-white/60">Pending</span>
-        ) : null}
       </button>
+      {relationship === 'friends' ? (
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold text-emerald-300"><UserCheck className="size-3" /> Friends</span>
+      ) : relationship === 'pending' ? (
+        <span className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-[10px] text-white/60">Pending</span>
+      ) : (
+        <button type="button" onClick={onAddFriend} className="secondary-action shrink-0 px-3 py-1.5 text-[11px]"><UserPlus className="size-3" /> Add Friend</button>
+      )}
     </li>
   )
 }

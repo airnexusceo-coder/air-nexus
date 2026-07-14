@@ -17,38 +17,38 @@ assert.equal(deriveFriendshipState(false, null), 'none', 'a stranger with no req
 // is untrusted even though nothing here is a spendable resource.
 
 assert.deepEqual(
-  clampMotivationSyncInput({ lifetimeXp: 500, currentStreakDays: 12, longestStreakDays: 30 }),
-  { lifetimeXp: 500, currentStreakDays: 12, longestStreakDays: 30 },
+  clampMotivationSyncInput({ lifetimePoints: 500, currentStreakDays: 12, longestStreakDays: 30 }),
+  { lifetimePoints: 500, currentStreakDays: 12, longestStreakDays: 30 },
   'ordinary in-range values pass through unchanged',
 )
 
 assert.deepEqual(
-  clampMotivationSyncInput({ lifetimeXp: -100, currentStreakDays: -5, longestStreakDays: -1 }),
-  { lifetimeXp: 0, currentStreakDays: 0, longestStreakDays: 0 },
+  clampMotivationSyncInput({ lifetimePoints: -100, currentStreakDays: -5, longestStreakDays: -1 }),
+  { lifetimePoints: 0, currentStreakDays: 0, longestStreakDays: 0 },
   'negative values clamp to zero',
 )
 
 assert.deepEqual(
-  clampMotivationSyncInput({ lifetimeXp: 50_000_000, currentStreakDays: 999_999, longestStreakDays: 999_999 }),
-  { lifetimeXp: 1_000_000, currentStreakDays: 3650, longestStreakDays: 3650 },
+  clampMotivationSyncInput({ lifetimePoints: 50_000_000, currentStreakDays: 999_999, longestStreakDays: 999_999 }),
+  { lifetimePoints: 1_000_000, currentStreakDays: 3650, longestStreakDays: 3650 },
   'huge values clamp to the configured ceilings',
 )
 
 assert.deepEqual(
-  clampMotivationSyncInput({ lifetimeXp: 100, currentStreakDays: 40, longestStreakDays: 10 }),
-  { lifetimeXp: 100, currentStreakDays: 40, longestStreakDays: 40 },
+  clampMotivationSyncInput({ lifetimePoints: 100, currentStreakDays: 40, longestStreakDays: 10 }),
+  { lifetimePoints: 100, currentStreakDays: 40, longestStreakDays: 40 },
   'longest streak is raised to at least the current streak — a client cannot report a longest streak shorter than today\'s',
 )
 
 assert.deepEqual(
-  clampMotivationSyncInput({ lifetimeXp: Number.NaN, currentStreakDays: Number.NaN, longestStreakDays: Number.NaN }),
-  { lifetimeXp: 0, currentStreakDays: 0, longestStreakDays: 0 },
+  clampMotivationSyncInput({ lifetimePoints: Number.NaN, currentStreakDays: Number.NaN, longestStreakDays: Number.NaN }),
+  { lifetimePoints: 0, currentStreakDays: 0, longestStreakDays: 0 },
   'NaN input (e.g. a malformed client payload) fails closed to zero rather than persisting NaN',
 )
 
 assert.deepEqual(
-  clampMotivationSyncInput({ lifetimeXp: 12.6, currentStreakDays: 5.4, longestStreakDays: 5.5 }),
-  { lifetimeXp: 13, currentStreakDays: 5, longestStreakDays: 6 },
+  clampMotivationSyncInput({ lifetimePoints: 12.6, currentStreakDays: 5.4, longestStreakDays: 5.5 }),
+  { lifetimePoints: 13, currentStreakDays: 5, longestStreakDays: 6 },
   'fractional values are rounded before storage',
 )
 

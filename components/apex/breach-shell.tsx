@@ -13,14 +13,18 @@ type BreachShellProps = {
   breachId: string
   notify: (message: string, tone?: NoticeTone) => void
   onExit: () => void
+  onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
 }
 
 /**
  * The interactive breach experience. Real player breaches are resolved by the
  * Supabase SQL resolver. Practice bot breaches use signed backend state and do
- * not mutate any player Vault or ranked rewards.
+ * not mutate any player Vault or ranked rewards. Only real breaches award
+ * Nexus Points (1:1 with the authoritative, anti-farmed Clash XP) — practice
+ * bots stay reward-free since they have no per-target cooldown and could
+ * otherwise be farmed indefinitely.
  */
-export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
+export function BreachShell({ breachId, notify, onExit, onEarnNexusPoints }: BreachShellProps) {
   const [requestBreachId, setRequestBreachId] = useState(breachId)
   const [state, setState] = useState<BreachStateDTO | null>(null)
   const [busy, setBusy] = useState(false)
@@ -66,6 +70,9 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
         setSelectedTool(null)
         if (next.status !== 'active') {
           notify(resultNotice(next), next.result === 'breached' ? 'success' : 'info')
+          if (!next.practice && next.xpAwarded > 0) {
+            onEarnNexusPoints(next.xpAwarded, breachPointsDescription(next), `apex-breach-${next.id}`)
+          }
         }
       } catch {
         notify('Network error. Please try again.', 'warning')
@@ -73,7 +80,7 @@ export function BreachShell({ breachId, notify, onExit }: BreachShellProps) {
         setBusy(false)
       }
     },
-    [requestBreachId, notify],
+    [requestBreachId, notify, onEarnNexusPoints],
   )
 
   if (!state) {
@@ -189,6 +196,10 @@ function resultNotice(state: BreachStateDTO) {
   return state.result === 'breached' ? `Core Gate breached - +${state.xpAwarded} Clash XP` : state.result === 'retreated' ? 'You retreated from the breach.' : 'The Vault contained your breach.'
 }
 
+function breachPointsDescription(state: BreachStateDTO) {
+  return state.result === 'breached' ? `Apex breach: breached ${state.defenderName}'s Vault` : `Apex breach: contained attempt against ${state.defenderName}`
+}
+
 function ResultPanel({ state, onDone }: { state: BreachStateDTO; onDone: () => void }) {
   const Icon = state.result === 'breached' ? ShieldX : state.result === 'retreated' ? LogOut : ShieldCheck
   const title = state.result === 'breached' ? 'Core Gate Breached' : state.result === 'retreated' ? 'Retreated' : 'Breach Contained'
@@ -199,9 +210,9 @@ function ResultPanel({ state, onDone }: { state: BreachStateDTO; onDone: () => v
       {state.practice ? (
         <p className="text-sm text-muted-foreground">Practice score: {state.xpAwarded} XP preview. No ranked XP, Core Energy, or player Vault damage was written.</p>
       ) : state.result === 'breached' ? (
-        <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP - ◇{state.rewardEnergy} recovered</p>
+        <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP - +{state.xpAwarded} Nexus Points - ◇{state.rewardEnergy} recovered</p>
       ) : state.result === 'contained' && state.xpAwarded > 0 ? (
-        <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP for the attempt</p>
+        <p className="text-sm text-muted-foreground">+{state.xpAwarded} Clash XP - +{state.xpAwarded} Nexus Points for the attempt</p>
       ) : (
         <p className="text-sm text-muted-foreground">No Clash XP awarded.</p>
       )}
