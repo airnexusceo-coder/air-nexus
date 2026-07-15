@@ -27,6 +27,8 @@ export type AiUnitLessonPack = {
   courseName: string
   unit: 1 | 2 | 3 | 4
   unitTitle: string
+  /** Present only for a chapter-scoped (Area of Study) deep-dive pack, absent for a whole-unit pack. */
+  chapterId?: string
   sourceTitle: string
   sourceUrl: string
   sourcePageUrl?: string

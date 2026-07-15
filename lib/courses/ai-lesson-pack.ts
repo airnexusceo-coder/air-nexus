@@ -2,7 +2,7 @@ import { GroqApiError, GroqConfigurationError } from '@/lib/ai/groq'
 import { createTutorReplyWithFallback } from '@/lib/ai/text-fallback'
 import { ProviderApiError, ProviderConfigurationError } from '@/lib/ai/providers/types'
 import type { AiLessonCommandTerm, AiLessonSlide, AiLessonSlideKind, AiUnitLessonPack } from '@/lib/courses/lesson-pack-types'
-import type { VceCourse, VceCourseLevel } from '@/lib/courses/vce-catalog'
+import type { VceCourse, VceCourseChapter, VceCourseLevel } from '@/lib/courses/vce-catalog'
 import { VCE_STUDY_DESIGN_SOURCE } from '@/lib/courses/vce-catalog'
 import { formatCommandTermsForPrompt, inferVcaaCommandTermsFromText, VCAA_COMMAND_TERMS_SOURCE } from '@/lib/courses/vcaa-command-terms'
 import { loadVcaaStudyDesignUnitText, type VcaaStudyDesignArea, type VcaaStudyDesignUnitSource } from '@/lib/courses/vcaa-study-design'
@@ -608,6 +608,142 @@ export function findCourseLevel(course: VceCourse, unit: unknown) {
   return course.levels.find((level) => level.unit === unitNumber) ?? null
 }
 
+export function findCourseChapter(level: VceCourseLevel, chapterId: unknown) {
+  if (typeof chapterId !== 'string' || !chapterId) return null
+  return level.chapters.find((chapter) => chapter.id === chapterId) ?? null
+}
+
 export function lessonPackCacheKey(course: VceCourse, level: VceCourseLevel) {
   return `${slug(course.id)}-unit-${level.unit}-paragraph-v1`
+}
+
+export function lessonPackCacheKeyForChapter(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter) {
+  return `${slug(course.id)}-unit-${level.unit}-area-${slug(chapter.id)}-v1`
+}
+
+/**
+ * Deep-dive lesson pack scoped to exactly one Area of Study (chapter),
+ * reusing the same generation/validation/fallback pipeline as the
+ * whole-unit pack above — the only difference is the source material and
+ * prompt are narrowed to a single area, so all 50 slides teach that one
+ * area instead of summarising three areas at once.
+ */
+function catalogSourceForChapter(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter): VcaaStudyDesignUnitSource {
+  const area: VcaaStudyDesignArea = {
+    title: chapter.title,
+    outcome: chapter.outcome,
+    keyKnowledge: chapter.lessons.flatMap((lesson) => lesson.keyKnowledge.map((point) => point.detail)),
+    keySkills: chapter.lessons.flatMap((lesson) => lesson.practice),
+  }
+  const text = `${area.title}\n${area.outcome}\nKey knowledge\n${area.keyKnowledge.join('\n')}\nKey skills\n${area.keySkills.join('\n')}`
+  return {
+    sourceTitle: `${course.name} VCE Study Design — ${chapter.title}`,
+    sourceUrl: course.studyDesign.sourceUrl || VCE_STUDY_DESIGN_SOURCE.url,
+    documentUrl: undefined,
+    text,
+    unitTitle: `${level.title} — ${chapter.title}`,
+    areas: [area],
+    commandTerms: inferVcaaCommandTermsFromText(text, course.studyDesign.commandTerms),
+  }
+}
+
+function matchVcaaAreaForChapter(areas: VcaaStudyDesignArea[], chapter: VceCourseChapter, chapterIndex: number): VcaaStudyDesignArea | null {
+  if (areas.length === 0) return null
+  const chapterTitle = chapter.title.toLowerCase()
+  const byTitle = areas.find((area) => {
+    const areaTitle = area.title.toLowerCase()
+    return areaTitle.includes(chapterTitle) || chapterTitle.includes(areaTitle)
+  })
+  if (byTitle) return byTitle
+  return chapterIndex >= 0 ? areas[chapterIndex] ?? null : null
+}
+
+async function loadAreaSourceOrCatalog(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, chapterIndex: number, signal?: AbortSignal): Promise<VcaaStudyDesignUnitSource> {
+  try {
+    const unitSource = await loadVcaaStudyDesignUnitText(course, level.unit, signal)
+    const matchedArea = matchVcaaAreaForChapter(unitSource.areas, chapter, chapterIndex)
+    if (matchedArea) {
+      return { ...unitSource, unitTitle: `${unitSource.unitTitle || level.title} — ${chapter.title}`, areas: [matchedArea] }
+    }
+  } catch (error) {
+    console.warn('Courses VCAA area source fallback:', error instanceof Error ? error.message : 'Unknown error')
+  }
+  return catalogSourceForChapter(course, level, chapter)
+}
+
+function buildAreaPrompt(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, source: VcaaStudyDesignUnitSource) {
+  return `Create a deep-dive VCE teaching lesson pack for ${course.name}, ${level.title}, focused entirely on one Area of Study: "${chapter.title}".
+
+Use the uploaded VCAA study design text as the source of truth. This lesson pack must go deeper into this single Area of Study than a whole-unit overview would — every slide should serve this one area, not the rest of the unit.
+
+VCAA Area of Study outline parsed from the study design:
+${sourceOutline(source)}
+
+VCAA command terms to teach in context:
+${formatCommandTermsForPrompt(source.commandTerms)}
+
+Return strict JSON only, no markdown, with this shape:
+{
+  "id": "string",
+  "commandTerms": [
+    { "term": "Analyse", "meaning": "student-friendly meaning", "responseMove": "how to answer", "source": "${VCAA_COMMAND_TERMS_SOURCE.url}" }
+  ],
+  "slides": [
+    {
+      "id": "slide-1",
+      "kind": "teach|example|activity|question|answer|checkpoint",
+      "title": "short slide title",
+      "minutes": 3,
+      "body": "one-sentence slide overview",
+      "paragraphs": ["3-5 student-facing teaching paragraphs, each 45-90 words"],
+      "bullets": ["0-4 concise key moves or reminders"],
+      "commandTerm": { "term": "Explain", "meaning": "meaning", "responseMove": "response move", "source": "${VCAA_COMMAND_TERMS_SOURCE.url}" },
+      "activity": "optional student task",
+      "question": "optional VCE-style check question",
+      "answerGuide": "optional answer guide"
+    }
+  ]
+}
+
+Rules:
+- Create exactly 50 slides, all scoped to "${chapter.title}" only — do not drift into other Areas of Study in this unit.
+- This must feel like a teacher giving a full, deep lesson on this one area, not flashcards and not a question bank.
+- The "body" field is only a one-sentence overview. The real teaching must be in "paragraphs".
+- Every teach, example, activity and checkpoint slide must include 3-5 paragraphs. Each paragraph should be 45-90 words and should explain what the idea is, why it matters, how it works, and how a student uses it in VCE work.
+- Use at most 8 "question" slides and at most 8 "answer" slides. Every question slide must still teach before asking, and must include an answerGuide.
+- Cover every key knowledge point for this Area of Study, each taught with explanation, a worked/modelled example, and at least one guided activity or check question.
+- Use VCAA command terms in context. Teach what the command term asks the student to do before asking the student to answer.
+- Sequence the slides as a real lesson: hook, direct teaching, examples, guided practice, independent activity, short VCE-style checks, answer feedback, and a final checkpoint for this Area of Study.
+- Do not copy long passages from the study design or glossary. Paraphrase into student-friendly teaching.`
+}
+
+export async function createAiAreaLessonPack(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, signal?: AbortSignal): Promise<AiUnitLessonPack> {
+  const chapterIndex = level.chapters.findIndex((item) => item.id === chapter.id)
+  const source = await loadAreaSourceOrCatalog(course, level, chapter, chapterIndex, signal)
+  const fallback: AiUnitLessonPack = { ...buildFallbackPack(course, level, source), chapterId: chapter.id, id: `${course.id}-unit-${level.unit}-${chapter.id}-fallback-pack` }
+
+  try {
+    const result = await createTutorReplyWithFallback({
+      message: buildAreaPrompt(course, level, chapter, source),
+      documents: [
+        { name: source.sourceTitle, text: source.text },
+        { name: VCAA_COMMAND_TERMS_SOURCE.label, text: formatCommandTermsForPrompt(source.commandTerms) },
+      ],
+      history: [],
+      mode: 'advanced',
+      action: 'study-coach',
+      purpose: 'study-generation',
+      tier: 'plus',
+      signal,
+    })
+    const parsed = extractJsonObject(result.reply)
+    const pack = normalisePack(parsed, course, level, source)
+    if (!pack) return fallback
+    return { ...pack, chapterId: chapter.id, id: `${course.id}-unit-${level.unit}-${chapter.id}-ai-pack` }
+  } catch (error) {
+    if (error instanceof GroqConfigurationError || error instanceof ProviderConfigurationError || error instanceof GroqApiError || error instanceof ProviderApiError || error instanceof TypeError || error instanceof SyntaxError) {
+      return fallback
+    }
+    throw error
+  }
 }

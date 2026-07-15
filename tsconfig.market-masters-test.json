@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-build",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "ES2020",
+    "isolatedModules": false,
+    "jsx": "react-jsx",
+    "plugins": []
+  },
+  "include": [
+    "tests/market-masters.test.ts",
+    "lib/market-masters/**/*.ts"
+  ]
+}

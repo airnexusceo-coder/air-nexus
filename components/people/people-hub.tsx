@@ -11,7 +11,6 @@ type NoticeTone = 'success' | 'info' | 'warning'
 
 type PeopleHubProps = {
   notify: (message: string, tone?: NoticeTone) => void
-  onNavigate: (section: string) => void
 }
 
 type SearchResult = { userId: string; displayName: string; apexXp: number; isFriend: boolean; isFollowing: boolean; friendshipStatus: 'pending' | 'accepted' | null }
@@ -20,7 +19,7 @@ type RequestRow = { id: string; direction: 'incoming' | 'outgoing'; other_user_i
 
 type Tab = 'search' | 'friends' | 'requests'
 
-export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
+export function PeopleHub({ notify }: PeopleHubProps) {
   const [tab, setTab] = useState<Tab>('search')
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
 
@@ -109,7 +108,6 @@ export function PeopleHub({ notify, onNavigate }: PeopleHubProps) {
       <ProfileView
         userId={selectedUserId}
         notify={notify}
-        onNavigate={onNavigate}
         onBack={() => { setSelectedUserId(null); void loadFriends(); void loadRequests() }}
       />
     )

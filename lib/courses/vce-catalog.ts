@@ -74,7 +74,7 @@ export type CourseAccessSelection = {
   plusUnit: 1 | 2 | 3 | 4 | null
 }
 
-export type CourseAccessReason = 'premium' | 'free-subject' | 'plus-monthly-unit' | 'locked'
+export type CourseAccessReason = 'premium' | 'free-subject' | 'plus-monthly-unit' | 'purchased' | 'locked'
 
 export type CourseAccessResult = {
   unlocked: boolean
@@ -1247,6 +1247,9 @@ export const VCE_COURSE_CATEGORIES: VceCourseCategory[] = ['English', 'Mathemati
 export function currentCourseMonthKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
+
+/** Nexus Points cost to purchase a full VCE course (all 4 units), unlocked until the next school holiday break. Shared between the client purchase UI and the server purchase route. */
+export const COURSE_PURCHASE_COST = 800
 
 export function resolveCourseAccess(
   plan: NexusPlan,

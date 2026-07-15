@@ -2,11 +2,8 @@
 
 import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import {
-  ArrowLeft,
   BookOpenCheck,
   BrainCircuit,
-  Check,
-  CircleHelp,
   FileText,
   GraduationCap,
   Layers3,
@@ -14,20 +11,19 @@ import {
   LoaderCircle,
   Paperclip,
   RefreshCw,
-  RotateCcw,
   Send,
   Sparkles,
   Target,
-  Trophy,
   X,
 } from 'lucide-react'
 import { AiMarkdown } from '@/components/ai-markdown'
 import { QuizCard } from '@/components/study/quiz-card'
+import { FlashcardDeckPlayer } from '@/components/study/flashcard-deck-player'
 import { Modal } from '@/components/ui/modal'
 import { apiUrl } from '@/lib/api-client'
 import { DOCUMENT_ACCEPT, readDocument } from '@/lib/documents/client'
 import { TUTOR_MODES, type TutorAction, type TutorHistoryMessage, type TutorMode } from '@/lib/ai/tutor-types'
-import { FLASHCARD_DECK_STORAGE_KEY, parseFlashcardDeck, parseQuiz, type Flashcard, type FlashcardDeck, type Quiz } from '@/lib/ai/study-artifacts'
+import { loadFlashcardDecks, parseFlashcardDeck, parseQuiz, saveFlashcardDeck, type FlashcardDeck, type Quiz } from '@/lib/ai/study-artifacts'
 import { cn } from '@/lib/utils'
 
 type TutorMessage = TutorHistoryMessage & {
@@ -62,38 +58,6 @@ function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function cleanText(value: unknown, maxLength: number) {
-  return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
-}
-
-function loadSavedDeck() {
-  if (typeof window === 'undefined') return null
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(FLASHCARD_DECK_STORAGE_KEY) ?? '')
-    if (!isRecord(parsed) || typeof parsed.title !== 'string' || typeof parsed.createdAt !== 'string' || !Array.isArray(parsed.cards)) return null
-    const cards = parsed.cards.flatMap((candidate): Flashcard[] => {
-      if (!isRecord(candidate)) return []
-      const front = cleanText(candidate.front, 240)
-      const back = cleanText(candidate.back, 500)
-      if (!front || !back || typeof candidate.id !== 'string') return []
-      return [{
-        id: candidate.id,
-        front,
-        back,
-        hint: cleanText(candidate.hint, 220),
-        difficulty: candidate.difficulty === 'intermediate' || candidate.difficulty === 'advanced' ? candidate.difficulty : 'beginner',
-      }]
-    })
-    return cards.length ? { title: parsed.title, createdAt: parsed.createdAt, cards } : null
-  } catch {
-    return null
-  }
-}
-
 export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps) {
   const [mode, setMode] = useState<TutorMode>('auto')
   const [messages, setMessages] = useState<TutorMessage[]>([starterMessage])
@@ -110,13 +74,11 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
 
   const [notes, setNotes] = useState('')
   const [cardCount, setCardCount] = useState(10)
-  const [deck, setDeck] = useState<FlashcardDeck | null>(() => loadSavedDeck())
+  const [deckHistory, setDeckHistory] = useState<FlashcardDeck[]>(() => loadFlashcardDecks())
+  const [activeDeckId, setActiveDeckId] = useState<string | null>(() => loadFlashcardDecks()[0]?.id ?? null)
+  const deck = deckHistory.find((item) => item.id === activeDeckId) ?? null
   const [generatingCards, setGeneratingCards] = useState(false)
   const [flashcardError, setFlashcardError] = useState('')
-  const [queue, setQueue] = useState<number[]>(() => deck ? deck.cards.map((_, index) => index) : [])
-  const [flipped, setFlipped] = useState(false)
-  const [showHint, setShowHint] = useState(false)
-  const [ratings, setRatings] = useState<Record<number, number>>({})
   const [sourceName, setSourceName] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const tutorMessagesEndRef = useRef<HTMLDivElement>(null)
@@ -262,12 +224,8 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
       if (!response.ok || !data.reply) throw new Error(data.error || 'Flashcard generation failed')
       const generated = parseFlashcardDeck(data.reply)
       if (!generated) throw new Error('AirGPT returned an invalid flashcard deck')
-      setDeck(generated)
-      setQueue(generated.cards.map((_, index) => index))
-      setRatings({})
-      setFlipped(false)
-      setShowHint(false)
-      window.localStorage.setItem(FLASHCARD_DECK_STORAGE_KEY, JSON.stringify(generated))
+      setDeckHistory(saveFlashcardDeck(generated))
+      setActiveDeckId(generated.id)
       notify(`Created ${generated.cards.length} flashcards`, 'success')
     } catch (error) {
       setFlashcardError(error instanceof Error ? error.message : 'Flashcard generation failed')
@@ -275,29 +233,6 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
       setGeneratingCards(false)
     }
   }
-
-  const rateCard = (score: number) => {
-    const currentIndex = queue[0]
-    if (currentIndex === undefined) return
-    setRatings((current) => ({ ...current, [currentIndex]: Math.max(current[currentIndex] ?? 0, score) }))
-    const remaining = queue.slice(1)
-    if (score === 0 && remaining.length > 0) remaining.push(currentIndex)
-    setQueue(remaining)
-    setFlipped(false)
-    setShowHint(false)
-  }
-
-  const restartDeck = (missedOnly: boolean) => {
-    if (!deck) return
-    const nextQueue = deck.cards.map((_, index) => index).filter((index) => !missedOnly || (ratings[index] ?? 0) < 2)
-    setQueue(nextQueue.length ? nextQueue : deck.cards.map((_, index) => index))
-    setFlipped(false)
-    setShowHint(false)
-  }
-
-  const currentCardIndex = queue[0]
-  const currentCard = deck && currentCardIndex !== undefined ? deck.cards[currentCardIndex] : null
-  const mastered = deck ? deck.cards.filter((_, index) => (ratings[index] ?? 0) >= 2).length : 0
 
   return (
     <div className="space-y-6">
@@ -374,28 +309,33 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
             <p className="mt-2 text-sm leading-6 text-slate-400">Paste notes or attach a document. AirGPT will extract the concepts that are worth actively recalling.</p>
             <textarea value={notes} onChange={(event) => setNotes(event.target.value.slice(0, MAX_FLASHCARD_NOTES))} rows={13} placeholder="Paste class notes, a chapter summary, key definitions, or revision material…" aria-label="Flashcard source notes" className="mt-5 w-full resize-y rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-sm leading-6 outline-none transition placeholder:text-slate-600 focus:border-white/35" />
             <div className="mt-3 flex flex-wrap items-center gap-2"><input ref={fileInputRef} type="file" accept={DOCUMENT_ACCEPT} onChange={attachNotes} className="sr-only" /><button type="button" onClick={() => fileInputRef.current?.click()} className="secondary-action"><Paperclip className="size-4" />Attach notes</button>{sourceName && <span className="inline-flex items-center gap-1 rounded-full bg-white/7 px-3 py-1.5 text-xs text-slate-300"><FileText className="size-3" />{sourceName}<button type="button" onClick={() => setSourceName('')} aria-label="Clear attached file label"><X className="size-3" /></button></span>}</div>
-            <label className="mt-5 block text-xs text-slate-400">Number of cards<select value={cardCount} onChange={(event) => setCardCount(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2.5 text-sm text-white outline-none"><option value={8}>8 focused cards</option><option value={10}>10 balanced cards</option><option value={16}>16 detailed cards</option></select></label>
+            <label className="mt-5 block text-xs text-slate-400">Number of cards<select value={cardCount} onChange={(event) => setCardCount(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2.5 text-sm text-white outline-none"><option value={8}>8 focused cards</option><option value={10}>10 balanced cards</option><option value={16}>16 detailed cards</option><option value={25}>25 cards</option><option value={35}>35 cards</option><option value={50}>50 cards — full deck</option></select></label>
             {flashcardError && <p role="alert" className="mt-4 rounded-xl border border-rose-300/15 bg-rose-400/[0.06] p-3 text-xs text-rose-200">{flashcardError}</p>}
             <button type="button" onClick={() => void generateFlashcards()} disabled={generatingCards || notes.trim().length < 40} className="primary-action mt-5 w-full">{generatingCards ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}{generatingCards ? 'Creating your deck…' : 'Generate flashcards'}</button>
           </section>
 
           <section className="glass min-h-[650px] rounded-3xl p-5 sm:p-6" aria-label="Flashcard study area">
+            {deckHistory.length > 1 && (
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                {deckHistory.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setActiveDeckId(item.id)}
+                    className={cn(
+                      'max-w-[12rem] truncate rounded-full border px-3 py-1 text-xs font-medium transition',
+                      item.id === activeDeckId ? 'border-white/30 bg-white/15 text-white' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10',
+                    )}
+                  >
+                    {item.title}
+                  </button>
+                ))}
+              </div>
+            )}
             {!deck ? (
               <div className="flex min-h-[580px] flex-col items-center justify-center text-center"><span className="flex size-16 items-center justify-center rounded-3xl bg-white/10 text-white"><BrainCircuit className="size-8" /></span><h3 className="mt-5 text-xl font-semibold">Your active-recall deck appears here</h3><p className="mt-2 max-w-md text-sm leading-6 text-slate-400">Generate cards from your own notes, reveal each answer, then rate how well you remembered it.</p></div>
-            ) : currentCard ? (
-              <div className="flex min-h-[580px] flex-col">
-                <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">{deck.title}</p><p className="mt-1 text-sm text-slate-500">{mastered}/{deck.cards.length} mastered · {queue.length} in this round</p></div><button type="button" onClick={() => restartDeck(false)} aria-label="Restart flashcard deck" className="interactive-icon"><RefreshCw className="size-4" /></button></div>
-                <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full bg-gradient-to-r from-zinc-300 to-white transition-all" style={{ width: `${(mastered / deck.cards.length) * 100}%` }} /></div>
-                <button type="button" onClick={() => setFlipped((current) => !current)} aria-label="Flip flashcard" className="group mt-8 flex min-h-80 flex-1 flex-col items-center justify-center rounded-[2rem] border border-white/15 bg-[radial-gradient(circle_at_top,rgba(255,255,255,.08),transparent_55%),rgba(255,255,255,.035)] p-8 text-center shadow-2xl transition hover:border-white/30">
-                  <span className="rounded-full bg-white/7 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">{flipped ? 'Answer' : 'Question'} · {currentCard.difficulty}</span>
-                  <p className={cn('mt-6 max-w-2xl text-white', flipped ? 'text-xl leading-8' : 'text-2xl font-semibold leading-9')}>{flipped ? currentCard.back : currentCard.front}</p>
-                  {!flipped && showHint && currentCard.hint && <p className="mt-5 rounded-2xl bg-white/8 px-4 py-3 text-sm leading-6 text-white">Hint: {currentCard.hint}</p>}
-                  <span className="mt-8 inline-flex items-center gap-2 text-xs text-slate-500"><RotateCcw className="size-3.5 transition group-hover:rotate-180" />Tap to {flipped ? 'see the question' : 'reveal the answer'}</span>
-                </button>
-                {!flipped ? <button type="button" onClick={() => setShowHint((current) => !current)} disabled={!currentCard.hint} className="secondary-action mx-auto mt-4"><Lightbulb className="size-4" />{showHint ? 'Hide hint' : 'Show hint'}</button> : <div className="mt-5 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => rateCard(0)} className="rounded-xl border border-rose-300/15 bg-rose-400/[0.06] px-4 py-3 text-sm font-semibold text-rose-200 hover:bg-rose-400/10"><RotateCcw className="mr-2 inline size-4" />Again</button><button type="button" onClick={() => rateCard(1)} className="rounded-xl border border-amber-300/15 bg-amber-400/[0.06] px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-400/10"><CircleHelp className="mr-2 inline size-4" />Learning</button><button type="button" onClick={() => rateCard(2)} className="rounded-xl border border-emerald-300/15 bg-emerald-400/[0.06] px-4 py-3 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/10"><Check className="mr-2 inline size-4" />Know it</button></div>}
-              </div>
             ) : (
-              <div className="flex min-h-[580px] flex-col items-center justify-center text-center"><span className="flex size-16 items-center justify-center rounded-3xl bg-emerald-400/10 text-emerald-200"><Trophy className="size-8" /></span><h3 className="mt-5 text-2xl font-semibold">Round complete</h3><p className="mt-2 text-sm text-slate-400">You mastered {mastered} of {deck.cards.length} cards in this session.</p><div className="mt-6 flex flex-wrap justify-center gap-3"><button type="button" onClick={() => restartDeck(true)} className="primary-action"><Target className="size-4" />Review weak cards</button><button type="button" onClick={() => restartDeck(false)} className="secondary-action"><ArrowLeft className="size-4" />Study all again</button></div></div>
+              <FlashcardDeckPlayer deck={deck} key={deck.createdAt} />
             )}
           </section>
         </div>

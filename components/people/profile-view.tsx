@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Award, Flame, Swords, Trophy, UserMinus, UserPlus } from 'lucide-react'
+import { ArrowLeft, Award, Flame, Trophy, UserMinus, UserPlus } from 'lucide-react'
 import { deriveApexRank } from '@/lib/apex/config'
 import { deriveFriendshipState } from '@/lib/airnexus/relationship-state'
 import { loadMotivationState, getMotivationStats } from '@/lib/motivation'
@@ -29,11 +29,10 @@ type ApexAchievement = { slug: string; name: string; description: string; earned
 type ProfileViewProps = {
   userId: string
   notify: (message: string, tone?: NoticeTone) => void
-  onNavigate: (section: string) => void
   onBack: () => void
 }
 
-export function ProfileView({ userId, notify, onNavigate, onBack }: ProfileViewProps) {
+export function ProfileView({ userId, notify, onBack }: ProfileViewProps) {
   const [profile, setProfile] = useState<PublicProfile | null>(null)
   const [achievements, setAchievements] = useState<ApexAchievement[]>([])
   const [myUserId, setMyUserId] = useState<string | null>(null)
@@ -130,17 +129,13 @@ export function ProfileView({ userId, notify, onNavigate, onBack }: ProfileViewP
                 {profile.isFollowing ? <UserMinus className="size-3.5" /> : <UserPlus className="size-3.5" />}
                 {profile.isFollowing ? 'Unfollow' : 'Follow'}
               </button>
-              {relationship === 'friends' ? (
-                <button type="button" onClick={() => onNavigate('Apex')} className="primary-action px-3 py-1.5 text-xs">
-                  <Swords className="size-3.5" /> Challenge to Breach
-                </button>
-              ) : relationship === 'pending' ? (
+              {relationship === 'pending' ? (
                 <span className="secondary-action px-3 py-1.5 text-xs opacity-60">Request pending</span>
-              ) : (
+              ) : relationship === 'none' ? (
                 <button type="button" disabled={busy} onClick={() => void addFriend()} className="primary-action px-3 py-1.5 text-xs">
                   <UserPlus className="size-3.5" /> Add Friend
                 </button>
-              )}
+              ) : null}
             </div>
           )}
         </div>
@@ -155,7 +150,7 @@ export function ProfileView({ userId, notify, onNavigate, onBack }: ProfileViewP
       {myStats && myState && (
         <div className="glass rounded-2xl p-4">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-white/50">Compare — you vs {profile.displayName}</h2>
-          <p className="mt-1 text-[11px] text-white/40">Self-reported study stats only — your Apex Clash XP/rank is on your Dashboard.</p>
+          <p className="mt-1 text-[11px] text-white/40">Self-reported study stats only.</p>
           <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
             <CompareStat label="Lifetime Nexus Points" mine={myState.lifetimePoints} theirs={profile.lifetimePoints} />
             <CompareStat label="Current streak" mine={myStats.currentStreak} theirs={profile.currentStreakDays} suffix="d" />

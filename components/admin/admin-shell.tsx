@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, LogOut, ShieldCheck, Sparkles, Swords, Trophy, Users } from 'lucide-react'
+import { GraduationCap, LayoutDashboard, LogOut, ShieldCheck, Sparkles, Swords, Trophy, Users } from 'lucide-react'
 import { NexusLogo } from '@/components/brand/nexus-mark'
 import { cn } from '@/lib/utils'
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/clashes', label: 'Clashes', icon: Swords },
   { href: '/admin/achievements', label: 'Achievements', icon: Trophy },
+  { href: '/admin/market-masters', label: 'Market Masters', icon: GraduationCap },
   { href: '/admin/admins', label: 'Admins', icon: ShieldCheck },
   { href: '/admin/permissions', label: 'Permissions', icon: Sparkles },
 ]

@@ -19,7 +19,9 @@
     "test:social": "tsc --noEmit false --outDir .test-build --module commonjs --target ES2020 --esModuleInterop --skipLibCheck tests/social.test.ts lib/airnexus/relationship-state.ts lib/motivation-sync-clamp.ts && node .test-build/tests/social.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\"",
     "test:billing": "tsc --noEmit false --outDir .test-build --module commonjs --target ES2020 --esModuleInterop --skipLibCheck tests/billing.test.ts lib/billing/plans.ts && node .test-build/tests/billing.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\"",
     "test:docs": "tsc --noEmit false --outDir .test-build --module commonjs --target ES2020 --esModuleInterop --skipLibCheck tests/docs.test.ts lib/docs/sanitize.ts && node .test-build/tests/docs.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\"",
-    "test:study-artifacts": "tsc --noEmit false --outDir .test-build --module commonjs --target ES2020 --esModuleInterop --skipLibCheck tests/study-artifacts.test.ts lib/ai/study-artifacts.ts lib/math/expression.ts && node .test-build/tests/study-artifacts.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\""
+    "test:study-artifacts": "tsc --noEmit false --outDir .test-build --module commonjs --target ES2020 --esModuleInterop --skipLibCheck tests/study-artifacts.test.ts lib/ai/study-artifacts.ts lib/math/expression.ts && node .test-build/tests/study-artifacts.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\"",
+    "test:market-masters": "tsc -p tsconfig.market-masters-test.json && node -r ./tests/register-market-masters-alias.cjs .test-build/tests/market-masters.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\"",
+    "test:business-empire": "tsc -p tsconfig.business-empire-test.json && node -r ./tests/register-market-masters-alias.cjs .test-build/tests/business-empire.test.js && node -e \"require('fs').rmSync('.test-build',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -36,6 +38,7 @@
     "pdf-parse": "^2.4.5",
     "react": "^19",
     "react-dom": "^19",
+    "recharts": "^3.9.2",
     "shadcn": "^4.8.0",
     "stripe": "^22.3.0",
     "tailwind-merge": "^3.3.1",

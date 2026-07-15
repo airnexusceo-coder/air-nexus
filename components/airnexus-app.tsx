@@ -7,6 +7,7 @@ import { ContextPanel } from '@/components/context-panel'
 import { Workspace } from '@/components/workspace'
 import { MobileBottomNav } from '@/components/mobile-bottom-nav'
 import { Modal } from '@/components/ui/modal'
+import { NexusTutorial } from '@/components/nexus-tutorial'
 import { cn } from '@/lib/utils'
 import { formatPlanExpiry, PLAN_DETAILS, SECTION_PLAN_REQUIREMENTS, type NexusPlan } from '@/lib/plans'
 import type { AuthSession } from '@/lib/auth/session'
@@ -22,8 +23,9 @@ import {
 } from '@/lib/nexus-points'
 import { getMotivationStats, loadMotivationState, recordMotivationActivity, type MotivationCelebration } from '@/lib/motivation'
 import { avatarGradientFor, getCosmetic, type CosmeticCategory } from '@/lib/cosmetics'
+import { COURSE_PURCHASE_COST } from '@/lib/courses/vce-catalog'
 
-export type AppDialog = 'upgrade-required' | 'insufficient-points' | 'profile' | null
+export type AppDialog = 'upgrade-required' | 'insufficient-points' | 'profile' | 'nexus-tutorial' | null
 export type NoticeTone = 'success' | 'info' | 'warning'
 
 type LocalUserProfile = {
@@ -57,6 +59,7 @@ type StoredUserProfile = LocalUserProfile & {
 
 const PROFILE_STORAGE_KEY = 'airnexus-google-profile'
 const STREAK_REWARD_STORAGE_KEY = 'airnexus-streak-reward-7'
+const NEXUS_TUTORIAL_STORAGE_KEY = 'airnexus-nexus-tutorial-seen'
 
 type AirGPTAppProps = {
   authUser: AuthSession
@@ -67,6 +70,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const profileStorageKey = `${PROFILE_STORAGE_KEY}:${authUser.id}`
   const rewardsStorageKey = `${NEXUS_REWARDS_STORAGE_KEY}:${authUser.id}`
   const streakStorageKey = `${STREAK_REWARD_STORAGE_KEY}:${authUser.id}`
+  const tutorialStorageKey = `${NEXUS_TUTORIAL_STORAGE_KEY}:${authUser.id}`
   const [activeSection, setActiveSection] = useState('AI Chat')
   const [mainChatOpen, setMainChatOpen] = useState(true)
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
@@ -147,9 +151,13 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         ...(stored?.transactions ?? []),
       ])
       setRewardsHydrated(true)
+
+      if (window.localStorage.getItem(tutorialStorageKey) !== 'seen') {
+        setDialog('nexus-tutorial')
+      }
     }, 0)
     return () => window.clearTimeout(timeoutId)
-  }, [rewardsStorageKey])
+  }, [rewardsStorageKey, tutorialStorageKey])
 
   useEffect(() => {
     if (!rewardsHydrated) return
@@ -398,6 +406,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     notify(`${nextPlan} activated with Nexus Points until ${formatPlanExpiry(expiryIso)}`, 'success')
   }
 
+  const closeTutorial = () => {
+    window.localStorage.setItem(tutorialStorageKey, 'seen')
+    setDialog(null)
+  }
+
+  const openTutorial = () => {
+    setDialog('nexus-tutorial')
+  }
+
   const signOut = () => {
     onSignOut()
   }
@@ -488,6 +505,34 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     notify(reward.name + ' unlocked', 'success')
   }
 
+  /** Unlocks a full VCE course (all 4 units) until the next school holiday break. The Nexus Points spend is asserted client-side, same trust model as redeemReward above; the resulting unlock record is real and server-persisted (lib/courses/purchases.ts), so it can't be spoofed by editing local state. */
+  const purchaseCourse = async (course: { id: string; name: string }): Promise<boolean> => {
+    if (nexusPoints < COURSE_PURCHASE_COST) {
+      notify('You need more Nexus Points for this course', 'warning')
+      return false
+    }
+    try {
+      const response = await fetch('/api/courses/purchases', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ courseId: course.id }),
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: string } | null
+        notify(data?.error ?? 'Could not complete this purchase.', 'warning')
+        return false
+      }
+      setNexusPoints((points) => points - COURSE_PURCHASE_COST)
+      setTransactions((current) => [createTransaction('spent', COURSE_PURCHASE_COST, `${course.name} course`), ...current])
+      notify(`${course.name} unlocked until the holidays`, 'success')
+      return true
+    } catch {
+      notify('Network error. Please try again.', 'warning')
+      return false
+    }
+  }
+
   const equipCosmetic = (category: CosmeticCategory, id: string | null) => {
     if (id && !redeemedRewards.includes(id)) return
     if (category === 'avatar') setEquippedAvatar(id)
@@ -563,6 +608,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         streakRewardClaimed={streakRewardClaimed}
         onClaimStreakReward={claimStreakReward}
         onEarnNexusPoints={earnNexusPoints}
+        onPurchaseCourse={purchaseCourse}
+        onOpenNexusTutorial={openTutorial}
       />
 
       <ContextPanel
@@ -686,6 +733,9 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
               </button>
             )}
           </div>
+          <button type="button" onClick={openTutorial} className="secondary-action mt-2 w-full">
+            How to earn & spend Nexus Points
+          </button>
         </div>
         <div className="mt-5 space-y-3">
           <SettingToggle icon={Bell} label="Workspace notifications" checked={notificationsEnabled} onChange={setNotificationsEnabled} />
@@ -728,6 +778,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         </button>
       </Modal>
 
+      <NexusTutorial
+        open={dialog === 'nexus-tutorial'}
+        onClose={closeTutorial}
+        onGoToMarketplace={() => {
+          closeTutorial()
+          setActiveSection('Marketplace')
+          setMainChatOpen(false)
+        }}
+      />
 
       {motivationCelebration && (
         <div role="status" className="pointer-events-none fixed left-1/2 top-5 z-[125] w-[min(92vw,380px)] -translate-x-1/2">

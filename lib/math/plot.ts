@@ -38,6 +38,18 @@ export function buildFunctionPaths(
   })
 }
 
+/** Samples one function into raw {x,y} points for chart libraries (Recharts) that want data arrays rather than a pre-built SVG path. Non-finite results are dropped so a chart never tries to plot Infinity/NaN. */
+export function sampleFunctionPoints(expression: string, xMin: number, xMax: number, steps = 200): { x: number; y: number }[] {
+  const evaluate = compileExpression(expression)
+  const points: { x: number; y: number }[] = []
+  for (let step = 0; step <= steps; step += 1) {
+    const x = xMin + (step / steps) * (xMax - xMin)
+    const y = evaluate(x)
+    if (Number.isFinite(y)) points.push({ x, y })
+  }
+  return points
+}
+
 /** Samples every function across [xMin, xMax] to pick a y-range that actually shows the interesting part of the curve, instead of a fixed guess. */
 export function autoFitYBounds(expressions: string[], xMin: number, xMax: number): { yMin: number; yMax: number } {
   const samples: number[] = []

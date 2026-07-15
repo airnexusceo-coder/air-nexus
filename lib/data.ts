@@ -20,8 +20,9 @@ import {
   GraduationCap,
   Layers3,
   Brain,
-  Shield,
   UserSearch,
+  TrendingUp,
+  Briefcase,
 } from 'lucide-react'
 
 export type NavItem = {
@@ -58,6 +59,8 @@ export const navGroups: NavGroup[] = [
       { label: 'AI Chat', icon: MessageSquareText },
       { label: 'Study Coach', icon: Compass },
       { label: 'Courses', icon: BookOpen },
+      { label: 'Market Masters', icon: TrendingUp },
+      { label: 'Business Empire', icon: Briefcase },
       { label: 'AI Memory', icon: Brain },
       { label: 'Flashcards', icon: Layers3 },
       { label: 'Panic Mode', icon: BookOpen },
@@ -84,9 +87,8 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
-    title: 'Nexus Clash & Rewards',
+    title: 'Rewards',
     items: [
-      { label: 'Apex', icon: Shield },
       { label: 'Marketplace', icon: Store },
     ],
   },

@@ -7,7 +7,7 @@ import {
   type TutorReply,
   type TutorReplyStream,
 } from '@/lib/ai/groq'
-import { actionInstruction, modeInstruction, tutorSystemPrompt } from '@/lib/ai/prompts'
+import { actionInstruction, maxTokensForAction, modeInstruction, tutorSystemPrompt } from '@/lib/ai/prompts'
 import { createAnthropicTextReply, createAnthropicTextReplyStream, isAnthropicConfigured } from '@/lib/ai/providers/anthropic-text'
 import { createOpenAiTextReply, createOpenAiTextReplyStream, isOpenAiConfigured } from '@/lib/ai/providers/openai-text'
 import { ProviderApiError, ProviderConfigurationError, type ProviderCompleteInput, type SimpleChatMessage } from '@/lib/ai/providers/types'
@@ -25,7 +25,6 @@ export type TutorReplyWithProvider = TutorReply & { provider: string }
 export type TutorReplyStreamWithProvider = TutorReplyStream & { provider: string }
 
 const FALLBACK_TEMPERATURE = 0.5
-const FALLBACK_MAX_TOKENS = 2048
 
 function isRetryable(error: unknown): boolean {
   if (error instanceof GroqConfigurationError || error instanceof ProviderConfigurationError) return true
@@ -54,7 +53,7 @@ function fallbackParams(input: CreateTutorReplyInput): ProviderCompleteInput {
   return {
     messages: buildFallbackMessages(input),
     temperature: FALLBACK_TEMPERATURE,
-    maxTokens: FALLBACK_MAX_TOKENS,
+    maxTokens: maxTokensForAction(input.action ?? 'teach'),
     signal: input.signal,
   }
 }

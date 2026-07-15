@@ -15,6 +15,7 @@ import {
   BarChart3,
   Bell,
   Brain,
+  Briefcase,
   BookOpen,
   CalendarDays,
   Calculator,
@@ -47,6 +48,7 @@ import {
   Star,
   Store,
   TimerReset,
+  TrendingUp,
   Trophy,
   UserSearch,
   Users,
@@ -77,11 +79,11 @@ import {
   type DocumentAttachment,
 } from '@/lib/documents/client'
 import {
-  FLASHCARD_DECK_STORAGE_KEY,
   detectStudyIntent,
   parseFlashcardDeck,
   parseGraphSpec,
   parseQuiz,
+  saveFlashcardDeck,
   type FlashcardDeck,
   type GraphSpec,
   type Quiz,
@@ -95,7 +97,6 @@ function SectionLoading() {
   return <div className="grid gap-4" role="status" aria-label="Loading workspace section"><div className="premium-skeleton h-28 rounded-3xl" /><div className="grid gap-4 md:grid-cols-2"><div className="premium-skeleton h-64 rounded-3xl" /><div className="premium-skeleton h-64 rounded-3xl" /></div></div>
 }
 
-const ApexHome = dynamic(() => import('@/components/apex/apex-home').then((module) => module.ApexHome), { loading: SectionLoading })
 const CoursesPage = dynamic(() => import('@/components/courses-page').then((module) => module.CoursesPage), { loading: SectionLoading })
 const PeopleHub = dynamic(() => import('@/components/people/people-hub').then((module) => module.PeopleHub), { loading: SectionLoading })
 const AiStudyCoachPage = dynamic(() => import('@/components/ai-study-coach-page').then((module) => module.AiStudyCoachPage), { loading: SectionLoading })
@@ -106,6 +107,8 @@ const DocsPage = dynamic(() => import('@/components/docs-page').then((module) =>
 const IntelligentDashboardPage = dynamic(() => import('@/components/intelligent-dashboard-page').then((module) => module.IntelligentDashboardPage), { loading: SectionLoading })
 const LessonRecorderPage = dynamic(() => import('@/components/lesson-recorder-page').then((module) => module.LessonRecorderPage), { loading: SectionLoading })
 const MarketplacePage = dynamic(() => import('@/components/marketplace-page').then((module) => module.MarketplacePage), { loading: SectionLoading })
+const MarketMastersHome = dynamic(() => import('@/components/market-masters/market-masters-home').then((module) => module.MarketMastersHome), { loading: SectionLoading })
+const BusinessEmpireHome = dynamic(() => import('@/components/business-empire/business-empire-home').then((module) => module.BusinessEmpireHome), { loading: SectionLoading })
 const MemoryPage = dynamic(() => import('@/components/memory-page').then((module) => module.MemoryPage), { loading: SectionLoading })
 const SettingsPage = dynamic(() => import('@/components/settings-page').then((module) => module.SettingsPage), { loading: SectionLoading })
 const WorkspacePages = dynamic(() => import('@/components/workspace-pages').then((module) => module.WorkspacePages), { loading: SectionLoading })
@@ -141,6 +144,8 @@ type WorkspaceProps = {
   streakRewardClaimed: boolean
   onClaimStreakReward: () => void
   onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
+  onPurchaseCourse: (course: { id: string; name: string }) => Promise<boolean>
+  onOpenNexusTutorial: () => void
 }
 
 type MessageArtifact =
@@ -297,6 +302,8 @@ export function Workspace({
   streakRewardClaimed,
   onClaimStreakReward,
   onEarnNexusPoints,
+  onPurchaseCourse,
+  onOpenNexusTutorial,
 }: WorkspaceProps) {
   const [draft, setDraft] = useState('')
   const [messages, setMessages] = useState<MainMessage[]>(() => copyInitialMessages())
@@ -645,7 +652,7 @@ export function Workspace({
       } else if (intent === 'flashcards') {
         const deck = parseFlashcardDeck(data.reply)
         if (deck) {
-          window.localStorage.setItem(FLASHCARD_DECK_STORAGE_KEY, JSON.stringify(deck))
+          saveFlashcardDeck(deck)
           setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: `Created ${deck.cards.length} flashcards: ${deck.title}`, artifact: { kind: 'flashcards', deck } } : message))
           onEarnNexusPoints(15, 'AI study: generated flashcards', `ai-flashcards-${assistantId}`)
           return
@@ -790,6 +797,8 @@ export function Workspace({
         streakRewardClaimed={streakRewardClaimed}
         onClaimStreakReward={onClaimStreakReward}
         onEarnNexusPoints={onEarnNexusPoints}
+        onPurchaseCourse={onPurchaseCourse}
+        onOpenNexusTutorial={onOpenNexusTutorial}
       />
     )
   }
@@ -1382,6 +1391,8 @@ function SectionWorkspace({
   streakRewardClaimed,
   onClaimStreakReward,
   onEarnNexusPoints,
+  onPurchaseCourse,
+  onOpenNexusTutorial,
 }: {
   section: string
   onOpenSidebar: () => void
@@ -1408,6 +1419,8 @@ function SectionWorkspace({
   streakRewardClaimed: boolean
   onClaimStreakReward: () => void
   onEarnNexusPoints: (amount: number, description: string, actionId: string) => void
+  onPurchaseCourse: (course: { id: string; name: string }) => Promise<boolean>
+  onOpenNexusTutorial: () => void
 }) {
   const [seconds, setSeconds] = useState(25 * 60)
   const [timerRunning, setTimerRunning] = useState(false)
@@ -1452,6 +1465,8 @@ function SectionWorkspace({
     section === 'Integrations' ? Plug :
     section === 'Settings' ? SettingsIcon :
     section === 'Marketplace' ? Store :
+    section === 'Market Masters' ? TrendingUp :
+    section === 'Business Empire' ? Briefcase :
     section === 'Apex' ? Shield :
     section === 'AI Chat' ? MessageSquare :
     BookOpen
@@ -1524,7 +1539,7 @@ function SectionWorkspace({
         )}
 
         {section === 'People' && (
-          <PeopleHub notify={notify} onNavigate={onNavigate} />
+          <PeopleHub notify={notify} />
         )}
 
         {section === 'Panic Mode' && (
@@ -1565,22 +1580,35 @@ function SectionWorkspace({
         )}
 
         {section === 'Marketplace' && (
-          <MarketplacePage currentPlan={plan} nexusPoints={nexusPoints} planExpiry={planExpiry} redeemedRewards={redeemedRewards} equippedAvatar={equippedAvatar} equippedBadge={equippedBadge} transactions={transactions} onSelectFree={onSelectFree} onPayWithCard={onPayWithCard} onPayWithPoints={onPayWithPoints} onRedeem={onRedeemReward} onEquip={onEquipCosmetic} />
+          <MarketplacePage currentPlan={plan} nexusPoints={nexusPoints} planExpiry={planExpiry} redeemedRewards={redeemedRewards} equippedAvatar={equippedAvatar} equippedBadge={equippedBadge} transactions={transactions} onSelectFree={onSelectFree} onPayWithCard={onPayWithCard} onPayWithPoints={onPayWithPoints} onRedeem={onRedeemReward} onEquip={onEquipCosmetic} onOpenTutorial={onOpenNexusTutorial} onNavigate={onNavigate} />
         )}
 
         {section === 'Courses' && (
-          <CoursesPage plan={plan} notify={notify} onRequestUpgrade={onRequestUpgrade} />
+          <CoursesPage plan={plan} nexusPoints={nexusPoints} notify={notify} onRequestUpgrade={onRequestUpgrade} onPurchaseCourse={onPurchaseCourse} />
+        )}
+
+        {section === 'Market Masters' && (
+          <MarketMastersHome userId={motivationUserId} notify={notify} onEarnNexusPoints={onEarnNexusPoints} />
+        )}
+
+        {section === 'Business Empire' && (
+          <BusinessEmpireHome userId={motivationUserId} notify={notify} onEarnNexusPoints={onEarnNexusPoints} />
         )}
 
         {section === 'Apex' && (
-          <ApexHome notify={notify} nexusPoints={nexusPoints} onRedeemReward={onRedeemReward} onEarnNexusPoints={onEarnNexusPoints} />
+          <section className="glass mx-auto max-w-xl rounded-3xl p-8 text-center">
+            <h2 className="text-xl font-semibold">Apex is paused</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Apex is being reworked and isn&apos;t available right now. Nothing has been lost — it&apos;ll be back.
+            </p>
+          </section>
         )}
 
         {section === 'Settings' && (
           <SettingsPage />
         )}
 
-        {!['Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex'].includes(section) && (
+        {!['Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex', 'Market Masters', 'Business Empire'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">

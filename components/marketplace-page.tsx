@@ -1,18 +1,22 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import {
   Bot,
   CalendarClock,
   Check,
   CreditCard,
   Crown,
+  GraduationCap,
   Gem,
+  HelpCircle,
   Sparkles,
   X,
 } from 'lucide-react'
 import { formatPlanExpiry, PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
 import type { NexusTransaction } from '@/lib/nexus-points'
 import { avatarGradientFor, COSMETIC_CATALOG, DEFAULT_AVATAR_GRADIENT, type CosmeticCategory } from '@/lib/cosmetics'
+import { VCE_COURSES } from '@/lib/courses/vce-catalog'
 import { cn } from '@/lib/utils'
 
 type MarketplacePageProps = {
@@ -28,7 +32,11 @@ type MarketplacePageProps = {
   onPayWithPoints: (plan: Exclude<NexusPlan, 'Free'>) => void
   onRedeem: (reward: { id: string; name: string; cost: number }) => void
   onEquip: (category: CosmeticCategory, id: string | null) => void
+  onOpenTutorial: () => void
+  onNavigate: (section: string) => void
 }
+
+type CoursePurchase = { id: string; courseId: string; pointsSpent: number; purchasedAt: string; expiresAt: string }
 
 const plans: Array<{
   name: NexusPlan
@@ -67,9 +75,28 @@ export function MarketplacePage({
   onPayWithPoints,
   onRedeem,
   onEquip,
+  onOpenTutorial,
+  onNavigate,
 }: MarketplacePageProps) {
   const avatarCosmetics = COSMETIC_CATALOG.filter((item) => item.category === 'avatar')
   const badgeCosmetics = COSMETIC_CATALOG.filter((item) => item.category === 'badge')
+  const [coursePurchases, setCoursePurchases] = useState<CoursePurchase[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const response = await fetch('/api/courses/purchases', { credentials: 'include', cache: 'no-store' })
+      if (!response.ok || cancelled) return
+      const data = await response.json().catch(() => null) as { purchases?: CoursePurchase[] } | null
+      if (cancelled) return
+      const now = Date.now()
+      setCoursePurchases((data?.purchases ?? []).filter((purchase) => new Date(purchase.expiresAt).getTime() > now))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   return (
     <div className="space-y-10">
       <div>
@@ -77,6 +104,17 @@ export function MarketplacePage({
         <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">Marketplace</h2>
         <p className="mt-2 text-sm text-slate-400">Upgrade your learning experience with Nexus Plans.</p>
       </div>
+
+      <section className="glass flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between" aria-label="How Nexus Points work">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white"><HelpCircle className="size-4" /></span>
+          <div>
+            <p className="text-sm font-semibold text-white">New here? See how Nexus Points work</p>
+            <p className="mt-1 text-xs text-slate-500">A quick guide to earning points from studying and spending them below.</p>
+          </div>
+        </div>
+        <button type="button" onClick={onOpenTutorial} className="secondary-action shrink-0">View tutorial</button>
+      </section>
 
       <section className="glass grid gap-4 rounded-2xl p-5 sm:grid-cols-3" aria-label="Account plan summary">
         <SummaryItem icon={Crown} label="Current plan" value={currentPlan} />
@@ -195,6 +233,30 @@ export function MarketplacePage({
           })}
         </div>
       </section>
+
+      {coursePurchases.length > 0 && (
+        <section aria-labelledby="course-unlocks-heading">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 id="course-unlocks-heading" className="text-lg font-semibold">Your course unlocks</h3>
+              <p className="mt-1 text-xs text-slate-500">Full VCE courses purchased with Nexus Points, open until the date shown.</p>
+            </div>
+            <button type="button" onClick={() => onNavigate('Courses')} className="secondary-action shrink-0"><GraduationCap className="size-4" />Open Courses</button>
+          </div>
+          <div className="glass grid gap-3 rounded-2xl p-4 sm:grid-cols-2 xl:grid-cols-3">
+            {coursePurchases.map((purchase) => {
+              const courseName = VCE_COURSES.find((course) => course.id === purchase.courseId)?.name ?? purchase.courseId
+              return (
+                <article key={purchase.id} className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                  <p className="text-sm font-semibold text-white">{courseName}</p>
+                  <p className="mt-1 text-xs text-slate-500">Unlocked until {formatPlanExpiry(purchase.expiresAt)}</p>
+                  <p className="mt-2 text-xs font-medium text-zinc-300">{purchase.pointsSpent.toLocaleString()} Points spent</p>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <section aria-labelledby="transactions-heading">
         <div className="mb-4">

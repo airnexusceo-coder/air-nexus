@@ -33,6 +33,7 @@ export const ADMIN_PERMISSION_GROUPS = {
   admin: ['view', 'create', 'edit', 'remove'],
   apex: ['full_access'],
   rooms: ['create'],
+  market_masters: ['view'],
 } as const
 
 type PermissionGroups = typeof ADMIN_PERMISSION_GROUPS
@@ -60,6 +61,7 @@ const LIVE_PERMISSIONS: AdminPermission[] = [
   'admin.view', 'admin.create', 'admin.edit', 'admin.remove',
   'apex.full_access',
   'rooms.create',
+  'market_masters.view',
 ]
 const LIVE_SET = new Set(LIVE_PERMISSIONS)
 

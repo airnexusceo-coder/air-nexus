@@ -603,6 +603,15 @@
   .premium-skeleton::after { display: none; }
 }
 
+/* Market Masters' in-game "reduce motion" preference — independent of the OS
+   setting above, since a player may want this off without changing system
+   settings. Disables hover/press transitions within the game's own shell. */
+.mm-reduce-motion, .mm-reduce-motion * {
+  transition-duration: 0.001ms !important;
+  animation-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
 /* Native-feeling mobile workspace behavior. */
 html,
 body {

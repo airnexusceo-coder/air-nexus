@@ -31,7 +31,7 @@ import { cn } from '@/lib/utils'
 import { MotivationPage } from '@/components/motivation-page'
 import type { NotificationDTO, NotificationType } from '@/lib/notifications/types'
 import { CHAT_HISTORY_STORAGE_KEY } from '@/lib/chat-history'
-import { FLASHCARD_DECK_STORAGE_KEY, type Flashcard, type FlashcardDeck } from '@/lib/ai/study-artifacts'
+import { FLASHCARD_DECK_STORAGE_KEY, parseStoredFlashcardDeck, saveFlashcardDeck } from '@/lib/ai/study-artifacts'
 import { motivationStorageKey, parseMotivationState, MOTIVATION_UPDATED_EVENT } from '@/lib/motivation'
 import { NEXUS_REWARDS_STORAGE_KEY, parseRewardsState } from '@/lib/nexus-points'
 
@@ -633,29 +633,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function cleanText(value: unknown, maxLength: number) {
-  return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
-}
-
-/** Mirrors ai-tutor-page.tsx's loadSavedDeck validation so an imported deck can never overwrite a good local deck with malformed data. */
-function parseImportedFlashcardDeck(value: unknown): FlashcardDeck | null {
-  if (!isRecord(value) || typeof value.title !== 'string' || typeof value.createdAt !== 'string' || !Array.isArray(value.cards)) return null
-  const cards = value.cards.flatMap((candidate): Flashcard[] => {
-    if (!isRecord(candidate)) return []
-    const front = cleanText(candidate.front, 240)
-    const back = cleanText(candidate.back, 500)
-    if (!front || !back || typeof candidate.id !== 'string') return []
-    return [{
-      id: candidate.id,
-      front,
-      back,
-      hint: cleanText(candidate.hint, 220),
-      difficulty: candidate.difficulty === 'intermediate' || candidate.difficulty === 'advanced' ? candidate.difficulty : 'beginner',
-    }]
-  })
-  return cards.length ? { title: value.title, createdAt: value.createdAt, cards } : null
-}
-
 function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps, 'notify' | 'motivationUserId'>) {
   const importRef = useRef<HTMLInputElement>(null)
 
@@ -722,11 +699,12 @@ function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps
           window.localStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(parsed.chatHistory))
           restored.push('chat history')
         }
-        const deck = parseImportedFlashcardDeck(parsed.flashcardDeck)
-        if (deck) {
-          window.localStorage.setItem(FLASHCARD_DECK_STORAGE_KEY, JSON.stringify(deck))
-          restored.push('flashcards')
-        }
+        const rawDecks = Array.isArray(parsed.flashcardDeck) ? parsed.flashcardDeck : [parsed.flashcardDeck]
+        const importedDecks = rawDecks
+          .map((candidate, index) => parseStoredFlashcardDeck(candidate, `deck-imported-${index}-${Date.now()}`))
+          .filter((deck) => deck !== null)
+        for (const deck of importedDecks) saveFlashcardDeck(deck)
+        if (importedDecks.length > 0) restored.push('flashcards')
       } catch {
         notify(`${file.name} isn't a valid AirNexus export`, 'warning')
         event.target.value = ''

@@ -2,7 +2,7 @@ import { sanitizeResponse } from '@/lib/ai/sanitize-response'
 import type { TutorAction, TutorHistoryMessage, TutorMode } from '@/lib/ai/tutor-types'
 import { executeStudyTool, studyToolDefinitions, type GroqToolCall } from '@/lib/ai/study-tools'
 import { selectGroqTextModel, type GroqTextPurpose } from '@/lib/ai/model-router'
-import { actionInstruction, automaticToolPrompt, modeInstruction, toolResultPrompt, tutorSystemPrompt } from '@/lib/ai/prompts'
+import { actionInstruction, automaticToolPrompt, maxTokensForAction, modeInstruction, toolResultPrompt, tutorSystemPrompt } from '@/lib/ai/prompts'
 
 const GROQ_CHAT_COMPLETIONS_URL = 'https://api.groq.com/openai/v1/chat/completions'
 
@@ -149,7 +149,7 @@ export async function createTutorReply({
       model,
       messages,
       temperature: action === 'flashcards' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes' || action === 'draft' || action.startsWith('assignment-') ? 0.25 : 0.5,
-      max_completion_tokens: action.startsWith('assignment-') ? 6_000 : action === 'flashcards' || action === 'study-coach' || action === 'notes' || action === 'draft' ? 4_096 : 2_048,
+      max_completion_tokens: maxTokensForAction(action),
       stream: false,
     }),
     signal,
@@ -224,7 +224,7 @@ export async function createTutorReplyStream({
       model,
       messages,
       temperature: action === 'flashcards' || action === 'study-coach' || action === 'writing-suggestions' || action === 'notes' || action === 'draft' || action.startsWith('assignment-') ? 0.25 : 0.5,
-      max_completion_tokens: action.startsWith('assignment-') ? 6_000 : action === 'flashcards' || action === 'study-coach' || action === 'notes' || action === 'draft' ? 4_096 : 2_048,
+      max_completion_tokens: maxTokensForAction(action),
       stream: true,
     }),
     signal,

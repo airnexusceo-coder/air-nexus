@@ -66,12 +66,14 @@ Rules:
 - Do not use Markdown fences or add text outside the JSON.`
   }
   if (action === 'graph') {
-    return `GRAPH MODE: decide the function(s) to plot for the student's request. Return valid JSON only with this exact shape:
-{"title":"short graph title","functions":[{"expression":"single-variable expression in x","label":"short legend label"}],"xMin":-10,"xMax":10,"yMin":-10,"yMax":10}
+    return `GRAPH MODE: decide whether the student wants a mathematical function plotted, or a specific set of data points/values graphed, then return valid JSON only with this exact shape:
+{"title":"short graph title","functions":[{"expression":"single-variable expression in x","label":"short legend label"}],"series":[{"label":"short legend label","points":[{"x":0,"y":0}],"style":"line"}],"xMin":-10,"xMax":10,"yMin":-10,"yMax":10}
 Rules:
-- Each "expression" must use only this syntax: + - * / ^ ( ) numbers, the variable x, implicit multiplication like 2x, the functions sin cos tan sqrt abs log ln exp, and the constants pi and e. Do not use any other notation (no "y=", no commas, no other variables).
-- Include up to 4 functions only when the student asked to compare several; otherwise return exactly one.
-- Only include xMin/xMax/yMin/yMax when the default -10 to 10 view would clearly cut off the interesting part of the graph (e.g. a function with a much larger or smaller natural range); otherwise omit them.
+- Use "functions" for a mathematical relationship (e.g. "graph y = x^2", "plot sin(x)"). Each "expression" must use only this syntax: + - * / ^ ( ) numbers, the variable x, implicit multiplication like 2x, the functions sin cos tan sqrt abs log ln exp, and the constants pi and e. Do not use any other notation (no "y=", no commas, no other variables).
+- Use "series" for explicit data the student gave you, or asked you to visualize (e.g. "plot these points: (1,4) (2,9) (3,15)", "graph my test scores over the weeks", a table of values, or numbers extracted from an attached document). Each point needs numeric "x" and "y". Set "style" to "scatter" for unordered/independent data points, or "line" when the points represent a trend across an ordered axis (like time). Include at least 2 points per series, up to 200.
+- You may return "functions", "series", or both, but never leave both empty — if you cannot determine real numeric values for either, ask the student a clarifying question in plain text instead of calling this mode.
+- Include up to 4 functions or 6 series only when comparing several; otherwise return exactly one.
+- Only include xMin/xMax/yMin/yMax when the default -10 to 10 view (or the natural range of the supplied data) would clearly cut off the interesting part of the graph; otherwise omit them.
 - Do not use Markdown fences or add text outside the JSON.`
   }
   if (action === 'feedback') {
@@ -126,10 +128,27 @@ Rules:
   if (action === 'flashcards') {
     return `FLASHCARD MODE: build active-recall flashcards for the request. If notes or documents were supplied, use only facts found in them and ground every card in that material. If none were supplied, use accurate general knowledge about the requested topic instead. Return valid JSON only with this exact shape:
 {"deckTitle":"concise title","cards":[{"front":"active-recall question or term","back":"concise answer","hint":"small retrieval cue","difficulty":"beginner|intermediate|advanced"}]}
-Do not use Markdown fences. Avoid duplicate cards, vague prompts, and trivia.`
+Rules:
+- Support decks up to 50 cards. If the student (or the "Create N flashcards" instruction) specifies a number, produce exactly that many, up to 50 — never silently produce fewer. If no number was requested, judge deck size from how much material was supplied: roughly 10-15 cards for a short topic, more for substantial notes or documents, capped at 50.
+- Keep each "front"/"back"/"hint" concise even in a large deck — brevity is what keeps a 50-card deck usable, not padding.
+- Do not use Markdown fences. Avoid duplicate cards, vague prompts, and trivia.`
   }
   if (purpose === 'tutoring') {
     return 'TEACH MODE: begin with a brief diagnostic or connect to the learner\'s last answer, explain the topic in clear steps, include one worked example when useful, ask one focused follow-up question, and finish with a lesson recap. Keep the full response under 450 words, with the final section reserved for the complete Lesson recap.'
   }
   return 'CHAT MODE: this is an ordinary AI chat, not a structured lesson. Answer directly and conversationally, like a sharp, knowledgeable study partner. Default to a few short paragraphs or a short list — roughly under 150 words — unless the student is asking for a long-form explanation, a full derivation, a document, or explicitly asks for more detail or depth, in which case give it fully and do not artificially cut it short. Skip the forced diagnostic opener, worked example, and "Lesson recap" close unless the student is actually working through a problem step by step. Get to the point.'
+}
+
+/**
+ * Output token budget by action, shared by the primary Groq path and the
+ * OpenAI/Anthropic fallback path so neither one truncates a large structured
+ * reply mid-JSON. Flashcards gets its own higher tier: a full 50-card deck
+ * comfortably runs past the 4,096 tokens that's enough for shorter
+ * structured replies.
+ */
+export function maxTokensForAction(action: TutorAction): number {
+  if (action.startsWith('assignment-')) return 6_000
+  if (action === 'flashcards') return 8_192
+  if (action === 'study-coach' || action === 'notes' || action === 'draft') return 4_096
+  return 2_048
 }

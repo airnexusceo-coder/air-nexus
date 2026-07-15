@@ -11,6 +11,7 @@ import {
   CircleDot,
   Crown,
   FileText,
+  Gem,
   GraduationCap,
   Layers3,
   ListChecks,
@@ -25,6 +26,7 @@ import {
 
 import type { NexusPlan } from '@/lib/plans'
 import {
+  COURSE_PURCHASE_COST,
   VCE_COURSES,
   VCE_COURSE_CATEGORIES,
   VCE_STUDY_DESIGN_SOURCE,
@@ -37,12 +39,16 @@ import {
 } from '@/lib/courses/vce-catalog'
 import type { AiUnitLessonPack } from '@/lib/courses/lesson-pack-types'
 
+type CoursePurchase = { id: string; courseId: string; pointsSpent: number; purchasedAt: string; expiresAt: string }
+
 type NotifyFn = (message: string) => void
 
 type CoursesPageProps = {
   plan: NexusPlan
+  nexusPoints: number
   notify?: NotifyFn
   onRequestUpgrade: (feature: string, requiredPlan: Exclude<NexusPlan, 'Free'>) => void
+  onPurchaseCourse: (course: { id: string; name: string }) => Promise<boolean>
 }
 
 type PlusSelection = {
@@ -110,7 +116,7 @@ function isValidPlusSelection(value: unknown): value is PlusSelection {
   )
 }
 
-export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps) {
+export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPurchaseCourse }: CoursesPageProps) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState(ALL_CATEGORIES)
   const [selectedCourseId, setSelectedCourseId] = useState(VCE_COURSES[0]?.id ?? '')
@@ -120,6 +126,8 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
   const [activeUnitLessonPack, setActiveUnitLessonPack] = useState<ActiveUnitLessonPack | null>(null)
   const [activeAssessment, setActiveAssessment] = useState<ActiveCourseAssessment | null>(null)
   const [generatingPackKey, setGeneratingPackKey] = useState<string | null>(null)
+  const [purchases, setPurchases] = useState<CoursePurchase[]>([])
+  const [purchasingCourseId, setPurchasingCourseId] = useState<string | null>(null)
 
   const monthKey = currentCourseMonthKey()
   const monthLabel = useMemo(() => formatMonthKey(monthKey), [monthKey])
@@ -132,20 +140,41 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
       }
 
       const storedPlusSelection = window.localStorage.getItem(PLUS_SELECTION_KEY)
-      if (!storedPlusSelection) return
-
-      try {
-        const parsed = JSON.parse(storedPlusSelection)
-        if (isValidPlusSelection(parsed) && VCE_COURSES.some((course) => course.id === parsed.courseId)) {
-          setPlusSelection(parsed)
+      if (storedPlusSelection) {
+        try {
+          const parsed = JSON.parse(storedPlusSelection)
+          if (isValidPlusSelection(parsed) && VCE_COURSES.some((course) => course.id === parsed.courseId)) {
+            setPlusSelection(parsed)
+          }
+        } catch {
+          window.localStorage.removeItem(PLUS_SELECTION_KEY)
         }
-      } catch {
-        window.localStorage.removeItem(PLUS_SELECTION_KEY)
       }
+
+      void (async () => {
+        const [selectionResponse, purchasesResponse] = await Promise.all([
+          fetch('/api/courses/selection', { credentials: 'include', cache: 'no-store' }),
+          fetch('/api/courses/purchases', { credentials: 'include', cache: 'no-store' }),
+        ])
+        if (selectionResponse.ok) {
+          const data = await selectionResponse.json() as { selection?: { freeSubjectId: string | null; plusMonthKey: string | null; plusCourseId: string | null; plusUnit: 1 | 2 | 3 | 4 | null } }
+          if (data.selection?.freeSubjectId) setFreeSubjectId(data.selection.freeSubjectId)
+          if (data.selection?.plusCourseId && data.selection.plusUnit && data.selection.plusMonthKey) {
+            setPlusSelection({ monthKey: data.selection.plusMonthKey, courseId: data.selection.plusCourseId, unit: data.selection.plusUnit })
+          }
+        }
+        if (purchasesResponse.ok) {
+          const data = await purchasesResponse.json() as { purchases?: CoursePurchase[] }
+          const now = Date.now()
+          setPurchases((data.purchases ?? []).filter((purchase) => new Date(purchase.expiresAt).getTime() > now))
+        }
+      })()
     }, 0)
 
     return () => window.clearTimeout(hydrationTimer)
   }, [])
+
+  const purchasedCourseIds = new Set(purchases.map((purchase) => purchase.courseId))
 
   const activePlusSelection = plusSelection?.monthKey === monthKey ? plusSelection : undefined
 
@@ -177,13 +206,19 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
   const selectedCourse =
     VCE_COURSES.find((course) => course.id === selectedCourseId) ?? filteredCourses[0] ?? VCE_COURSES[0]
 
+  const resolveAccessWithPurchase = (course: VceCourse, unit: 1 | 2 | 3 | 4) => {
+    if (purchasedCourseIds.has(course.id)) return { unlocked: true, reason: 'purchased' as const, requiredPlan: null }
+    return resolveCourseAccess(plan, course.id, unit, accessSelection, monthKey)
+  }
+
   const selectedAccess = useMemo(
     () =>
       selectedCourse.levels.map((level) => ({
         level,
-        access: resolveCourseAccess(plan, selectedCourse.id, level.unit, accessSelection, monthKey),
+        access: resolveAccessWithPurchase(selectedCourse, level.unit),
       })),
-    [accessSelection, monthKey, plan, selectedCourse],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [accessSelection, monthKey, plan, selectedCourse, purchasedCourseIds],
   )
 
   const unlockedUnits = selectedAccess.filter((entry) => entry.access.unlocked).length
@@ -209,6 +244,12 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
     setFreeSubjectId(course.id)
     window.localStorage.setItem(FREE_SUBJECT_KEY, course.id)
     notify?.(`${course.name} is now your free full VCE subject.`)
+    void fetch('/api/courses/selection', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'free', courseId: course.id }),
+    }).catch(() => undefined)
   }
 
   const choosePlusUnit = (course: VceCourse, level: VceCourseLevel) => {
@@ -223,20 +264,43 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
     setPlusSelection(nextSelection)
     window.localStorage.setItem(PLUS_SELECTION_KEY, JSON.stringify(nextSelection))
     notify?.(`Unit ${level.unit} of ${course.name} is your ${monthLabel} Plus unlock.`)
+    void fetch('/api/courses/selection', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'plus', courseId: course.id, unit: level.unit }),
+    }).catch(() => undefined)
+  }
+
+  const purchaseCourseNow = async (course: VceCourse) => {
+    if (purchasedCourseIds.has(course.id) || purchasingCourseId) return
+    setPurchasingCourseId(course.id)
+    try {
+      const success = await onPurchaseCourse({ id: course.id, name: course.name })
+      if (success) {
+        const response = await fetch('/api/courses/purchases', { credentials: 'include', cache: 'no-store' })
+        if (response.ok) {
+          const data = await response.json() as { purchases?: CoursePurchase[] }
+          setPurchases(data.purchases ?? [])
+        }
+      }
+    } finally {
+      setPurchasingCourseId(null)
+    }
   }
 
   const getUnlockedCount = (course: VceCourse) =>
-    course.levels.filter((level) => resolveCourseAccess(plan, course.id, level.unit, accessSelection, monthKey).unlocked)
+    course.levels.filter((level) => resolveAccessWithPurchase(course, level.unit).unlocked)
       .length
-  const generateUnitLessonPack = async (course: VceCourse, level: VceCourseLevel) => {
-    const key = `${course.id}:${level.unit}`
+  const generateUnitLessonPack = async (course: VceCourse, level: VceCourseLevel, chapter?: VceCourseChapter) => {
+    const key = chapter ? `${course.id}:${level.unit}:${chapter.id}` : `${course.id}:${level.unit}`
     setGeneratingPackKey(key)
     try {
       const response = await fetch('/api/courses/lesson-pack', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ courseId: course.id, unit: level.unit }),
+        body: JSON.stringify({ courseId: course.id, unit: level.unit, plan, chapterId: chapter?.id }),
       })
       const data = await response.json().catch(() => null) as { pack?: AiUnitLessonPack; error?: string } | null
       if (!response.ok || !data?.pack) {
@@ -457,8 +521,31 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
                     Premium all access
                   </button>
                 )}
+                {plan !== 'Premium' && (
+                  purchasedCourseIds.has(selectedCourse.id) ? (
+                    <span className="inline-flex items-center gap-2 rounded-md border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 text-sm font-semibold text-emerald-100">
+                      <Gem className="h-4 w-4" />
+                      Purchased — open until the holidays
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={purchasingCourseId === selectedCourse.id || nexusPoints < COURSE_PURCHASE_COST}
+                      onClick={() => void purchaseCourseNow(selectedCourse)}
+                      className="inline-flex items-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-300/12 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/18 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      {purchasingCourseId === selectedCourse.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Gem className="h-4 w-4" />}
+                      Buy full course · {COURSE_PURCHASE_COST.toLocaleString()} Nexus Points
+                    </button>
+                  )
+                )}
               </div>
             </div>
+            {purchasedCourseIds.has(selectedCourse.id) ? (
+              <p className="mt-3 text-xs text-white/45">All 4 units are unlocked until the next school holidays.</p>
+            ) : plan !== 'Premium' ? (
+              <p className="mt-3 text-xs text-white/45">Buying unlocks all 4 units of {selectedCourse.name} until the next school holidays — no monthly rotation.</p>
+            ) : null}
           </section>
 
           <section className="grid gap-3 lg:grid-cols-2">
@@ -483,6 +570,8 @@ export function CoursesPage({ plan, notify, onRequestUpgrade }: CoursesPageProps
                 onOpenUnitTest={() => setActiveAssessment({ course: selectedCourse, level, scope: 'unit' })}
                 onGenerateUnitLesson={() => void generateUnitLessonPack(selectedCourse, level)}
                 generatingLessonPack={generatingPackKey === `${selectedCourse.id}:${level.unit}`}
+                onGenerateAreaLesson={(chapter) => void generateUnitLessonPack(selectedCourse, level, chapter)}
+                generatingAreaLessonKey={generatingPackKey}
                 onUpgrade={(requiredPlan) =>
                   onRequestUpgrade(`${selectedCourse.name} Unit ${level.unit}`, requiredPlan)
                 }
@@ -554,6 +643,8 @@ type UnitCardProps = {
   onOpenUnitTest: () => void
   onGenerateUnitLesson: () => void
   generatingLessonPack: boolean
+  onGenerateAreaLesson: (chapter: VceCourseChapter) => void
+  generatingAreaLessonKey: string | null
 }
 
 function UnitCard({
@@ -572,6 +663,8 @@ function UnitCard({
   onOpenUnitTest,
   onGenerateUnitLesson,
   generatingLessonPack,
+  onGenerateAreaLesson,
+  generatingAreaLessonKey,
 }: UnitCardProps) {
   const statusLabel = unlocked ? 'Unlocked' : 'Locked'
   const Icon = unlocked ? CheckCircle2 : LockKeyhole
@@ -623,6 +716,8 @@ function UnitCard({
             locked={!unlocked}
             onOpenLesson={onOpenLesson}
             onOpenAreaTest={onOpenAreaTest}
+            onGenerateAreaLesson={onGenerateAreaLesson}
+            generatingAreaLesson={generatingAreaLessonKey === `${course.id}:${level.unit}:${chapter.id}`}
           />
         ))}
       </div>
@@ -694,12 +789,16 @@ function ChapterBlock({
   locked,
   onOpenLesson,
   onOpenAreaTest,
+  onGenerateAreaLesson,
+  generatingAreaLesson,
 }: {
   chapter: VceCourseChapter
   chapterNumber: number
   locked: boolean
   onOpenLesson: (chapter: VceCourseChapter, lesson: VceCourseLesson) => void
   onOpenAreaTest: (chapter: VceCourseChapter) => void
+  onGenerateAreaLesson: (chapter: VceCourseChapter) => void
+  generatingAreaLesson: boolean
 }) {
   return (
     <div className={classNames('border-t border-white/10 pt-3', locked && 'opacity-70')}>
@@ -718,6 +817,15 @@ function ChapterBlock({
           className="rounded-md border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-50 transition hover:bg-amber-300/16 disabled:cursor-not-allowed disabled:opacity-45"
         >
           Area test
+        </button>
+        <button
+          type="button"
+          disabled={locked || generatingAreaLesson}
+          onClick={() => onGenerateAreaLesson(chapter)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-300/16 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {generatingAreaLesson ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {generatingAreaLesson ? 'Building 50 slides...' : 'Deep-dive lesson (50 slides)'}
         </button>
       </div>
       <h4 className="mt-2 text-sm font-semibold text-white">{chapter.title}</h4>

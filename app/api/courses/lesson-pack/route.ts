@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server'
 
-import { createAiUnitLessonPack, findCourseLevel, lessonPackCacheKey } from '@/lib/courses/ai-lesson-pack'
+import { createAiAreaLessonPack, createAiUnitLessonPack, findCourseChapter, findCourseLevel, lessonPackCacheKey, lessonPackCacheKeyForChapter } from '@/lib/courses/ai-lesson-pack'
 import { VCE_COURSES } from '@/lib/courses/vce-catalog'
+import type { NexusPlan } from '@/lib/plans'
 import type { AiUnitLessonPack } from '@/lib/courses/lesson-pack-types'
+import { resolveCourseAccessServer } from '@/lib/courses/purchases'
 import { getServerAuthSession, SupabaseConfigurationError } from '@/lib/supabase/server'
+
+function asPlan(value: unknown): NexusPlan {
+  return value === 'Plus' || value === 'Premium' ? value : 'Free'
+}
 
 export const runtime = 'nodejs'
 export const maxDuration = 90
@@ -51,13 +57,21 @@ export async function POST(req: Request) {
   const level = findCourseLevel(course, body?.unit)
   if (!level) return NextResponse.json({ error: 'Unknown VCE unit' }, { status: 400 })
 
-  const cacheKey = lessonPackCacheKey(course, level)
+  const access = await resolveCourseAccessServer(auth, asPlan(body?.plan), course.id, level.unit)
+  if (!access.unlocked) return NextResponse.json({ error: 'This unit is not unlocked on your plan yet.' }, { status: 403 })
+
+  const chapter = body?.chapterId ? findCourseChapter(level, body.chapterId) : null
+  if (body?.chapterId && !chapter) return NextResponse.json({ error: 'Unknown Area of Study' }, { status: 400 })
+
+  const cacheKey = chapter ? lessonPackCacheKeyForChapter(course, level, chapter) : lessonPackCacheKey(course, level)
   const cached = lessonPackCache.get(cacheKey)
   if (cached) return NextResponse.json({ pack: cached, cached: true })
 
   const { controller, timeoutId } = createTimeoutSignal()
   try {
-    const pack = await createAiUnitLessonPack(course, level, controller.signal)
+    const pack = chapter
+      ? await createAiAreaLessonPack(course, level, chapter, controller.signal)
+      : await createAiUnitLessonPack(course, level, controller.signal)
     lessonPackCache.set(cacheKey, pack)
     return NextResponse.json({ pack, cached: false })
   } catch (error) {

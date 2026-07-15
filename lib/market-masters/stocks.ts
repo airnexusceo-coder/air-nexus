@@ -1,0 +1,528 @@
+import type { Stock } from '@/lib/market-masters/types'
+
+/**
+ * All companies, tickers, and events in Market Masters are fictional. Prices
+ * are simulated locally and never reflect a real security. Risk and
+ * volatility are set per company (not just per industry) so two companies in
+ * the same industry — even the same risk tier — can still behave
+ * differently, the same way real markets work.
+ */
+export const STOCKS: Stock[] = [
+  // --- Technology ---------------------------------------------------------
+  {
+    ticker: 'NIMB',
+    name: 'NimbusSoft Inc.',
+    industry: 'Technology',
+    risk: 'medium',
+    description: 'Makes cloud software that businesses use to manage projects and data storage.',
+    startingPrice: 142.5,
+    dividendYield: 0,
+    volatility: 1.3,
+  },
+  {
+    ticker: 'BASE',
+    name: 'Baseline Cloud Systems',
+    industry: 'Technology',
+    risk: 'low',
+    description: 'A mature enterprise IT company selling reliable, unglamorous back-office software to large companies.',
+    startingPrice: 88.2,
+    dividendYield: 1.5,
+    volatility: 0.7,
+  },
+  {
+    ticker: 'FRGE',
+    name: 'Forgepoint Devices',
+    industry: 'Technology',
+    risk: 'high',
+    description: 'Designs consumer gadgets and wearables — hit product cycles can send this stock sharply up or down.',
+    startingPrice: 34.8,
+    dividendYield: 0,
+    volatility: 2.4,
+  },
+
+  // --- Artificial Intelligence ---------------------------------------------
+  {
+    ticker: 'COGN',
+    name: 'Cognivio Labs',
+    industry: 'Artificial Intelligence',
+    risk: 'high',
+    description: 'Builds experimental AI models. Huge potential upside, but the technology and its market are both still unproven.',
+    startingPrice: 46.75,
+    dividendYield: 0,
+    volatility: 3.0,
+  },
+  {
+    ticker: 'SENT',
+    name: 'Sentiro Analytics',
+    industry: 'Artificial Intelligence',
+    risk: 'medium',
+    description: 'Sells established AI-powered data analytics tools to large businesses — less speculative than a pure research company.',
+    startingPrice: 71.4,
+    dividendYield: 0.5,
+    volatility: 1.8,
+  },
+  {
+    ticker: 'NEXM',
+    name: 'Nexmind Robotics',
+    industry: 'Artificial Intelligence',
+    risk: 'high',
+    description: 'Builds AI-driven warehouse and factory robots — a real, growing customer base, but expensive hardware R&D.',
+    startingPrice: 29.6,
+    dividendYield: 0,
+    volatility: 2.6,
+  },
+
+  // --- Cybersecurity --------------------------------------------------------
+  {
+    ticker: 'SHLD',
+    name: 'ShieldForge Security',
+    industry: 'Cybersecurity',
+    risk: 'medium',
+    description: 'Sells software that protects companies from hackers and data breaches.',
+    startingPrice: 63.9,
+    dividendYield: 0,
+    volatility: 1.6,
+  },
+  {
+    ticker: 'VNTG',
+    name: 'Vantage Point Security',
+    industry: 'Cybersecurity',
+    risk: 'low',
+    description: 'A well-established cybersecurity firm with long-term government and enterprise contracts.',
+    startingPrice: 54.1,
+    dividendYield: 1.2,
+    volatility: 0.9,
+  },
+
+  // --- Healthcare -------------------------------------------------------------
+  {
+    ticker: 'VITC',
+    name: 'VitalCure Biotech',
+    industry: 'Healthcare',
+    risk: 'high',
+    description: 'A biotech company researching new treatments — big potential upside, but many drugs never make it to market.',
+    startingPrice: 58.2,
+    dividendYield: 0,
+    volatility: 2.8,
+  },
+  {
+    ticker: 'MDBK',
+    name: 'Meadowbrook Health Group',
+    industry: 'Healthcare',
+    risk: 'low',
+    description: 'Runs a network of hospitals and clinics. Healthcare demand stays fairly steady in good times and bad.',
+    startingPrice: 96.3,
+    dividendYield: 2.4,
+    volatility: 0.6,
+  },
+  {
+    ticker: 'PULS',
+    name: 'PulsePoint Medical Devices',
+    industry: 'Healthcare',
+    risk: 'medium',
+    description: 'Makes diagnostic and monitoring equipment sold to hospitals — steadier than drug research, still innovation-driven.',
+    startingPrice: 68.9,
+    dividendYield: 1.3,
+    volatility: 1.2,
+  },
+
+  // --- Banking ----------------------------------------------------------------
+  {
+    ticker: 'MRDN',
+    name: 'Meridian Trust Bank',
+    industry: 'Banking',
+    risk: 'low',
+    description: 'A long-established retail bank offering savings accounts, loans, and mortgages.',
+    startingPrice: 76.4,
+    dividendYield: 3.2,
+    volatility: 0.5,
+  },
+  {
+    ticker: 'UPFN',
+    name: 'Union Peak Financial',
+    industry: 'Banking',
+    risk: 'medium',
+    description: 'An investment bank that trades and advises on large deals — more exposed to market swings than an everyday retail bank.',
+    startingPrice: 112.8,
+    dividendYield: 1.8,
+    volatility: 1.0,
+  },
+
+  // --- Insurance --------------------------------------------------------------
+  {
+    ticker: 'ASHM',
+    name: 'Ashworth Mutual Insurance',
+    industry: 'Insurance',
+    risk: 'low',
+    description: 'Sells home, car, and life insurance. Steady premium income makes this a traditionally stable business.',
+    startingPrice: 67.5,
+    dividendYield: 3.6,
+    volatility: 0.6,
+  },
+  {
+    ticker: 'PLRS',
+    name: 'Polaris Specialty Underwriters',
+    industry: 'Insurance',
+    risk: 'medium',
+    description: 'Insures large commercial risks like factories and shipping fleets — bigger premiums, but bigger payouts when something goes wrong.',
+    startingPrice: 82.3,
+    dividendYield: 2.1,
+    volatility: 1.3,
+  },
+
+  // --- Renewable Energy ---------------------------------------------------
+  {
+    ticker: 'SLSP',
+    name: 'SolarSpark Renewables',
+    industry: 'Renewable Energy',
+    risk: 'high',
+    description: 'Builds solar panel farms. A fast-growing but young company in a competitive, subsidy-sensitive industry.',
+    startingPrice: 18.4,
+    dividendYield: 0,
+    volatility: 2.6,
+  },
+  {
+    ticker: 'WNDR',
+    name: 'Windrise Power',
+    industry: 'Renewable Energy',
+    risk: 'medium',
+    description: 'An established wind-farm operator with long-term energy contracts already in place.',
+    startingPrice: 41.2,
+    dividendYield: 1.4,
+    volatility: 1.7,
+  },
+
+  // --- Oil & Gas ----------------------------------------------------------------
+  {
+    ticker: 'PETC',
+    name: 'PetroCore Energy',
+    industry: 'Oil & Gas',
+    risk: 'medium',
+    description: 'Extracts and refines oil and gas. Profits rise and fall with global fuel prices.',
+    startingPrice: 64.1,
+    dividendYield: 4.5,
+    volatility: 1.4,
+  },
+  {
+    ticker: 'DRLX',
+    name: 'Drillmax Offshore',
+    industry: 'Oil & Gas',
+    risk: 'high',
+    description: 'Operates offshore drilling rigs under contract to larger energy companies — high day-rates, but exposed to accidents and downturns.',
+    startingPrice: 21.9,
+    dividendYield: 1.0,
+    volatility: 2.7,
+  },
+
+  // --- Retail -------------------------------------------------------------------
+  {
+    ticker: 'URBC',
+    name: 'UrbanCart Retail',
+    industry: 'Retail',
+    risk: 'medium',
+    description: 'Runs a chain of general-merchandise stores across the country, plus a growing online store.',
+    startingPrice: 39.75,
+    dividendYield: 1.8,
+    volatility: 1.2,
+  },
+  {
+    ticker: 'THRF',
+    name: 'Thriftline Stores',
+    industry: 'Retail',
+    risk: 'low',
+    description: 'A discount retail chain — value shopping tends to hold up even when household budgets are tight.',
+    startingPrice: 27.6,
+    dividendYield: 2.2,
+    volatility: 0.6,
+  },
+
+  // --- Food & Beverages -----------------------------------------------------------
+  {
+    ticker: 'GRPL',
+    name: 'GreenPlate Foods',
+    industry: 'Food & Beverages',
+    risk: 'low',
+    description: 'Makes packaged groceries sold in supermarkets. People keep buying groceries in good times and bad.',
+    startingPrice: 47.6,
+    dividendYield: 2.6,
+    volatility: 0.5,
+  },
+  {
+    ticker: 'FIZZ',
+    name: 'Fizzwell Beverage Co.',
+    industry: 'Food & Beverages',
+    risk: 'medium',
+    description: 'Makes soft drinks and bottled beverages — brand loyalty helps, but tastes and health trends shift fast.',
+    startingPrice: 33.2,
+    dividendYield: 1.7,
+    volatility: 1.0,
+  },
+  {
+    ticker: 'BREW',
+    name: 'Brightbrew Coffee Roasters',
+    industry: 'Food & Beverages',
+    risk: 'medium',
+    description: 'Runs a growing chain of coffee shops — expansion drives growth, but rent and staffing costs bite into margins.',
+    startingPrice: 26.4,
+    dividendYield: 0,
+    volatility: 1.4,
+  },
+
+  // --- Entertainment --------------------------------------------------------
+  {
+    ticker: 'STLS',
+    name: 'Starlight Studios',
+    industry: 'Entertainment',
+    risk: 'high',
+    description: 'Produces films and a streaming service. Success depends heavily on whether its releases become hits.',
+    startingPrice: 28.9,
+    dividendYield: 0,
+    volatility: 2.4,
+  },
+  {
+    ticker: 'CASC',
+    name: 'Cascade Broadcasting',
+    industry: 'Entertainment',
+    risk: 'low',
+    description: 'Operates traditional television and radio stations with long-term advertising contracts.',
+    startingPrice: 33.1,
+    dividendYield: 3.0,
+    volatility: 0.7,
+  },
+  {
+    ticker: 'ECHO',
+    name: 'EchoWave Music Group',
+    industry: 'Entertainment',
+    risk: 'medium',
+    description: 'Owns a catalog of recorded music and a streaming royalties business — steadier than film, but still hit-dependent.',
+    startingPrice: 40.7,
+    dividendYield: 1.2,
+    volatility: 1.5,
+  },
+
+  // --- Gaming ---------------------------------------------------------------
+  {
+    ticker: 'PIXL',
+    name: 'PixelForge Interactive',
+    industry: 'Gaming',
+    risk: 'high',
+    description: 'A video game studio betting big on a handful of major releases each year — hits and misses swing the stock hard.',
+    startingPrice: 24.3,
+    dividendYield: 0,
+    volatility: 2.9,
+  },
+  {
+    ticker: 'ARCD',
+    name: 'Arcadia Mobile Games',
+    industry: 'Gaming',
+    risk: 'medium',
+    description: 'Publishes a large portfolio of smaller mobile games, which smooths out the risk of any single title flopping.',
+    startingPrice: 19.85,
+    dividendYield: 0.8,
+    volatility: 1.6,
+  },
+
+  // --- Transport --------------------------------------------------------------
+  {
+    ticker: 'CFRT',
+    name: 'Continental Freight Logistics',
+    industry: 'Transport',
+    risk: 'medium',
+    description: 'Moves goods by truck and rail across the country for other businesses.',
+    startingPrice: 52.4,
+    dividendYield: 1.6,
+    volatility: 1.1,
+  },
+  {
+    ticker: 'PORT',
+    name: 'Portside Shipping Group',
+    industry: 'Transport',
+    risk: 'medium',
+    description: 'Operates container ships and port terminals moving goods internationally — global trade swings hit it directly.',
+    startingPrice: 37.8,
+    dividendYield: 2.4,
+    volatility: 1.5,
+  },
+
+  // --- Airlines -----------------------------------------------------------------
+  {
+    ticker: 'SKYB',
+    name: 'SkyBridge Airlines',
+    industry: 'Airlines',
+    risk: 'high',
+    description: 'A regional airline. Fuel costs, weather, and travel demand all swing its profits.',
+    startingPrice: 22.35,
+    dividendYield: 0,
+    volatility: 2.5,
+  },
+  {
+    ticker: 'ATLW',
+    name: 'Atlas Wings International',
+    industry: 'Airlines',
+    risk: 'medium',
+    description: 'A larger long-haul carrier with a loyal frequent-flyer program — more stable than a regional airline, still fuel-sensitive.',
+    startingPrice: 46.1,
+    dividendYield: 0.6,
+    volatility: 1.9,
+  },
+
+  // --- Automotive -----------------------------------------------------------
+  {
+    ticker: 'VOLT',
+    name: 'Voltrix Motors',
+    industry: 'Automotive',
+    risk: 'high',
+    description: 'An electric-vehicle maker chasing rapid growth in a young, intensely competitive market.',
+    startingPrice: 35.6,
+    dividendYield: 0,
+    volatility: 2.3,
+  },
+  {
+    ticker: 'RDGL',
+    name: 'Ridgeline Auto Parts',
+    industry: 'Automotive',
+    risk: 'low',
+    description: 'Supplies replacement parts to repair shops — demand stays steady since people keep fixing older cars.',
+    startingPrice: 44.9,
+    dividendYield: 2.8,
+    volatility: 0.7,
+  },
+  {
+    ticker: 'GRDN',
+    name: 'Guardian Motor Works',
+    industry: 'Automotive',
+    risk: 'medium',
+    description: 'A traditional mass-market carmaker selling sedans and SUVs — big volumes, thin margins, and a slow shift toward EVs.',
+    startingPrice: 29.4,
+    dividendYield: 2.0,
+    volatility: 1.2,
+  },
+
+  // --- Construction ---------------------------------------------------------
+  {
+    ticker: 'IRON',
+    name: 'Ironclad Construction Group',
+    industry: 'Construction',
+    risk: 'medium',
+    description: 'Builds commercial buildings and infrastructure — project delays and interest rates strongly affect results.',
+    startingPrice: 58.7,
+    dividendYield: 1.5,
+    volatility: 1.3,
+  },
+  {
+    ticker: 'TMBR',
+    name: 'Timberline Homebuilders',
+    industry: 'Construction',
+    risk: 'medium',
+    description: 'Builds new residential housing developments — closely tied to mortgage rates and how confident buyers feel.',
+    startingPrice: 33.6,
+    dividendYield: 1.1,
+    volatility: 1.5,
+  },
+
+  // --- Telecommunications ---------------------------------------------------
+  {
+    ticker: 'NLNK',
+    name: 'Northlink Telecom',
+    industry: 'Telecommunications',
+    risk: 'low',
+    description: 'Provides mobile and internet service. Steady demand and long-term contracts make revenue predictable.',
+    startingPrice: 54.2,
+    dividendYield: 3.8,
+    volatility: 0.6,
+  },
+  {
+    ticker: 'BECN',
+    name: 'Beacon Wireless',
+    industry: 'Telecommunications',
+    risk: 'medium',
+    description: 'A newer challenger wireless carrier fighting for market share with aggressive pricing.',
+    startingPrice: 21.15,
+    dividendYield: 1.0,
+    volatility: 1.1,
+  },
+
+  // --- Agriculture ------------------------------------------------------------
+  {
+    ticker: 'HARV',
+    name: 'Harvestline Agritech',
+    industry: 'Agriculture',
+    risk: 'medium',
+    description: 'Sells farming equipment and crop technology. Weather and global crop prices both move this stock.',
+    startingPrice: 49.3,
+    dividendYield: 1.9,
+    volatility: 1.2,
+  },
+  {
+    ticker: 'FLDG',
+    name: 'Fieldgrove Farms Co-op',
+    industry: 'Agriculture',
+    risk: 'low',
+    description: 'A large-scale grain and livestock producer selling to wholesalers — essential, low-glamour, weather-dependent.',
+    startingPrice: 24.7,
+    dividendYield: 2.6,
+    volatility: 0.9,
+  },
+
+  // --- Manufacturing ----------------------------------------------------------
+  {
+    ticker: 'PRIM',
+    name: 'Prime Industrial Manufacturing',
+    industry: 'Manufacturing',
+    risk: 'medium',
+    description: 'Makes industrial machinery and parts for other manufacturers — a steady but economy-sensitive business.',
+    startingPrice: 61.8,
+    dividendYield: 2.0,
+    volatility: 1.1,
+  },
+  {
+    ticker: 'FORG',
+    name: 'Forgewell Metals',
+    industry: 'Manufacturing',
+    risk: 'medium',
+    description: 'Smelts and processes raw metal for other manufacturers — profits track global metal prices closely.',
+    startingPrice: 43.5,
+    dividendYield: 1.6,
+    volatility: 1.4,
+  },
+
+  // --- Real Estate --------------------------------------------------------------
+  {
+    ticker: 'CRNR',
+    name: 'Cornerstone Realty Group',
+    industry: 'Real Estate',
+    risk: 'medium',
+    description: 'Develops and manages commercial office and retail buildings.',
+    startingPrice: 45.25,
+    dividendYield: 2.5,
+    volatility: 1.0,
+  },
+  {
+    ticker: 'SMPT',
+    name: 'Summit Property Trust',
+    industry: 'Real Estate',
+    risk: 'low',
+    description: 'A real estate investment trust that owns residential apartment buildings and pays out most of its income as dividends.',
+    startingPrice: 38.4,
+    dividendYield: 4.8,
+    volatility: 0.5,
+  },
+  {
+    ticker: 'HRZN',
+    name: 'Horizon Logistics Properties',
+    industry: 'Real Estate',
+    risk: 'medium',
+    description: 'Owns and leases warehouses to online retailers and shipping companies — demand tracks e-commerce growth.',
+    startingPrice: 51.6,
+    dividendYield: 3.3,
+    volatility: 1.1,
+  },
+]
+
+export function getStock(ticker: string): Stock | undefined {
+  return STOCKS.find((stock) => stock.ticker === ticker)
+}
+
+export const STOCKS_BY_TICKER: Record<string, Stock> = Object.fromEntries(
+  STOCKS.map((stock) => [stock.ticker, stock]),
+)
