@@ -12,6 +12,7 @@
 export const ADMIN_PERMISSION_GROUPS = {
   users: ['view', 'create', 'edit', 'suspend', 'ban', 'delete', 'impersonate'],
   nexus_points: ['view', 'grant', 'remove', 'set', 'audit'],
+  subscriptions: ['view', 'gift', 'revoke'],
   xp: ['view', 'grant', 'remove', 'set'],
   levels: ['view', 'edit'],
   clashes: ['view', 'create', 'edit', 'cancel', 'force_result', 'reset'],
@@ -53,6 +54,8 @@ export const ADMIN_PERMISSIONS: AdminPermission[] = (Object.entries(ADMIN_PERMIS
  */
 const LIVE_PERMISSIONS: AdminPermission[] = [
   'users.view', 'users.create', 'users.edit', 'users.suspend', 'users.ban', 'users.delete',
+  'nexus_points.view', 'nexus_points.grant', 'nexus_points.audit',
+  'subscriptions.view', 'subscriptions.gift', 'subscriptions.revoke',
   'xp.view', 'xp.grant', 'xp.remove', 'xp.set',
   'clashes.view', 'clashes.cancel', 'clashes.force_result',
   'achievements.view', 'achievements.create', 'achievements.edit', 'achievements.delete', 'achievements.grant', 'achievements.revoke',
@@ -69,17 +72,14 @@ export function isPermissionLive(permission: AdminPermission): boolean {
   return LIVE_SET.has(permission)
 }
 
-const NO_LEDGER = 'Nexus Points have no server ledger — they are stored per-browser (localStorage), not in Supabase.'
+const LIMITED_NEXUS_LEDGER = 'Nexus Points now support admin gifts, but arbitrary remove/set needs a full server balance ledger rather than the user-local wallet.'
 const NO_SYSTEM = (name: string) => `No ${name} system exists in AirNexus yet.`
 const NO_SEMANTICS = (what: string) => `No real ${what} to act on yet.`
 
 export const PERMISSION_LOCKED_REASON: Partial<Record<AdminPermission, string>> = {
   'users.impersonate': 'Requires a Supabase Admin API session-exchange design — a separate security feature, not built this pass.',
-  'nexus_points.view': NO_LEDGER,
-  'nexus_points.grant': NO_LEDGER,
-  'nexus_points.remove': NO_LEDGER,
-  'nexus_points.set': NO_LEDGER,
-  'nexus_points.audit': NO_LEDGER,
+  'nexus_points.remove': LIMITED_NEXUS_LEDGER,
+  'nexus_points.set': LIMITED_NEXUS_LEDGER,
   'levels.view': NO_SYSTEM('numeric level'),
   'levels.edit': NO_SYSTEM('numeric level'),
   'clashes.create': NO_SEMANTICS('breach to author'),

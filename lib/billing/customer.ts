@@ -3,7 +3,7 @@ import 'server-only'
 import type Stripe from 'stripe'
 import { readSupabaseRestJson, supabaseServiceFetch, SupabaseRequestError, type ServerAuthSession } from '@/lib/supabase/server'
 import { getOrCreatePlanProductId, getStripeClient } from '@/lib/billing/stripe'
-import { ACTIVE_SUBSCRIPTION_STATUSES, BILLING_PLAN_CONFIG, resolveEffectivePlan, type PaidPlan } from '@/lib/billing/plans'
+import { ACTIVE_SUBSCRIPTION_STATUSES, BILLING_PLAN_CONFIG, isPaidPlan, resolveEffectivePlan, type PaidPlan } from '@/lib/billing/plans'
 import type { NexusPlan } from '@/lib/plans'
 
 function encode(value: string) {
@@ -17,6 +17,8 @@ type BillingRow = {
   plan_expires_at: string | null
   subscription_status: string | null
   stripe_customer_id: string | null
+  admin_granted_plan: string | null
+  admin_plan_expires_at: string | null
 }
 
 export type BillingStatus = {
@@ -25,21 +27,37 @@ export type BillingStatus = {
   subscriptionStatus: string | null
   hasBillingAccount: boolean
   hasActiveSubscription: boolean
+  hasAdminGift: boolean
+  adminPlanExpiresAt: string | null
 }
+
+const PLAN_RANK: Record<NexusPlan, number> = { Free: 0, Plus: 1, Premium: 2 }
 
 /** Curated, client-safe billing snapshot — never includes raw Stripe IDs. */
 export async function getBillingStatus(auth: ServerAuthSession): Promise<BillingStatus> {
-  const response = await supabaseServiceFetch(`/profiles?user_id=eq.${encode(auth.user.id)}&select=plan,plan_expires_at,subscription_status,stripe_customer_id`)
+  const response = await supabaseServiceFetch(`/profiles?user_id=eq.${encode(auth.user.id)}&select=plan,plan_expires_at,subscription_status,stripe_customer_id,admin_granted_plan,admin_plan_expires_at`)
   const rows = await readSupabaseRestJson<BillingRow[]>(response, 'Could not read billing status')
   const row = rows[0]
-  const plan: NexusPlan = row?.plan === 'Plus' || row?.plan === 'Premium' ? row.plan : 'Free'
   const subscriptionStatus = row?.subscription_status ?? null
+  const hasActiveSubscription = subscriptionStatus !== null && ACTIVE_SUBSCRIPTION_STATUSES.has(subscriptionStatus)
+  const stripePlan: NexusPlan = hasActiveSubscription && (row?.plan === 'Plus' || row?.plan === 'Premium') ? row.plan : 'Free'
+
+  const adminGiftPlan = isPaidPlan(row?.admin_granted_plan) ? row.admin_granted_plan : null
+  const adminPlanExpiresAt = row?.admin_plan_expires_at ?? null
+  const hasAdminGift = Boolean(adminGiftPlan && adminPlanExpiresAt && new Date(adminPlanExpiresAt).getTime() > Date.now())
+  const plan = hasAdminGift && adminGiftPlan && PLAN_RANK[adminGiftPlan] > PLAN_RANK[stripePlan] ? adminGiftPlan : stripePlan
+  const planExpiresAt = hasAdminGift && adminGiftPlan && plan === adminGiftPlan && PLAN_RANK[adminGiftPlan] > PLAN_RANK[stripePlan]
+    ? adminPlanExpiresAt
+    : hasActiveSubscription ? row?.plan_expires_at ?? null : hasAdminGift ? adminPlanExpiresAt : null
+
   return {
     plan,
-    planExpiresAt: row?.plan_expires_at ?? null,
+    planExpiresAt,
     subscriptionStatus,
     hasBillingAccount: Boolean(row?.stripe_customer_id),
-    hasActiveSubscription: subscriptionStatus !== null && ACTIVE_SUBSCRIPTION_STATUSES.has(subscriptionStatus),
+    hasActiveSubscription,
+    hasAdminGift,
+    adminPlanExpiresAt,
   }
 }
 

@@ -11,7 +11,7 @@ assert.equal(hasPermission({ role: 'admin', permissions: ['users.view'] }, 'user
 assert.equal(hasPermission({ role: 'admin', permissions: [] }, 'users.view'), false, 'an admin with no grants has no permissions at all')
 
 // --- permission taxonomy consistency ---------------------------------------
-// Hand-written ~90-entry live/locked map — this catches typos: every locked
+// Hand-written live/locked map — this catches typos: every locked
 // permission must actually be absent from the live set, and vice versa.
 
 for (const permission of ADMIN_PERMISSIONS) {
@@ -26,7 +26,10 @@ for (const permission of ADMIN_PERMISSIONS) {
 
 assert.ok(ADMIN_PERMISSIONS.includes('rooms.create'), 'rooms.create exists in the taxonomy — the concrete original ask')
 assert.equal(isPermissionLive('rooms.create'), true, 'rooms.create is live — it is the one permission this whole feature exists to enforce')
-assert.equal(isPermissionLive('nexus_points.grant'), false, 'nexus_points.* stays locked — no server Nexus Points ledger exists')
+assert.equal(isPermissionLive('nexus_points.grant'), true, 'nexus_points.grant is live — admin gifts are backed by nexus_point_grants')
+assert.equal(isPermissionLive('nexus_points.remove'), false, 'nexus_points.remove stays locked until there is a full server balance ledger')
+assert.equal(isPermissionLive('subscriptions.gift'), true, 'subscriptions.gift is live — admin plan gifts are stored separately from Stripe')
+assert.equal(isPermissionLive('subscriptions.revoke'), true, 'subscriptions.revoke is live — admin plan gifts can be cleared')
 assert.equal(isPermissionLive('users.impersonate'), false, 'impersonation stays locked — flagged as a separate follow-up, not silently built')
 
 // --- password hashing --------------------------------------------------

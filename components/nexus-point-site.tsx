@@ -234,6 +234,8 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const [error, setError] = useState('')
   const [remember, setRemember] = useState(true)
   const [nextPath, setNextPath] = useState('/airgpt')
+  const [adminAccessOpen, setAdminAccessOpen] = useState(false)
+  const [, setAdminTapCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -249,6 +251,28 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
       window.clearTimeout(timeoutId)
     }
   }, [router])
+
+  useEffect(() => {
+    if (mode !== 'login') return
+    let sequence = ''
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.key.length !== 1) return
+      sequence = (sequence + event.key.toLowerCase()).slice(-10)
+      if (sequence.endsWith('nexusadmin')) setAdminAccessOpen(true)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [mode])
+
+  const revealAdminAccess = () => {
+    if (mode !== 'login') return
+    setAdminTapCount((count) => {
+      const next = count + 1
+      if (next >= 7) setAdminAccessOpen(true)
+      return next
+    })
+  }
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -275,13 +299,65 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     }
   }
 
-  return <section className="relative mx-auto flex min-h-[calc(100vh-160px)] max-w-[1440px] items-center justify-center px-5 py-16"><div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,255,255,.08),transparent_38%)]" /><div className="nexus-card relative w-full max-w-md p-7 sm:p-9"><NexusLogo className="size-11" /><p className="mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-300">{mode === 'login' ? 'Secure sign in' : 'Join Air Nexus'}</p><h1 className="mt-2 text-3xl font-semibold">{mode === 'login' ? 'Continue to AirGPT' : 'Create your account'}</h1><p className="mt-2 text-sm leading-6 text-zinc-500">Supabase Auth protects your workspace and memory. AirNexus only uses server-verified account IDs.</p>
-    <form onSubmit={submit} className="mt-6">{mode === 'signup' && <label className="block text-xs text-zinc-400">Username<input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="nexus-field mt-2" placeholder="e.g. study_wolf23" autoComplete="username" /><span className="mt-1.5 block text-[10px] text-zinc-600">3-20 characters, letters, numbers, and underscores only — not your real name.</span></label>}<label className={mode === 'signup' ? 'mt-5 block text-xs text-zinc-400' : 'block text-xs text-zinc-400'}>Email<input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" /></label><label className="mt-5 block text-xs text-zinc-400">Password<input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} /></label>
-      <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Sign in'}<ArrowRight className="size-4" /></button></form>
-    <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-white" /><span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep this Supabase session on this device.</span></span></label>
-    {error && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
-    <p className="mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? "New to Air Nexus? " : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="text-white hover:text-zinc-300">{mode === 'login' ? 'Sign up' : 'Login'}</Link></p></div></section>
+  return (
+    <section className="relative mx-auto flex min-h-[calc(100vh-160px)] max-w-[1440px] items-center justify-center px-5 py-16">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,255,255,.08),transparent_38%)]" />
+      <div className="nexus-card relative w-full max-w-md overflow-hidden p-7 sm:p-9">
+        <div aria-hidden="true" className="absolute -right-24 -top-28 size-56 rounded-full bg-violet-500/10 blur-3xl" />
+        <button type="button" onClick={revealAdminAccess} aria-label="Air Nexus mark" className="relative rounded-2xl text-left outline-none transition hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-white/40">
+          <NexusLogo className="size-11" />
+        </button>
+        <p className="relative mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-300">{mode === 'login' ? 'Secure sign in' : 'Join Air Nexus'}</p>
+        <h1 className="relative mt-2 text-3xl font-semibold">{mode === 'login' ? 'Continue to AirGPT' : 'Create your account'}</h1>
+        <p className="relative mt-2 text-sm leading-6 text-zinc-500">Supabase Auth protects your workspace and memory. AirNexus only uses server-verified account IDs.</p>
+
+        <form onSubmit={submit} className="relative mt-6">
+          {mode === 'signup' && (
+            <label className="block text-xs text-zinc-400">
+              Username
+              <input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="nexus-field mt-2" placeholder="e.g. study_wolf23" autoComplete="username" />
+              <span className="mt-1.5 block text-[10px] text-zinc-600">3-20 characters, letters, numbers, and underscores only ? not your real name.</span>
+            </label>
+          )}
+          <label className={mode === 'signup' ? 'mt-5 block text-xs text-zinc-400' : 'block text-xs text-zinc-400'}>
+            Email
+            <input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" />
+          </label>
+          <label className="mt-5 block text-xs text-zinc-400">
+            Password
+            <input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+          </label>
+          <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Sign in'}<ArrowRight className="size-4" /></button>
+        </form>
+
+        <label className="relative mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400">
+          <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-white" />
+          <span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep this Supabase session on this device.</span></span>
+        </label>
+        {error && <p role="alert" className="relative mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
+        {mode === 'login' && adminAccessOpen && (
+          <Link href="/admin/login" className="relative mt-4 flex items-center justify-between rounded-2xl border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100 transition hover:border-violet-200/40 hover:bg-violet-300/15">
+            Owner console
+            <ArrowRight className="size-4" />
+          </Link>
+        )}
+        <p className="relative mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? "New to Air Nexus? " : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="text-white hover:text-zinc-300">{mode === 'login' ? 'Sign up' : 'Login'}</Link></p>
+        {mode === 'login' && (
+          <button
+            type="button"
+            aria-label={adminAccessOpen ? 'Open owner console login' : 'Hidden owner access'}
+            onClick={() => { if (adminAccessOpen) router.push('/admin/login'); else revealAdminAccess() }}
+            className={cn(
+              'absolute bottom-3 right-3 size-4 rounded-full border transition duration-300',
+              adminAccessOpen ? 'border-violet-200/70 bg-violet-200 shadow-[0_0_18px_rgba(221,214,254,.55)]' : 'border-white/5 bg-white/[0.025] opacity-10 hover:opacity-35',
+            )}
+          />
+        )}
+      </div>
+    </section>
+  )
 }
+
 function ToolPage({ slug }: { slug: string }) {
   const tool = tools.find((item) => item.slug === slug)
   if (!tool) return <PageShell eyebrow="Product" title="Tool not found" description="That Air Nexus tool does not exist."><Link href="/products" className="nexus-outline">Browse working tools</Link></PageShell>

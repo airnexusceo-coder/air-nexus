@@ -1,0 +1,167 @@
+import 'server-only'
+
+import { ACTIVE_SUBSCRIPTION_STATUSES, isPaidPlan, type PaidPlan } from '@/lib/billing/plans'
+import type { NexusPlan } from '@/lib/plans'
+import { readSupabaseRestJson, supabaseServiceFetch, SupabaseRequestError } from '@/lib/supabase/server'
+import { recordAuditLog } from './audit'
+import type { AdminUser } from './session'
+
+function encode(value: string) {
+  return encodeURIComponent(value)
+}
+
+const PLAN_RANK: Record<NexusPlan, number> = { Free: 0, Plus: 1, Premium: 2 }
+const MAX_GIFT_DAYS = 3650
+const MAX_POINTS_GIFT = 1_000_000
+
+type ProfileGiftRow = {
+  plan: string | null
+  plan_expires_at: string | null
+  subscription_status: string | null
+  admin_granted_plan: string | null
+  admin_plan_expires_at: string | null
+}
+
+type PendingGrantRow = {
+  amount: number
+}
+
+export type AdminGrantStatus = {
+  stripePlan: NexusPlan
+  stripePlanExpiresAt: string | null
+  subscriptionStatus: string | null
+  hasActiveSubscription: boolean
+  adminGrantedPlan: PaidPlan | null
+  adminPlanExpiresAt: string | null
+  adminPlanActive: boolean
+  effectivePlan: NexusPlan
+  pendingNexusPoints: number
+  pendingGrantCount: number
+}
+
+function asPlan(value: unknown): NexusPlan {
+  return value === 'Plus' || value === 'Premium' ? value : 'Free'
+}
+
+function activeAdminGift(row: ProfileGiftRow | undefined) {
+  const plan = isPaidPlan(row?.admin_granted_plan) ? row.admin_granted_plan : null
+  const expiresAt = row?.admin_plan_expires_at ?? null
+  const active = Boolean(plan && expiresAt && new Date(expiresAt).getTime() > Date.now())
+  return { plan, expiresAt, active }
+}
+
+function effectivePlanFor(row: ProfileGiftRow | undefined): Pick<AdminGrantStatus, 'stripePlan' | 'stripePlanExpiresAt' | 'subscriptionStatus' | 'hasActiveSubscription' | 'adminGrantedPlan' | 'adminPlanExpiresAt' | 'adminPlanActive' | 'effectivePlan'> {
+  const subscriptionStatus = row?.subscription_status ?? null
+  const hasActiveSubscription = subscriptionStatus !== null && ACTIVE_SUBSCRIPTION_STATUSES.has(subscriptionStatus)
+  const stripePlan = hasActiveSubscription ? asPlan(row?.plan) : 'Free'
+  const gift = activeAdminGift(row)
+  const effectivePlan = gift.active && gift.plan && PLAN_RANK[gift.plan] > PLAN_RANK[stripePlan] ? gift.plan : stripePlan
+
+  return {
+    stripePlan,
+    stripePlanExpiresAt: hasActiveSubscription ? row?.plan_expires_at ?? null : null,
+    subscriptionStatus,
+    hasActiveSubscription,
+    adminGrantedPlan: gift.plan,
+    adminPlanExpiresAt: gift.expiresAt,
+    adminPlanActive: gift.active,
+    effectivePlan,
+  }
+}
+
+async function fetchProfileGiftRow(userId: string): Promise<ProfileGiftRow | undefined> {
+  const response = await supabaseServiceFetch(
+    `/profiles?user_id=eq.${encode(userId)}&select=plan,plan_expires_at,subscription_status,admin_granted_plan,admin_plan_expires_at`,
+  )
+  const rows = await readSupabaseRestJson<ProfileGiftRow[]>(response, 'Failed to load user plan grants')
+  return rows[0]
+}
+
+async function fetchPendingPointGrantSummary(userId: string): Promise<{ pendingNexusPoints: number; pendingGrantCount: number }> {
+  const response = await supabaseServiceFetch(`/nexus_point_grants?user_id=eq.${encode(userId)}&claimed_at=is.null&select=amount`)
+  const rows = await readSupabaseRestJson<PendingGrantRow[]>(response, 'Failed to load Nexus Points grants')
+  return {
+    pendingNexusPoints: rows.reduce((total, row) => total + (Number.isFinite(row.amount) ? row.amount : 0), 0),
+    pendingGrantCount: rows.length,
+  }
+}
+
+export async function getUserGrantStatus(userId: string): Promise<AdminGrantStatus> {
+  const [profile, pending] = await Promise.all([
+    fetchProfileGiftRow(userId),
+    fetchPendingPointGrantSummary(userId),
+  ])
+  return { ...effectivePlanFor(profile), ...pending }
+}
+
+export async function giftSubscription(admin: AdminUser, userId: string, plan: unknown, durationDays: number): Promise<AdminGrantStatus> {
+  if (!isPaidPlan(plan)) throw new SupabaseRequestError('Choose Plus or Premium for a gifted subscription.', 400)
+  if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > MAX_GIFT_DAYS) {
+    throw new SupabaseRequestError(`Gift duration must be between 1 and ${MAX_GIFT_DAYS} days.`, 400)
+  }
+
+  const roundedDays = Math.round(durationDays)
+  const expiresAt = new Date(Date.now() + roundedDays * 24 * 60 * 60 * 1000).toISOString()
+  const response = await supabaseServiceFetch(`/profiles?user_id=eq.${encode(userId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      admin_granted_plan: plan,
+      admin_plan_expires_at: expiresAt,
+      admin_plan_granted_at: new Date().toISOString(),
+      admin_plan_granted_by: admin.id,
+    }),
+  })
+  const rows = await readSupabaseRestJson<unknown[]>(response, 'Could not gift subscription')
+  if (rows.length === 0) throw new SupabaseRequestError('User profile was not found.', 404)
+
+  await recordAuditLog(admin, 'subscriptions.gift', 'user', userId, { plan, durationDays: roundedDays, expiresAt })
+  return getUserGrantStatus(userId)
+}
+
+export async function revokeGiftSubscription(admin: AdminUser, userId: string): Promise<AdminGrantStatus> {
+  const before = await fetchProfileGiftRow(userId)
+  const response = await supabaseServiceFetch(`/profiles?user_id=eq.${encode(userId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      admin_granted_plan: null,
+      admin_plan_expires_at: null,
+      admin_plan_granted_at: null,
+      admin_plan_granted_by: null,
+    }),
+  })
+  const rows = await readSupabaseRestJson<unknown[]>(response, 'Could not revoke gifted subscription')
+  if (rows.length === 0) throw new SupabaseRequestError('User profile was not found.', 404)
+
+  await recordAuditLog(admin, 'subscriptions.revoke', 'user', userId, {
+    previousPlan: before?.admin_granted_plan ?? null,
+    previousExpiry: before?.admin_plan_expires_at ?? null,
+  })
+  return getUserGrantStatus(userId)
+}
+
+export async function grantNexusPoints(admin: AdminUser, userId: string, amount: number, description: string): Promise<AdminGrantStatus> {
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_POINTS_GIFT) {
+    throw new SupabaseRequestError(`Enter a Nexus Points amount between 1 and ${MAX_POINTS_GIFT.toLocaleString()}.`, 400)
+  }
+  const roundedAmount = Math.round(amount)
+  const trimmedDescription = description.trim() || 'Admin Nexus Points gift'
+  if (trimmedDescription.length > 160) throw new SupabaseRequestError('Gift note must be 160 characters or fewer.', 400)
+
+  const response = await supabaseServiceFetch('/nexus_point_grants', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: userId,
+      amount: roundedAmount,
+      description: trimmedDescription,
+      granted_by: admin.id,
+    }),
+  })
+  const rows = await readSupabaseRestJson<unknown[]>(response, 'Could not gift Nexus Points')
+  if (rows.length === 0) throw new SupabaseRequestError('Could not create Nexus Points gift.', 502)
+
+  await recordAuditLog(admin, 'nexus_points.grant', 'user', userId, { amount: roundedAmount, description: trimmedDescription })
+  return getUserGrantStatus(userId)
+}

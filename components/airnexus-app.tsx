@@ -107,6 +107,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [motivationCelebration, setMotivationCelebration] = useState<MotivationCelebration | null>(null)
   const [hasStripeSubscription, setHasStripeSubscription] = useState(false)
   const [billingBusy, setBillingBusy] = useState(false)
+  const adminGiftClaimedRef = useRef(false)
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -219,16 +220,36 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     }, 3200)
   }, [])
 
+  useEffect(() => {
+    if (!rewardsHydrated || adminGiftClaimedRef.current) return
+    adminGiftClaimedRef.current = true
+    const timeoutId = window.setTimeout(() => {
+      void fetch('/api/profile/nexus-grants/claim', { method: 'POST', credentials: 'include' })
+        .then((response) => response.ok ? response.json() as Promise<{ grants: Array<{ id: string; amount: number; description: string; createdAt: string }>; total: number }> : null)
+        .then((data) => {
+          if (!data || data.total <= 0) return
+          setNexusPoints((points) => points + data.total)
+          setTransactions((current) => [
+            ...data.grants.map((grant) => createTransaction('earned', grant.amount, grant.description || 'Admin Nexus Points gift')),
+            ...current,
+          ])
+          notify(`Admin gift claimed: +${data.total.toLocaleString()} Nexus Points`, 'success')
+        })
+        .catch(() => undefined)
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [notify, rewardsHydrated])
+
   const fetchBillingStatus = useCallback(async () => {
     const response = await fetch('/api/billing/status', { credentials: 'include', cache: 'no-store' })
     if (!response.ok) return
-    const data = (await response.json()) as { plan: NexusPlan; planExpiresAt: string | null; hasActiveSubscription: boolean }
+    const data = (await response.json()) as { plan: NexusPlan; planExpiresAt: string | null; hasActiveSubscription: boolean; hasAdminGift?: boolean }
     setHasStripeSubscription(data.hasActiveSubscription)
     // A real Stripe subscription always wins over the local plan (which may
     // reflect a Nexus-Points redemption, or a stale/tampered local value).
     // No active subscription just means "nothing to override with" — it
     // does not downgrade a points-purchased plan back to Free.
-    if (data.hasActiveSubscription) {
+    if (data.hasActiveSubscription || data.hasAdminGift) {
       setPlan(data.plan)
       setPlanExpiry(data.planExpiresAt)
     }

@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { ACTIVE_SUBSCRIPTION_STATUSES, isPaidPlan, type PaidPlan } from '@/lib/billing/plans'
+import type { NexusPlan } from '@/lib/plans'
 import { readSupabaseRestJson, supabaseAdminAuthFetch, supabaseServiceFetch, SupabaseRequestError } from '@/lib/supabase/server'
 import { recordAuditLog } from './audit'
 import type { AdminUser } from './session'
@@ -7,6 +9,8 @@ import type { AdminUser } from './session'
 function encode(value: string) {
   return encodeURIComponent(value)
 }
+
+const PLAN_RANK: Record<NexusPlan, number> = { Free: 0, Plus: 1, Premium: 2 }
 
 export type AdminUserView = {
   id: string
@@ -18,6 +22,15 @@ export type AdminUserView = {
   bannedAt: string | null
   bannedReason: string | null
   deletedAt: string | null
+  plan: NexusPlan
+  planExpiresAt: string | null
+  subscriptionStatus: string | null
+  hasActiveSubscription: boolean
+  adminGrantedPlan: PaidPlan | null
+  adminPlanExpiresAt: string | null
+  adminPlanActive: boolean
+  pendingNexusPoints: number
+  pendingNexusPointGrantCount: number
 }
 
 type GoTrueUser = { id: string; email?: string; created_at: string; user_metadata?: { full_name?: string } }
@@ -29,19 +42,72 @@ type ProfileRow = {
   banned_at: string | null
   banned_reason: string | null
   deleted_at: string | null
+  plan: string | null
+  plan_expires_at: string | null
+  subscription_status: string | null
+  admin_granted_plan: string | null
+  admin_plan_expires_at: string | null
+}
+
+type PendingPointGrantRow = {
+  user_id: string
+  amount: number
+}
+
+type PendingPointGrantSummary = {
+  amount: number
+  count: number
 }
 
 async function fetchProfilesByIds(ids: string[]): Promise<Map<string, ProfileRow>> {
   const unique = Array.from(new Set(ids))
   if (unique.length === 0) return new Map()
   const response = await supabaseServiceFetch(
-    `/profiles?user_id=in.(${unique.map(encode).join(',')})&select=user_id,display_name,suspended_until,suspended_reason,banned_at,banned_reason,deleted_at`,
+    `/profiles?user_id=in.(${unique.map(encode).join(',')})&select=user_id,display_name,suspended_until,suspended_reason,banned_at,banned_reason,deleted_at,plan,plan_expires_at,subscription_status,admin_granted_plan,admin_plan_expires_at`,
   )
   const rows = await readSupabaseRestJson<ProfileRow[]>(response, 'Failed to load profiles')
   return new Map(rows.map((row) => [row.user_id, row]))
 }
 
-function toView(user: GoTrueUser, profile: ProfileRow | undefined): AdminUserView {
+async function fetchPendingPointGrantsByUserIds(ids: string[]): Promise<Map<string, PendingPointGrantSummary>> {
+  const unique = Array.from(new Set(ids))
+  if (unique.length === 0) return new Map()
+  const response = await supabaseServiceFetch(`/nexus_point_grants?user_id=in.(${unique.map(encode).join(',')})&claimed_at=is.null&select=user_id,amount`)
+  const rows = await readSupabaseRestJson<PendingPointGrantRow[]>(response, 'Failed to load Nexus Points gifts')
+  const map = new Map<string, PendingPointGrantSummary>()
+  for (const row of rows) {
+    const current = map.get(row.user_id) ?? { amount: 0, count: 0 }
+    current.amount += Number.isFinite(row.amount) ? row.amount : 0
+    current.count += 1
+    map.set(row.user_id, current)
+  }
+  return map
+}
+
+function resolvePlan(profile: ProfileRow | undefined): Pick<AdminUserView, 'plan' | 'planExpiresAt' | 'subscriptionStatus' | 'hasActiveSubscription' | 'adminGrantedPlan' | 'adminPlanExpiresAt' | 'adminPlanActive'> {
+  const subscriptionStatus = profile?.subscription_status ?? null
+  const hasActiveSubscription = subscriptionStatus !== null && ACTIVE_SUBSCRIPTION_STATUSES.has(subscriptionStatus)
+  const stripePlan: NexusPlan = hasActiveSubscription && (profile?.plan === 'Plus' || profile?.plan === 'Premium') ? profile.plan : 'Free'
+  const adminGrantedPlan = isPaidPlan(profile?.admin_granted_plan) ? profile.admin_granted_plan : null
+  const adminPlanExpiresAt = profile?.admin_plan_expires_at ?? null
+  const adminPlanActive = Boolean(adminGrantedPlan && adminPlanExpiresAt && new Date(adminPlanExpiresAt).getTime() > Date.now())
+  const plan = adminPlanActive && adminGrantedPlan && PLAN_RANK[adminGrantedPlan] > PLAN_RANK[stripePlan] ? adminGrantedPlan : stripePlan
+  const planExpiresAt = adminPlanActive && adminGrantedPlan && plan === adminGrantedPlan && PLAN_RANK[adminGrantedPlan] > PLAN_RANK[stripePlan]
+    ? adminPlanExpiresAt
+    : hasActiveSubscription ? profile?.plan_expires_at ?? null : adminPlanActive ? adminPlanExpiresAt : null
+
+  return {
+    plan,
+    planExpiresAt,
+    subscriptionStatus,
+    hasActiveSubscription,
+    adminGrantedPlan,
+    adminPlanExpiresAt,
+    adminPlanActive,
+  }
+}
+
+function toView(user: GoTrueUser, profile: ProfileRow | undefined, pendingPoints: PendingPointGrantSummary | undefined): AdminUserView {
   return {
     id: user.id,
     email: user.email ?? '',
@@ -52,14 +118,21 @@ function toView(user: GoTrueUser, profile: ProfileRow | undefined): AdminUserVie
     bannedAt: profile?.banned_at ?? null,
     bannedReason: profile?.banned_reason ?? null,
     deletedAt: profile?.deleted_at ?? null,
+    ...resolvePlan(profile),
+    pendingNexusPoints: pendingPoints?.amount ?? 0,
+    pendingNexusPointGrantCount: pendingPoints?.count ?? 0,
   }
 }
 
 export async function listUsers(page = 1, perPage = 50): Promise<AdminUserView[]> {
   const response = await supabaseAdminAuthFetch(`/users?page=${page}&per_page=${perPage}`)
   const data = await readSupabaseRestJson<{ users: GoTrueUser[] }>(response, 'Failed to load users')
-  const profiles = await fetchProfilesByIds(data.users.map((user) => user.id))
-  return data.users.map((user) => toView(user, profiles.get(user.id)))
+  const ids = data.users.map((user) => user.id)
+  const [profiles, pendingPointGifts] = await Promise.all([
+    fetchProfilesByIds(ids),
+    fetchPendingPointGrantsByUserIds(ids),
+  ])
+  return data.users.map((user) => toView(user, profiles.get(user.id), pendingPointGifts.get(user.id)))
 }
 
 export async function createUser(admin: AdminUser, email: string, password: string, displayName?: string): Promise<AdminUserView> {
@@ -80,7 +153,7 @@ export async function createUser(admin: AdminUser, email: string, password: stri
   await recordAuditLog(admin, 'users.create', 'user', user.id, { email: trimmedEmail })
   // profiles/apex_profiles rows are seeded automatically by the existing
   // ensure_airnexus_defaults trigger (0002) on auth.users insert.
-  return toView(user, undefined)
+  return toView(user, undefined, undefined)
 }
 
 export async function editUserDisplayName(admin: AdminUser, userId: string, displayName: string): Promise<void> {

@@ -150,6 +150,23 @@ function downloadText(tool: AiToolDefinition, text: string) {
   URL.revokeObjectURL(url)
 }
 
+/** Converts a base64 data URL to a Blob and triggers a download via an object URL. Assigning a large base64 data: URL directly to an <a href> is unreliable in some browsers for binary downloads (silent truncation/corruption) — the object-URL route is the robust pattern, already used by downloadText above. */
+function downloadDataUrl(dataUrl: string, filename: string) {
+  const [header, base64 = ''] = dataUrl.split(',')
+  const mimeMatch = header.match(/^data:(.*?)(;base64)?$/)
+  const mime = mimeMatch?.[1] || 'application/octet-stream'
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  const blob = new Blob([bytes], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
 function selectInitialOption(tool: AiToolDefinition) {
   return tool.defaultOption ?? tool.options?.[0] ?? ''
 }
@@ -280,17 +297,11 @@ export function AiToolsPage({
   const downloadResult = () => {
     if (!result) return
     if (result.file) {
-      const anchor = document.createElement('a')
-      anchor.href = result.file
-      anchor.download = result.filename ?? resultFilename(selectedTool, 'pptx')
-      anchor.click()
+      downloadDataUrl(result.file, result.filename ?? resultFilename(selectedTool, 'pptx'))
       return
     }
     if (result.image) {
-      const anchor = document.createElement('a')
-      anchor.href = result.image
-      anchor.download = resultFilename(selectedTool, 'png')
-      anchor.click()
+      downloadDataUrl(result.image, resultFilename(selectedTool, 'png'))
       return
     }
     if (result.reply) downloadText(selectedTool, result.reply)
