@@ -81,7 +81,21 @@ export function ProductsPage({ state, onCreate, onDiscontinue, onInventoryAction
                   <Stat label="Manufactured this year" value={product.unitsManufactured.toLocaleString()} />
                   <Stat label="Unsold inventory" value={product.inventory.toLocaleString()} />
                   <Stat label="Satisfaction" value={`${product.satisfaction}/100`} />
+                  <Stat label="Rating" value={product.rating > 0 ? `${product.rating.toFixed(1)}/5` : 'No sales yet'} />
+                  <Stat label="Reliability" value={`${product.reliability}/100`} />
+                  <Stat label="Return rate" value={`${Math.round(product.returnRate * 100)}%`} />
+                  <Stat label="Complaint rate" value={`${Math.round(product.complaintRate * 100)}%`} />
                 </dl>
+                {product.reviews.length > 0 && (
+                  <div className="mt-3 space-y-1.5">
+                    <p className="text-[10px] uppercase tracking-wide text-slate-500">Recent customer reviews</p>
+                    {[...product.reviews].reverse().slice(0, 2).map((review) => (
+                      <p key={review.id} className={cn('rounded-lg bg-white/[0.03] px-2.5 py-1.5 text-xs leading-5', review.sentiment === 'positive' ? 'text-emerald-200' : review.sentiment === 'negative' ? 'text-rose-200' : 'text-slate-300')}>
+                        &ldquo;{review.text}&rdquo;
+                      </p>
+                    ))}
+                  </div>
+                )}
                 {product.inventory > 0 && (
                   <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-400/[0.05] p-3">
                     <Tag className="size-3.5 text-amber-300" aria-hidden="true" />

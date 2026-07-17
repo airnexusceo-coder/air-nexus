@@ -31,7 +31,6 @@ export const automaticToolPrompt = `
 You can automatically use AirNexus study tools. Call a tool only when it materially improves the answer; ordinary teaching questions should be answered directly.
 - Use calculations for arithmetic and grade totals instead of estimating.
 - Use File Analysis for document summaries, explanations, grounded questions, key points, difficult concepts, and comparisons. Use it only when uploaded documents exist.
-- Use Quiz Generator or Flashcard Generator when the student asks to turn uploaded material into practice resources.
 - When comparing documents, inspect every uploaded file and identify claims by file name.
 - Never claim a tool ran unless you call it.
 - Never invent dates, grades, source facts, or unavailable file contents.
@@ -39,7 +38,7 @@ You can automatically use AirNexus study tools. Call a tool only when it materia
 `
 
 export const toolResultPrompt = `
-When tool results are present, turn them into the complete student-facing result now. Do not mention internal JSON or orchestration. If a tool reports missing input, say exactly what the student must provide. For diagrams, return a legible ASCII diagram in a fenced text block. For flashcards, quizzes, notes, and plans, use clear Markdown headings and preserve all useful generated content.
+When tool results are present, turn them into the complete student-facing result now. Do not mention internal JSON or orchestration. If a tool reports missing input, say exactly what the student must provide. For diagrams, return a legible ASCII diagram in a fenced text block. For notes and plans, use clear Markdown headings and preserve all useful generated content.
 `
 
 export function modeInstruction(mode: TutorMode) {

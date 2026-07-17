@@ -12,9 +12,19 @@ import {
   verifyLedgerIntegrity,
 } from '../lib/business-empire/game-state'
 import { sumCashLedger } from '../lib/business-empire/simulation'
-import { computeDemand, computeQualityScore } from '../lib/business-empire/simulation'
+import { appendReputationTransaction, checkForProductRecall, computeDemand, computeQualityScore, verifyReputationIntegrity } from '../lib/business-empire/simulation'
 import { getIndustryProfile } from '../lib/business-empire/industries'
-import { DIFFICULTY_PROFILES, type GamePreferences, type GameState } from '../lib/business-empire/types'
+import {
+  assignJobByDegreeQuality,
+  computeCareerSavings,
+  computeFoundingAge,
+  getHardcoreJob,
+  isDegreeRelevantToIndustry,
+  scoreEntranceQuiz,
+  UNIVERSITY_ENTRANCE_QUIZ,
+} from '../lib/business-empire/hardcore-career'
+import { migrateLegacySave } from '../lib/business-empire/storage'
+import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, type CareerBackground, type GamePreferences, type GameState } from '../lib/business-empire/types'
 
 const rng = () => 0.5
 
@@ -163,7 +173,7 @@ console.log('Business Empire per-action ledger tests passed')
 
   const totalCostOfGoodsSold = report.perProduct.reduce((sum, row) => sum + row.costOfGoodsSold, 0)
   assert.equal(Math.round(report.grossProfit * 100) / 100, Math.round((report.totalRevenue - totalCostOfGoodsSold) * 100) / 100, 'gross profit is exactly revenue minus cost of goods sold (units sold only, not units produced)')
-  assert.equal(Math.round(report.totalExpenses * 100) / 100, Math.round((report.productionCosts + report.researchCosts + report.advertisingCosts + report.wages + report.rent + report.taxes + report.refunds) * 100) / 100, 'totalExpenses is exactly the sum of its listed parts')
+  assert.equal(Math.round(report.totalExpenses * 100) / 100, Math.round((report.productionCosts + report.researchCosts + report.advertisingCosts + report.wages + report.rent + report.operatingCosts + report.loanRepayments + report.taxes + report.refunds) * 100) / 100, 'totalExpenses is exactly the sum of its listed parts')
   assert.equal(Math.round(report.netProfit * 100) / 100, Math.round((report.totalRevenue - report.totalExpenses) * 100) / 100, 'net profit is exactly revenue minus total expenses')
   assert.equal(afterYear.cash, sumCashLedger(afterYear), 'cash equals the sum of the entire ledger after a year completes')
   assert.ok(verifyLedgerIntegrity(afterYear).ok)
@@ -272,3 +282,168 @@ console.log('Business Empire yearly close-out tests passed')
 }
 
 console.log('Business Empire demand + integrity tests passed')
+
+// ============================================================================
+// Reputation system, Hardcore Mode, and save migration
+// ============================================================================
+
+// 17. Founding a company records a reputation transaction whose after-value matches brandReputation, and it always carries a non-empty reason.
+{
+  const state = freshState()
+  assert.ok(state.reputationHistory.length >= 1, 'founding a company logs at least one reputation transaction')
+  const founding = state.reputationHistory[0]
+  assert.equal(founding.reasonCategory, 'COMPANY_FOUNDED')
+  assert.ok(founding.description.length > 0, 'a reputation transaction always carries a non-empty explanation')
+  assert.equal(founding.valueAfter, state.brandReputation)
+  assert.ok(verifyReputationIntegrity(state).ok, 'reputation history sums exactly to brandReputation')
+  assert.ok(state.brandReputation >= 30 && state.brandReputation <= 50, 'a new company starts in the 30-50 band, never with an already-excellent reputation')
+}
+
+// 18. appendReputationTransaction always clamps to 0-100 and never silently drops the reason.
+{
+  const state = freshState()
+  const boosted = appendReputationTransaction(state, { delta: 1000, reasonCategory: 'RELIABLE_PRODUCT', description: 'Test boost' })
+  assert.equal(boosted.brandReputation, 100, 'reputation is clamped at 100 even if a delta would overshoot')
+  const lastEntry = boosted.reputationHistory[boosted.reputationHistory.length - 1]
+  assert.equal(lastEntry.description, 'Test boost')
+  assert.equal(lastEntry.reasonCategory, 'RELIABLE_PRODUCT')
+  assert.ok(verifyReputationIntegrity(boosted).ok)
+
+  const crashed = appendReputationTransaction(state, { delta: -1000, reasonCategory: 'SCANDAL', description: 'Test crash' })
+  assert.equal(crashed.brandReputation, 0, 'reputation is clamped at 0 even if a delta would undershoot')
+}
+
+// 19. Demand responds to reputation: a higher-reputation company never sees lower estimated demand than a lower-reputation one, all else equal.
+{
+  const state = freshState()
+  const created = createProduct(state, {
+    name: 'Reputation Test Shirt', targetGroupId: getIndustryProfile('Clothing').customerGroups[0].id, quality: 'standard',
+    features: [], rndBudget: 0, unitsToManufacture: 1000, productionMethod: 'standard-factory', packagingQuality: 'standard', price: 45,
+  })
+  const product = created.state.products.find((p) => p.id === created.product!.id)!
+  const industry = getIndustryProfile('Clothing')
+  const difficulty = DIFFICULTY_PROFILES.beginner
+  const qualityScore = computeQualityScore(industry, product)
+  const demandArgs = { product, qualityScore, industry, competitors: created.state.competitors, customerSatisfaction: created.state.customerSatisfaction, economicIndex: 1, difficulty, advertisingReach: 0, demandEventMultiplier: 1, isFirstYearForCompany: true, rng }
+  const demandLowReputation = computeDemand({ ...demandArgs, brandReputation: 20 })
+  const demandHighReputation = computeDemand({ ...demandArgs, brandReputation: 90 })
+  assert.ok(demandHighReputation >= demandLowReputation, 'higher reputation never produces lower estimated demand than lower reputation, all else equal')
+}
+
+// 20. A low-reliability product in a recall-prone industry can trigger a recall; a high-reliability product never does.
+{
+  const carsIndustry = getIndustryProfile('Cars')
+  assert.ok(carsIndustry.challengeProfile.recallRisk > 0, 'setup: Cars must have a nonzero recall risk for this test to be meaningful')
+  assert.equal(checkForProductRecall(10, carsIndustry, () => 0), true, 'a very low-reliability product can be recalled when the risk roll succeeds')
+  assert.equal(checkForProductRecall(10, carsIndustry, () => 0.999), false, 'the same low-reliability product is not recalled when the risk roll fails')
+  assert.equal(checkForProductRecall(95, carsIndustry, () => 0), false, 'a high-reliability product is never recalled regardless of the risk roll')
+}
+
+// 21. A product recall reputation transaction is negative and fully explained (the concrete mechanic behind "defects can lower reputation").
+{
+  const state = freshState()
+  const recalled = appendReputationTransaction(state, { delta: -10, reasonCategory: 'PRODUCT_RECALL', description: 'Test Product was recalled after a quality defect was discovered.' })
+  assert.ok(recalled.brandReputation < state.brandReputation, 'a product recall strictly lowers company reputation')
+  const entry = recalled.reputationHistory[recalled.reputationHistory.length - 1]
+  assert.equal(entry.reasonCategory, 'PRODUCT_RECALL')
+  assert.ok(entry.description.includes('recalled'), 'the recall reputation entry explains itself in plain language')
+}
+
+// 22. Hardcore Mode career savings are a deterministic function of job and years worked (no dice roll decides how much a player saves).
+{
+  const job = getHardcoreJob('retail-assistant')!
+  const savingsA = computeCareerSavings(job, 3)
+  const savingsB = computeCareerSavings(job, 3)
+  assert.equal(savingsA, savingsB, 'career savings are deterministic for the same job and years worked')
+  assert.equal(computeCareerSavings(job, 0), 0, 'working zero years saves nothing')
+  assert.ok(computeCareerSavings(job, 5) > computeCareerSavings(job, 2), 'working more years always saves at least as much (raises compound upward)')
+}
+
+// 22b. The player never picks a job — it is assigned deterministically from the quiz-driven university quality. A higher score never lands a worse-paying job than a lower score in the same degree.
+{
+  const weakJob = assignJobByDegreeQuality('engineering', 10)
+  const strongJob = assignJobByDegreeQuality('engineering', 95)
+  assert.ok(strongJob.annualSalary >= weakJob.annualSalary, 'a stronger university placement never results in a worse-paying assigned job for the same degree')
+  assert.equal(assignJobByDegreeQuality('engineering', 50).id, assignJobByDegreeQuality('engineering', 50).id, 'the same degree and quality always assign the exact same job')
+  assert.equal(scoreEntranceQuiz(UNIVERSITY_ENTRANCE_QUIZ.map((q) => q.correctIndex)), 100, 'answering every quiz question correctly scores exactly 100')
+  assert.equal(scoreEntranceQuiz(UNIVERSITY_ENTRANCE_QUIZ.map(() => -1)), 0, 'answering every quiz question wrong scores exactly 0')
+}
+
+// 23. Founding a company in Hardcore Mode uses the career-savings amount as starting cash (ignoring any stale preferences.startingCash value), keeps the ledger exact, and ages the founder correctly.
+{
+  const universityQuality = 80
+  const degree: CareerBackground['degree'] = 'engineering'
+  const yearsWorked = 3
+  const job = assignJobByDegreeQuality(degree, universityQuality)
+  const careerBackground: CareerBackground = { universityQuality, degree, jobId: job.id, yearsWorked, totalSavings: computeCareerSavings(job, yearsWorked), foundingAge: computeFoundingAge(degree, yearsWorked) }
+  const hardcorePrefs: GamePreferences = { ...preferences, difficulty: 'hardcore', startingCash: 999_999, careerBackground }
+  const hardcoreState = createInitialState(hardcorePrefs, rng)
+  assert.equal(hardcoreState.cash, careerBackground.totalSavings, 'starting cash is recomputed from the career background, not trusted from preferences.startingCash')
+  assert.equal(careerBackground.foundingAge, 16 + 3 + 3, 'founding age is starting age (16) + university years (3, since a degree was studied) + years worked')
+  assert.ok(verifyLedgerIntegrity(hardcoreState).ok)
+  assert.ok(verifyReputationIntegrity(hardcoreState).ok)
+}
+
+// 24. The degree-industry relevance bonus applies only when the degree is actually relevant to the founded industry.
+{
+  assert.equal(isDegreeRelevantToIndustry('engineering', 'Technology'), true)
+  assert.equal(isDegreeRelevantToIndustry('engineering', 'Restaurants'), false)
+
+  const relevantJob = assignJobByDegreeQuality('engineering', 70)
+  const relevantPrefs: GamePreferences = {
+    ...preferences, industry: 'Technology', difficulty: 'hardcore', startingCash: 0,
+    careerBackground: { universityQuality: 70, degree: 'engineering', jobId: relevantJob.id, yearsWorked: 2, totalSavings: computeCareerSavings(relevantJob, 2), foundingAge: computeFoundingAge('engineering', 2) },
+  }
+  const relevantState = createInitialState(relevantPrefs, rng)
+
+  const irrelevantJob = assignJobByDegreeQuality('engineering', 70)
+  const irrelevantPrefs: GamePreferences = {
+    ...preferences, industry: 'Restaurants', difficulty: 'hardcore', startingCash: 0,
+    careerBackground: { universityQuality: 70, degree: 'engineering', jobId: irrelevantJob.id, yearsWorked: 2, totalSavings: computeCareerSavings(irrelevantJob, 2), foundingAge: computeFoundingAge('engineering', 2) },
+  }
+  const irrelevantState = createInitialState(irrelevantPrefs, rng)
+
+  assert.ok(relevantState.brandReputation > irrelevantState.brandReputation, 'a degree relevant to the founded industry grants a real, explained reputation bonus that an irrelevant degree does not')
+  assert.ok(relevantState.reputationHistory.some((entry) => entry.description.includes('relevant to')), 'the degree bonus is explained in the reputation history, never a silent number')
+}
+
+// 25. A save from the pre-reputation-system format (version 1) migrates into a valid, ledger-intact current-version state — existing Business Mode saves keep working.
+{
+  const legacyState = freshState()
+  const legacyProduct = createProduct(legacyState, {
+    name: 'Legacy Product', targetGroupId: getIndustryProfile('Clothing').customerGroups[0].id, quality: 'standard',
+    features: [], rndBudget: 0, unitsToManufacture: 100, productionMethod: 'standard-factory', packagingQuality: 'standard', price: 40,
+  }).state
+
+  // Simulate what a real version-1 save looked like: no reputationHistory, no loans, no per-product review fields, saveVersion 1.
+  const legacyRaw: Record<string, unknown> = JSON.parse(JSON.stringify(legacyProduct))
+  legacyRaw.saveVersion = 1
+  delete legacyRaw.reputationHistory
+  delete legacyRaw.staffMorale
+  delete legacyRaw.loans
+  delete legacyRaw.economicCyclePhase
+  for (const product of legacyRaw.products as Record<string, unknown>[]) {
+    delete product.rating
+    delete product.reviews
+    delete product.reliability
+    delete product.returnRate
+    delete product.complaintRate
+    delete product.awareness
+    delete product.customerLoyalty
+    delete product.lastRelaunchedYear
+  }
+
+  const migrated = migrateLegacySave(legacyRaw)
+  assert.ok(migrated, 'a version-1-shaped save migrates successfully rather than being discarded')
+  assert.equal(migrated!.cash, legacyProduct.cash, 'cash is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.brandReputation, legacyProduct.brandReputation, 'the reputation score itself is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
+  assert.ok(verifyReputationIntegrity(migrated!).ok, 'migration never creates unexplained reputation')
+  assert.equal(migrated!.reputationHistory.length, 1, 'migration seeds exactly one transparent "save upgraded" reputation entry')
+  assert.equal(migrated!.reputationHistory[0].reasonCategory, 'SAVE_MIGRATION')
+  assert.equal(migrated!.products[0].reviews.length, 0, 'migrated products start with an empty review list, not fabricated history')
+  assert.ok(migrated!.products[0].reliability >= 0 && migrated!.products[0].reliability <= 100, 'migrated products get a sensible backfilled reliability, not a zero pretending to be real')
+}
+
+console.log('Business Empire reputation, Hardcore Mode, and migration tests passed')

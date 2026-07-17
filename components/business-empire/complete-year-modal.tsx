@@ -2,7 +2,7 @@
 
 import { CalendarCheck2 } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
-import { computeRent, computeWages, sumLedgerCategoryForYear } from '@/lib/business-empire/simulation'
+import { computeOperatingCosts, computeRent, computeWages, sumLedgerCategoryForYear } from '@/lib/business-empire/simulation'
 import { getIndustryProfile } from '@/lib/business-empire/industries'
 import { formatCurrency } from '@/lib/business-empire/format'
 import { DIFFICULTY_PROFILES, type GameState } from '@/lib/business-empire/types'
@@ -21,8 +21,10 @@ export function CompleteYearModal({ state, onConfirm, onCancel }: CompleteYearMo
   const unitsProduced = active.reduce((sum, p) => sum + p.unitsManufactured, 0)
   const advertisingSpending = sumLedgerCategoryForYear(state, 'ADVERTISING_COST', state.year)
   const researchSpending = sumLedgerCategoryForYear(state, 'RESEARCH_COST', state.year)
-  const employeeCosts = computeWages(unitsProduced, active.length, difficulty)
+  const employeeCosts = computeWages(unitsProduced, active.length, difficulty, state.staffMorale)
   const rent = computeRent(industry, active.length, difficulty)
+  const operating = computeOperatingCosts(industry, active, difficulty)
+  const loanRepaymentEstimate = state.loans.reduce((sum, loan) => sum + Math.min(loan.remainingBalance, loan.principal / loan.termYears) + loan.remainingBalance * loan.interestRate, 0)
 
   return (
     <Modal open title="Complete Financial Year" description={`Review Year ${state.year} before it is simulated — nothing below has happened yet.`} onClose={onCancel} className="max-w-xl">
@@ -48,12 +50,14 @@ export function CompleteYearModal({ state, onConfirm, onCancel }: CompleteYearMo
           <Row label="Advertising spending (already paid)" value={formatCurrency(advertisingSpending)} />
           <Row label="Research spending (already paid)" value={formatCurrency(researchSpending)} />
           <Row label="Employee costs (about to be paid)" value={formatCurrency(employeeCosts)} />
-          <Row label="Rent & other operating costs" value={formatCurrency(rent)} />
+          <Row label="Rent (about to be paid)" value={formatCurrency(rent)} />
+          <Row label="Storage, insurance & maintenance (about to be paid)" value={formatCurrency(operating.total)} />
+          {state.loans.length > 0 && <Row label="Loan repayments (about to be paid)" value={formatCurrency(Math.round(loanRepaymentEstimate))} />}
           <Row label="Available cash right now" value={formatCurrency(state.cash)} />
         </section>
 
         <p className="text-xs leading-5 text-slate-400">
-          Completing the year will calculate customer demand, record sales, pay wages/rent/tax, and generate your full Annual Report. This cannot be undone.
+          Completing the year will calculate customer demand, record sales, pay wages/rent/operating costs/loan repayments/tax, update reputation (with a reason for every change), and generate your full Annual Report. This cannot be undone.
         </p>
 
         <div className="flex flex-wrap gap-2">

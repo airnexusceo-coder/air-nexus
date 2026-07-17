@@ -18,7 +18,6 @@ export const metadata: Metadata = {
   title: 'Air Nexus — Intelligence Without Limits',
   description:
     'Air Nexus is a next-generation AI platform powered by AirGPT for learning, creation, research, and productive work.',
-  generator: 'v0.app',
   icons: {
     icon: [
       {

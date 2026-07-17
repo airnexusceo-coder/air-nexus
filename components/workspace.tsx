@@ -25,7 +25,6 @@ import {
   ChevronRight,
   Command,
   ClipboardList,
-  Compass,
   FilePlus2,
   Gauge,
   GraduationCap,
@@ -99,8 +98,8 @@ function SectionLoading() {
 
 const CoursesPage = dynamic(() => import('@/components/courses-page').then((module) => module.CoursesPage), { loading: SectionLoading })
 const PeopleHub = dynamic(() => import('@/components/people/people-hub').then((module) => module.PeopleHub), { loading: SectionLoading })
-const AiStudyCoachPage = dynamic(() => import('@/components/ai-study-coach-page').then((module) => module.AiStudyCoachPage), { loading: SectionLoading })
 const AiTutorPage = dynamic(() => import('@/components/ai-tutor-page').then((module) => module.AiTutorPage), { loading: SectionLoading })
+const AiToolsPage = dynamic(() => import('@/components/ai-tools-page').then((module) => module.AiToolsPage), { loading: SectionLoading })
 const AssignmentWorkspacePage = dynamic(() => import('@/components/assignment-workspace-page').then((module) => module.AssignmentWorkspacePage), { loading: SectionLoading })
 const CalculatorsPage = dynamic(() => import('@/components/calculators-page').then((module) => module.CalculatorsPage), { loading: SectionLoading })
 const DocsPage = dynamic(() => import('@/components/docs-page').then((module) => module.DocsPage), { loading: SectionLoading })
@@ -115,6 +114,7 @@ const WorkspacePages = dynamic(() => import('@/components/workspace-pages').then
 
 type WorkspaceProps = {
   activeSection: string
+  activeToolSlug: string | null
   mainChatOpen: boolean
   onOpenMainChat: () => void
   onCloseMainChat: () => void
@@ -273,6 +273,7 @@ function formatTime() {
 
 export function Workspace({
   activeSection,
+  activeToolSlug,
   mainChatOpen,
   onOpenMainChat,
   onCloseMainChat,
@@ -773,6 +774,7 @@ export function Workspace({
     return (
       <SectionWorkspace
         section={activeSection}
+        activeToolSlug={activeToolSlug}
         onOpenSidebar={onOpenSidebar}
         onOpenContext={onOpenContext}
         onOpenRoom={onOpenRoom}
@@ -1367,6 +1369,7 @@ function AttachmentChips({
 }
 function SectionWorkspace({
   section,
+  activeToolSlug,
   onOpenSidebar,
   onOpenContext,
   onOpenRoom,
@@ -1395,6 +1398,7 @@ function SectionWorkspace({
   onOpenNexusTutorial,
 }: {
   section: string
+  activeToolSlug: string | null
   onOpenSidebar: () => void
   onOpenContext: () => void
   onOpenRoom: (roomId: string) => void
@@ -1446,9 +1450,9 @@ function SectionWorkspace({
   const icon =
     section === 'Dashboard' ? Gauge :
     section === 'AI Memory' ? Brain :
-    section === 'Study Coach' ? Compass :
     section === 'Courses' ? BookOpen :
     section === 'AI Tutor' ? GraduationCap :
+    section === 'AI Tools' ? Wand2 :
     section === 'Flashcards' ? Layers3 :
     section === 'Assignment Workspace' ? ClipboardList :
     section === 'Record Lesson' ? Mic :
@@ -1457,7 +1461,6 @@ function SectionWorkspace({
     section === 'Panic Mode' ? TimerReset :
     section === 'Tasks' ? CheckCircle2 :
     section === 'Calendar' ? CalendarDays :
-    section === 'Calculators' ? Calculator :
     section === 'Calculators' ? Calculator :
     section === 'Analytics' ? BarChart3 :
     section === 'Leaderboard' ? Trophy :
@@ -1505,22 +1508,16 @@ function SectionWorkspace({
           <MemoryPage notify={notify} />
         )}
 
-
-        {section === 'Study Coach' && (
-          <AiStudyCoachPage
-            profileName={profileName}
-            transactions={transactions}
-            onNavigate={onNavigate}
-            notify={notify}
-          />
-        )}
-
         {(section === 'AI Tutor' || section === 'Flashcards') && (
           <AiTutorPage
             activeTab={section === 'Flashcards' ? 'flashcards' : 'tutor'}
             onNavigate={onNavigate}
             notify={notify}
           />
+        )}
+
+        {section === 'AI Tools' && (
+          <AiToolsPage notify={notify} selectedSlug={activeToolSlug} />
         )}
 
         {section === 'Assignment Workspace' && (
@@ -1608,7 +1605,7 @@ function SectionWorkspace({
           <SettingsPage />
         )}
 
-        {!['Dashboard', 'AI Memory', 'Study Coach', 'AI Tutor', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex', 'Market Masters', 'Business Empire'].includes(section) && (
+        {!['Dashboard', 'AI Memory', 'AI Tutor', 'AI Tools', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex', 'Market Masters', 'Business Empire'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">

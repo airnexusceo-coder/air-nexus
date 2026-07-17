@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": ".test-build",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"]
+  },
+  "include": [
+    "tests/ai-tools.test.ts",
+    "lib/ai-tools/catalog.ts",
+    "lib/ai-tools/powerpoint.ts",
+    "lib/ai-tools/history.ts"
+  ]
+}

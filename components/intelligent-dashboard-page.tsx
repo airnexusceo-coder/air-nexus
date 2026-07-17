@@ -18,6 +18,7 @@ import {
   Target,
   TrendingUp,
 } from 'lucide-react'
+import { AiStudyCoachPage } from '@/components/ai-study-coach-page'
 import { apiUrl } from '@/lib/api-client'
 import { getMotivationStats, loadMotivationState, MOTIVATION_UPDATED_EVENT, type MotivationStats } from '@/lib/motivation'
 import type { NexusTransaction } from '@/lib/nexus-points'
@@ -555,6 +556,10 @@ Important: never invent an assignment, exam, due date, subject, or weakness. Inc
           </div>
         </section>
       </div>
+
+      <section className="glass rounded-[2rem] p-5 sm:p-6" aria-label="Integrated AI Coach">
+        <AiStudyCoachPage embedded profileName={profileName} transactions={transactions} onNavigate={onNavigate} notify={notify} />
+      </section>
 
       <section className="glass flex flex-col gap-4 rounded-3xl p-5 sm:flex-row sm:items-center sm:p-6" aria-label="Daily motivation">
         <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-200"><CheckCircle2 className="size-6" /></span>

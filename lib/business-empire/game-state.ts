@@ -2,18 +2,43 @@ import { getIndustryProfile } from '@/lib/business-empire/industries'
 import { getAdvertisingChannel } from '@/lib/business-empire/advertising'
 import { computeResearchCost, generateResearchReport } from '@/lib/business-empire/research'
 import {
+  computeCareerSavings,
+  DEGREE_INDUSTRY_REPUTATION_BONUS,
+  getDegreeProfile,
+  getHardcoreJob,
+  isDegreeRelevantToIndustry,
+} from '@/lib/business-empire/hardcore-career'
+import {
+  appendReputationTransaction,
   appendTransaction,
-  computeBrandReputation,
+  checkForProductRecall,
+  computeAdvertisingEffectivenessMultiplier,
+  computeAwarenessGrowth,
   computeCompanySatisfaction,
   computeCompanyValue,
   computeCostPerUnit,
+  computeCustomerLoyalty,
   computeDemand,
+  computeLoanApprovalOdds,
+  computeLoanInterestRate,
+  computeMarketSaturation,
+  computeOperatingCosts,
+  computeProductAgePenalty,
+  computeProductComplaintRate,
+  computeProductReliability,
+  computeProductReturnRate,
+  computeProductRating,
   computeProductSatisfaction,
+  computeProductionDelayChance,
   computeQualityScore,
   computeRent,
+  computeSatisfactionReputationPull,
+  computeSeasonalMultiplier,
+  computeStaffMorale,
   computeWages,
   createId,
   estimateAdvertisingReach,
+  generateProductReview,
   generateYearlyEvents,
   getInitialCompetitors,
   sumAdvertisingReachForProduct,
@@ -27,12 +52,16 @@ import {
   type AdvertisingChannel,
   type AnnualReport,
   type CashTransactionCategory,
+  type ClaimsHonesty,
   type GamePreferences,
   type GameState,
+  type Loan,
+  type LoanPurpose,
   type PackagingQuality,
   type Product,
   type ProductQuality,
   type ProductionMethod,
+  type ReputationReasonCategory,
   type ResearchLevel,
   type UnsoldInventoryAction,
 } from '@/lib/business-empire/types'
@@ -43,6 +72,19 @@ const TAX_RATE = 0.2
 export function createInitialState(preferences: GamePreferences, rng: () => number = Math.random): GameState {
   const startedAt = new Date().toISOString()
   const difficulty = DIFFICULTY_PROFILES[preferences.difficulty]
+
+  // New companies start with an average-to-below-average reputation — nobody trusts a brand-new
+  // business yet. Beginner difficulty nudges the starting point up slightly (a gentler on-ramp),
+  // advanced/hardcore nudge it down, but it never leaves the 30-50 band regardless.
+  const difficultyNudge = preferences.difficulty === 'beginner' ? 2 : preferences.difficulty === 'advanced' || preferences.difficulty === 'hardcore' ? -2 : 0
+  const startingReputation = Math.max(30, Math.min(50, Math.round(35 + rng() * 10) + difficultyNudge))
+
+  // Hardcore Mode never trusts a UI-picked starting cash — it always recomputes it from the career
+  // background actually recorded, so "starting capital was earned, not chosen" can't be bypassed.
+  const career = preferences.difficulty === 'hardcore' ? preferences.careerBackground : undefined
+  const careerJob = career ? getHardcoreJob(career.jobId) : undefined
+  const startingCash = career && careerJob ? computeCareerSavings(careerJob, career.yearsWorked) : preferences.startingCash
+
   const base: GameState = {
     companyName: preferences.companyName,
     founderName: preferences.founderName,
@@ -56,18 +98,41 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     researchReports: [],
     advertisingCampaigns: [],
     annualReports: [],
-    companyValue: preferences.startingCash,
+    companyValue: startingCash,
     marketShare: 0,
     customerSatisfaction: 70,
-    brandReputation: 50,
+    brandReputation: 0,
+    reputationHistory: [],
+    staffMorale: 70,
+    loans: [],
     economicIndex: 1,
+    economicCyclePhase: 'stable',
     completedLessonIds: [],
     unlockedFeatures: [],
     startedAt,
     lastSavedAt: startedAt,
     saveVersion: CURRENT_SAVE_VERSION,
   }
-  return appendTransaction(base, { category: 'STARTING_CAPITAL', amount: preferences.startingCash, description: `${preferences.companyName} founded — starting capital` })
+  const capitalDescription = career
+    ? `${preferences.companyName} founded — starting capital earned from ${career.yearsWorked} year(s) working as a ${careerJob?.title ?? 'employee'}`
+    : `${preferences.companyName} founded — starting capital`
+  const withCapital = appendTransaction(base, { category: 'STARTING_CAPITAL', amount: startingCash, description: capitalDescription })
+  let founded = appendReputationTransaction(withCapital, {
+    delta: startingReputation,
+    reasonCategory: 'COMPANY_FOUNDED',
+    description: `${preferences.companyName} founded with a starting reputation of ${startingReputation}/100 — new companies begin without an established track record.`,
+  })
+
+  if (career && isDegreeRelevantToIndustry(career.degree, preferences.industry)) {
+    const degreeLabel = getDegreeProfile(career.degree).label
+    founded = appendReputationTransaction(founded, {
+      delta: DEGREE_INDUSTRY_REPUTATION_BONUS,
+      reasonCategory: 'COMPANY_FOUNDED',
+      description: `The founder's ${degreeLabel} is directly relevant to ${preferences.industry} — customers and partners take the new company slightly more seriously as a result.`,
+    })
+  }
+
+  return founded
 }
 
 export type ProductCreationInput = {
@@ -117,6 +182,11 @@ export function createProduct(state: GameState, input: ProductCreationInput): { 
   const totalUpfrontCost = productionCost + input.rndBudget
   if (totalUpfrontCost > state.cash) return { state, error: `This would cost ${Math.round(totalUpfrontCost).toLocaleString()} up front (production + R&D), more than your available cash.` }
 
+  // A brand-new product's launch success is tied to the company's reputation at the moment of
+  // launch — a well-regarded company gets more initial awareness (a stronger launch), a weak
+  // reputation means the product starts more obscure and has to earn awareness the slow way.
+  const launchAwareness = Math.max(5, Math.min(60, Math.round(20 + (state.brandReputation - 50) * 0.4)))
+
   const product: Product = {
     id: createId('product'),
     name: input.name.trim(),
@@ -136,6 +206,14 @@ export function createProduct(state: GameState, input: ProductCreationInput): { 
     lifetimeUnitsSold: 0,
     lifetimeRevenue: 0,
     satisfaction: computeQualityScore(industry, input),
+    rating: 0,
+    reviews: [],
+    reliability: computeQualityScore(industry, input),
+    returnRate: 0,
+    complaintRate: 0,
+    awareness: launchAwareness,
+    customerLoyalty: 0,
+    lastRelaunchedYear: state.year,
   }
 
   let next: GameState = { ...state, products: [...state.products, product] }
@@ -182,7 +260,7 @@ export function purchaseResearch(state: GameState, level: ResearchLevel, targetG
   return { state: appendTransaction(next, { category: 'RESEARCH_COST', amount: -cost, description: `${level[0].toUpperCase()}${level.slice(1)} market research`, relatedId: report.id }) }
 }
 
-export function launchAdvertisingCampaign(state: GameState, productId: string, channel: AdvertisingChannel, budget: number): { state: GameState; error?: string } {
+export function launchAdvertisingCampaign(state: GameState, productId: string, channel: AdvertisingChannel, budget: number, claimsHonesty: ClaimsHonesty = 'honest'): { state: GameState; error?: string } {
   const product = state.products.find((p) => p.id === productId)
   if (!product) return { state, error: 'Unknown product.' }
   const channelProfile = getAdvertisingChannel(channel)
@@ -193,7 +271,11 @@ export function launchAdvertisingCampaign(state: GameState, productId: string, c
 
   const industry = getIndustryProfile(state.industry)
   const effectiveness = industry.advertisingEffectiveness[channel]
-  const estimatedReach = estimateAdvertisingReach(channel, budget, channelProfile.reachPerDollar, effectiveness)
+  const reputationMultiplier = computeAdvertisingEffectivenessMultiplier(state.brandReputation)
+  // Exaggerated claims reach further short-term, but the claim is checked against the product's real
+  // quality at year-end — if it doesn't hold up, that's a MISLEADING_ADVERTISING reputation hit.
+  const claimsBoost = claimsHonesty === 'exaggerated' ? 1.2 : 1
+  const estimatedReach = estimateAdvertisingReach(channel, budget, channelProfile.reachPerDollar, effectiveness, reputationMultiplier * claimsBoost)
 
   const campaign = {
     id: createId('campaign'),
@@ -203,10 +285,11 @@ export function launchAdvertisingCampaign(state: GameState, productId: string, c
     budget,
     estimatedReach,
     effectivenessScore: effectiveness,
+    claimsHonesty,
     createdAt: new Date().toISOString(),
   }
   const next: GameState = { ...state, advertisingCampaigns: [...state.advertisingCampaigns, campaign] }
-  return { state: appendTransaction(next, { category: 'ADVERTISING_COST', amount: -budget, description: `${channelProfile.label} campaign for ${product.name}`, relatedId: campaign.id }) }
+  return { state: appendTransaction(next, { category: 'ADVERTISING_COST', amount: -budget, description: `${channelProfile.label} campaign for ${product.name}${claimsHonesty === 'exaggerated' ? ' (exaggerated claims)' : ''}`, relatedId: campaign.id }) }
 }
 
 export function applyUnsoldInventoryAction(state: GameState, productId: string, action: UnsoldInventoryAction): { state: GameState; error?: string } {
@@ -232,10 +315,26 @@ export function applyUnsoldInventoryAction(state: GameState, productId: string, 
   }
 
   // relaunch: a modest refresh cost, and a satisfaction bump representing renewed appeal — inventory stays on hand to sell.
+  // Also resets the "outdated" clock, since a relaunch is exactly what removes the age penalty.
   const refreshCost = product.inventory * product.costPerUnit * 0.2
   if (refreshCost > state.cash) return { state, error: `Relaunching would cost ${Math.round(refreshCost).toLocaleString()}, more than your available cash.` }
-  const next: GameState = { ...state, products: state.products.map((p) => (p.id === productId ? { ...p, satisfaction: Math.min(100, p.satisfaction + 10) } : p)) }
+  const next: GameState = { ...state, products: state.products.map((p) => (p.id === productId ? { ...p, satisfaction: Math.min(100, p.satisfaction + 10), lastRelaunchedYear: state.year } : p)) }
   return { state: appendTransaction(next, { category: 'OTHER_EXPENSE', amount: -refreshCost, description: `Relaunch refresh for ${product.name}`, relatedId: productId }) }
+}
+
+/** A dedicated relaunch action available even without unsold inventory — resets the "outdated" clock for a product that's simply been on the market a while, at the cost of a fresh R&D-style investment. */
+export function relaunchProduct(state: GameState, productId: string, budget: number): { state: GameState; error?: string } {
+  const product = state.products.find((p) => p.id === productId)
+  if (!product) return { state, error: 'Unknown product.' }
+  if (product.discontinued) return { state, error: 'This product has been discontinued.' }
+  if (budget <= 0) return { state, error: 'Enter a relaunch budget greater than zero.' }
+  if (budget > state.cash) return { state, error: `Relaunching would cost ${Math.round(budget).toLocaleString()}, more than your available cash.` }
+
+  const next: GameState = {
+    ...state,
+    products: state.products.map((p) => (p.id === productId ? { ...p, lastRelaunchedYear: state.year, satisfaction: Math.min(100, p.satisfaction + 5) } : p)),
+  }
+  return { state: appendTransaction(next, { category: 'RESEARCH_COST', amount: -budget, description: `Relaunch investment for ${product.name}`, relatedId: productId }) }
 }
 
 export function completeLesson(state: GameState, lessonId: string): GameState {
@@ -245,6 +344,76 @@ export function completeLesson(state: GameState, lessonId: string): GameState {
 
 export function updatePreferences(state: GameState, partial: Partial<Pick<GamePreferences, 'learningSupport' | 'reducedMotion'>>): GameState {
   return { ...state, preferences: { ...state.preferences, ...partial } }
+}
+
+// --- Funding: loans + community/environmental investment ------------------------
+
+export type LoanApplicationPreview = { odds: number; factors: string[]; interestRate: number }
+
+/** A read-only preview of a loan application's odds and rate, before the player commits to applying. */
+export function previewLoanApplication(state: GameState, amount: number): LoanApplicationPreview {
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  const existingLoanBalance = state.loans.reduce((sum, l) => sum + l.remainingBalance, 0)
+  const { odds, factors } = computeLoanApprovalOdds(state.brandReputation, existingLoanBalance, state.companyValue, amount, difficulty)
+  const interestRate = computeLoanInterestRate(state.brandReputation, difficulty)
+  return { odds, factors, interestRate }
+}
+
+/** Applying for a loan is a real probability roll, not a guarantee — approval odds and the reasons behind them are shown to the player before they commit. A rejected application costs nothing. */
+export function applyForLoan(state: GameState, amount: number, purpose: LoanPurpose, rng: () => number = Math.random): { state: GameState; error?: string; approved: boolean } {
+  if (amount <= 0) return { state, error: 'Enter a loan amount greater than zero.', approved: false }
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  const existingLoanBalance = state.loans.reduce((sum, l) => sum + l.remainingBalance, 0)
+  const { odds } = computeLoanApprovalOdds(state.brandReputation, existingLoanBalance, state.companyValue, amount, difficulty)
+
+  if (rng() >= odds) {
+    return { state, error: 'The loan application was declined. Improving reputation or reducing existing debt improves future odds.', approved: false }
+  }
+
+  const interestRate = computeLoanInterestRate(state.brandReputation, difficulty)
+  const termYears = 5
+  const loan: Loan = { id: createId('loan'), principal: amount, remainingBalance: amount, interestRate, termYears, yearsRemaining: termYears, purpose, takenYear: state.year }
+  const next: GameState = { ...state, loans: [...state.loans, loan] }
+  return {
+    state: appendTransaction(next, { category: 'LOAN', amount, description: `Business loan approved (${Math.round(interestRate * 1000) / 10}% annual interest, ${termYears}-year term)`, relatedId: loan.id }),
+    approved: true,
+  }
+}
+
+/** A single bounded lever covering both "supports community projects" and "produces environmentally responsible products" — a deliberate spend that earns reputation, not a random event. */
+export function investInCommunityProject(state: GameState, budget: number): { state: GameState; error?: string } {
+  if (budget <= 0) return { state, error: 'Enter a budget greater than zero.' }
+  if (budget > state.cash) return { state, error: `This would cost ${Math.round(budget).toLocaleString()}, more than your available cash.` }
+  const reputationGain = Math.min(6, Math.round(budget / 2000))
+  const next = appendTransaction(state, { category: 'OTHER_EXPENSE', amount: -budget, description: 'Community and environmental initiative funding' })
+  return {
+    state: appendReputationTransaction(next, {
+      delta: reputationGain,
+      reasonCategory: 'COMMUNITY_SUPPORT',
+      description: `Invested ${Math.round(budget).toLocaleString()} in a community and environmental initiative, earning goodwill with customers.`,
+    }),
+  }
+}
+
+const INTERNATIONAL_EXPANSION_FEATURE_ID = 'international-expansion'
+const INTERNATIONAL_EXPANSION_REPUTATION_THRESHOLD = 80
+const INTERNATIONAL_EXPANSION_COMPANY_VALUE_THRESHOLD = 150_000
+
+export function isInternationalExpansionEligible(state: GameState): boolean {
+  return state.brandReputation >= INTERNATIONAL_EXPANSION_REPUTATION_THRESHOLD && state.companyValue >= INTERNATIONAL_EXPANSION_COMPANY_VALUE_THRESHOLD
+}
+
+/** A one-time unlock, reachable only at Excellent reputation plus a real company-value bar — represents earning the trust and scale needed to sell beyond the home market, without inventing a full country-by-country subsystem. */
+export function unlockInternationalExpansion(state: GameState, investment: number): { state: GameState; error?: string } {
+  if (state.unlockedFeatures.includes(INTERNATIONAL_EXPANSION_FEATURE_ID)) return { state, error: 'International expansion has already been unlocked.' }
+  if (!isInternationalExpansionEligible(state)) {
+    return { state, error: `International expansion needs at least ${INTERNATIONAL_EXPANSION_REPUTATION_THRESHOLD} reputation and a company value of ${INTERNATIONAL_EXPANSION_COMPANY_VALUE_THRESHOLD.toLocaleString()}.` }
+  }
+  if (investment <= 0) return { state, error: 'Enter an investment amount greater than zero.' }
+  if (investment > state.cash) return { state, error: `This would cost ${Math.round(investment).toLocaleString()}, more than your available cash.` }
+
+  const next: GameState = { ...state, unlockedFeatures: [...state.unlockedFeatures, INTERNATIONAL_EXPANSION_FEATURE_ID] }
+  return { state: appendTransaction(next, { category: 'OTHER_EXPENSE', amount: -investment, description: 'Investment to launch international expansion' }) }
 }
 
 export { verifyLedgerIntegrity }
@@ -277,14 +446,17 @@ export function estimateCurrentYearOutcome(state: GameState, rng: () => number =
 
   const projectedRent = computeRent(industry, activeProducts.length, difficulty)
   const totalUnitsPlanned = activeProducts.reduce((sum, p) => sum + p.unitsManufactured, 0)
-  const projectedWages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty)
+  const projectedWages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, state.staffMorale)
 
   const isFirstYearForCompany = state.annualReports.length === 0
+  const seasonal = computeSeasonalMultiplier(industry, year)
+  const saturation = computeMarketSaturation(state.marketShare, state.competitors)
   let projectedRevenue = 0
   for (const product of activeProducts) {
     const availableStock = product.inventory + product.unitsManufactured
     const qualityScore = computeQualityScore(industry, product)
     const advertisingReach = sumAdvertisingReachForProduct(state.advertisingCampaigns, product.id, year)
+    const agePenalty = computeProductAgePenalty(product, industry, year)
     const demand = computeDemand({
       product,
       qualityScore,
@@ -298,6 +470,11 @@ export function estimateCurrentYearOutcome(state: GameState, rng: () => number =
       demandEventMultiplier: 1,
       isFirstYearForCompany,
       rng,
+      customerLoyalty: product.customerLoyalty,
+      awareness: product.awareness,
+      seasonalMultiplier: seasonal.multiplier,
+      saturationMultiplier: saturation.multiplier,
+      agePenaltyMultiplier: agePenalty.multiplier,
     })
     projectedRevenue += Math.min(availableStock, demand) * product.price
   }
@@ -315,6 +492,9 @@ export function estimateProductDemandAtPrice(state: GameState, productId: string
   const qualityScore = computeQualityScore(industry, product)
   const advertisingReach = sumAdvertisingReachForProduct(state.advertisingCampaigns, product.id, state.year)
   const isFirstYearForCompany = state.annualReports.length === 0
+  const seasonal = computeSeasonalMultiplier(industry, state.year)
+  const saturation = computeMarketSaturation(state.marketShare, state.competitors)
+  const agePenalty = computeProductAgePenalty(product, industry, state.year)
   return computeDemand({
     product: { ...product, price },
     qualityScore,
@@ -328,21 +508,30 @@ export function estimateProductDemandAtPrice(state: GameState, productId: string
     demandEventMultiplier: 1,
     isFirstYearForCompany,
     rng,
+    customerLoyalty: product.customerLoyalty,
+    awareness: product.awareness,
+    seasonalMultiplier: seasonal.multiplier,
+    saturationMultiplier: saturation.multiplier,
+    agePenaltyMultiplier: agePenalty.multiplier,
   })
 }
 
 // --- The yearly close-out --------------------------------------------------------
 
 export function completeFinancialYear(state: GameState, rng: () => number = Math.random): { state: GameState; report: AnnualReport } {
-  const industry = getIndustryProfile(state.industry)
+  const baseIndustry = getIndustryProfile(state.industry)
+  // International expansion (unlocked at Excellent reputation + a real company-value bar) raises the
+  // effective addressable market — represented as a market-size boost rather than a full new subsystem.
+  const industry = state.unlockedFeatures.includes('international-expansion') ? { ...baseIndustry, marketSize: Math.round(baseIndustry.marketSize * 1.4) } : baseIndustry
   const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
   const year = state.year
   const openingCash = state.cash
   const isFirstYearForCompany = state.annualReports.length === 0
+  const factorNotes: string[] = []
 
   let working = state
   const activeProducts = working.products.filter((p) => !p.discontinued)
-  const events = generateYearlyEvents(industry, difficulty, activeProducts.map((p) => p.id), year, rng)
+  const events = generateYearlyEvents(industry, difficulty, activeProducts.map((p) => p.id), year, working.brandReputation, rng)
   const costMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.costMultiplier, 1)
   const companyWideDemandMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.demandMultiplier, 1)
   let economicIndex = working.economicIndex
@@ -350,9 +539,44 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
 
   const rent = computeRent(industry, activeProducts.length, difficulty)
   const totalUnitsPlanned = activeProducts.reduce((sum, p) => sum + p.unitsManufactured, 0)
-  const wages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty)
+  const wages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, working.staffMorale)
   working = appendTransaction(working, { category: 'RENT', amount: -rent, description: `Year ${year} rent and operating overhead` })
   working = appendTransaction(working, { category: 'WAGES', amount: -wages, description: `Year ${year} staff wages` })
+
+  const operating = computeOperatingCosts(industry, activeProducts, difficulty)
+  if (operating.total > 0) {
+    working = appendTransaction(working, {
+      category: 'OPERATING_COSTS',
+      amount: -operating.total,
+      description: `Year ${year} operating costs — storage ${operating.storage.toLocaleString()}, insurance ${operating.insurance.toLocaleString()}, maintenance ${operating.maintenance.toLocaleString()}`,
+    })
+  }
+
+  // Loans amortize on a straight-line principal schedule with interest charged on the remaining balance — the schedule is visible on the Funding page, never a surprise deduction.
+  let loanRepaymentsTotal = 0
+  const remainingLoans: Loan[] = []
+  for (const loan of working.loans) {
+    if (loan.yearsRemaining <= 0 || loan.remainingBalance <= 0) continue
+    const principalPortion = Math.min(loan.remainingBalance, loan.principal / loan.termYears)
+    const interestPortion = loan.remainingBalance * loan.interestRate
+    const payment = principalPortion + interestPortion
+    loanRepaymentsTotal += payment
+    const newRemainingBalance = Math.max(0, Math.round((loan.remainingBalance - principalPortion) * 100) / 100)
+    const newYearsRemaining = loan.yearsRemaining - 1
+    if (newRemainingBalance > 0.5 && newYearsRemaining > 0) {
+      remainingLoans.push({ ...loan, remainingBalance: newRemainingBalance, yearsRemaining: newYearsRemaining })
+    }
+  }
+  loanRepaymentsTotal = Math.round(loanRepaymentsTotal)
+  if (loanRepaymentsTotal > 0) {
+    working = appendTransaction(working, { category: 'LOAN_REPAYMENT', amount: -loanRepaymentsTotal, description: `Year ${year} loan repayments (principal + interest)` })
+  }
+  working = { ...working, loans: remainingLoans }
+
+  const seasonal = computeSeasonalMultiplier(industry, year)
+  if (seasonal.note) factorNotes.push(seasonal.note)
+  const saturation = computeMarketSaturation(working.marketShare, working.competitors)
+  if (saturation.note) factorNotes.push(saturation.note)
 
   const perProduct: AnnualReport['perProduct'] = []
   let totalRevenue = 0
@@ -361,6 +585,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   let unitsSoldTotal = 0
   let unsoldTotal = 0
   const updatedProducts: Product[] = []
+  const reputationAdjustments: { delta: number; reasonCategory: ReputationReasonCategory; description: string; relatedId?: string }[] = []
 
   for (const product of working.products) {
     if (product.discontinued) {
@@ -368,12 +593,50 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
       continue
     }
 
-    const carriedInventory = industry.perishable ? Math.round(product.inventory * (1 - PERISHABLE_EXPIRY_RATE)) : product.inventory
-    const availableStock = carriedInventory + product.unitsManufactured
     const qualityScore = computeQualityScore(industry, product)
+    const reliability = computeProductReliability(qualityScore, rng)
+    const recalled = checkForProductRecall(reliability, industry, rng)
+
+    if (recalled) {
+      const recallRefund = Math.round(product.lifetimeUnitsSold * product.price * 0.05)
+      if (recallRefund > 0) {
+        working = appendTransaction(working, { category: 'REFUND', amount: -recallRefund, description: `Product recall refunds for ${product.name}`, relatedId: product.id })
+      }
+      reputationAdjustments.push({
+        delta: -10,
+        reasonCategory: 'PRODUCT_RECALL',
+        description: `${product.name} was recalled after a quality defect was discovered — all current stock was withdrawn from sale.`,
+        relatedId: product.id,
+      })
+      factorNotes.push(`${product.name} was recalled this year — see the reputation history for details.`)
+
+      updatedProducts.push({
+        ...product,
+        inventory: 0,
+        unitsManufactured: 0,
+        reliability,
+        satisfaction: Math.max(0, product.satisfaction - 20),
+        history: [...product.history, { year, unitsProduced: product.unitsManufactured, unitsSold: 0, unsoldAtYearEnd: 0, revenue: 0, costOfGoodsSold: 0, satisfaction: Math.max(0, product.satisfaction - 20) }],
+      })
+      perProduct.push({ productId: product.id, productName: product.name, unitsProduced: product.unitsManufactured, unitsSold: 0, unsoldAtYearEnd: 0, revenue: 0, costOfGoodsSold: 0 })
+      unitsProducedTotal += product.unitsManufactured
+      continue
+    }
+
+    // Production delays: reputation and difficulty both affect how reliably suppliers deliver on time. Delayed units simply become next year's carried inventory rather than vanishing.
+    const delayChance = computeProductionDelayChance(working.brandReputation, difficulty)
+    const isDelayed = rng() < delayChance
+    const delayedUnits = isDelayed ? Math.round(product.unitsManufactured * (0.15 + rng() * 0.15)) : 0
+    if (isDelayed && delayedUnits > 0) factorNotes.push(`${delayedUnits.toLocaleString()} units of ${product.name} were delayed by a supplier and will arrive next year.`)
+    const producedThisYear = product.unitsManufactured - delayedUnits
+
+    const carriedInventory = industry.perishable ? Math.round(product.inventory * (1 - PERISHABLE_EXPIRY_RATE)) : product.inventory
+    const availableStock = carriedInventory + producedThisYear
     const productEvent = events.find((e) => e.targetProductId === product.id)
     const demandMultiplier = companyWideDemandMultiplier * (productEvent?.demandMultiplier ?? 1)
     const advertisingReach = sumAdvertisingReachForProduct(working.advertisingCampaigns, product.id, year)
+    const agePenalty = computeProductAgePenalty(product, industry, year)
+    if (agePenalty.note) factorNotes.push(agePenalty.note)
 
     const demand = computeDemand({
       product,
@@ -388,14 +651,39 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
       demandEventMultiplier: demandMultiplier,
       isFirstYearForCompany,
       rng,
+      customerLoyalty: product.customerLoyalty,
+      awareness: product.awareness,
+      seasonalMultiplier: seasonal.multiplier,
+      saturationMultiplier: saturation.multiplier,
+      agePenaltyMultiplier: agePenalty.multiplier,
     })
 
     const unitsSold = Math.min(availableStock, demand)
-    const unsoldAtYearEnd = availableStock - unitsSold
+    const unsoldAtYearEnd = availableStock - unitsSold + delayedUnits
     const effectiveCostPerUnit = product.costPerUnit * costMultiplier
     const revenue = unitsSold * product.price
     const costOfGoodsSold = unitsSold * effectiveCostPerUnit
     const satisfaction = computeProductSatisfaction(qualityScore, product.price, industry, availableStock, unitsSold)
+    const returnRate = computeProductReturnRate(reliability, satisfaction)
+    const complaintRate = computeProductComplaintRate(reliability, satisfaction)
+    const rating = computeProductRating(satisfaction, reliability)
+    const customerLoyalty = computeCustomerLoyalty(product.customerLoyalty, satisfaction, reliability)
+    const potentialBuyers = industry.marketSize / Math.max(1, industry.customerGroups.length)
+    const awareness = computeAwarenessGrowth(product.awareness, advertisingReach, potentialBuyers, unitsSold)
+    const reviews = unitsSold > 0 ? [...product.reviews, generateProductReview(rating, year, rng)].slice(-10) : product.reviews
+
+    // A product's reliability CHANGING across a meaningful threshold — not just existing above/below one — is what moves reputation, so a consistently mediocre product doesn't get penalized every single year.
+    if (product.reliability < 60 && reliability >= 60) {
+      reputationAdjustments.push({ delta: 3, reasonCategory: 'RELIABLE_PRODUCT', description: `${product.name} became noticeably more reliable this year, and customers noticed.`, relatedId: product.id })
+    } else if (product.reliability >= 40 && reliability < 40) {
+      reputationAdjustments.push({ delta: -4, reasonCategory: 'QUALITY_ISSUE', description: `${product.name}'s reliability dropped sharply this year, leading to more complaints and returns.`, relatedId: product.id })
+    }
+
+    const productCampaignsThisYear = working.advertisingCampaigns.filter((c) => c.productId === product.id && c.year === year)
+    const misledOnQuality = productCampaignsThisYear.some((c) => c.claimsHonesty === 'exaggerated') && qualityScore < 55
+    if (misledOnQuality) {
+      reputationAdjustments.push({ delta: -3, reasonCategory: 'MISLEADING_ADVERTISING', description: `Advertising for ${product.name} made claims its actual quality didn't back up.`, relatedId: product.id })
+    }
 
     working = appendTransaction(working, { category: 'SALES_REVENUE', amount: revenue, description: `Sold ${unitsSold} units of ${product.name}`, relatedId: product.id })
 
@@ -404,15 +692,22 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
       inventory: unsoldAtYearEnd,
       unitsManufactured: 0,
       satisfaction,
-      history: [...product.history, { year, unitsProduced: product.unitsManufactured, unitsSold, unsoldAtYearEnd, revenue, costOfGoodsSold, satisfaction }],
+      history: [...product.history, { year, unitsProduced: producedThisYear, unitsSold, unsoldAtYearEnd, revenue, costOfGoodsSold, satisfaction }],
       lifetimeUnitsSold: product.lifetimeUnitsSold + unitsSold,
       lifetimeRevenue: product.lifetimeRevenue + revenue,
+      rating,
+      reviews,
+      reliability,
+      returnRate,
+      complaintRate,
+      awareness,
+      customerLoyalty,
     })
 
-    perProduct.push({ productId: product.id, productName: product.name, unitsProduced: product.unitsManufactured, unitsSold, unsoldAtYearEnd, revenue, costOfGoodsSold })
+    perProduct.push({ productId: product.id, productName: product.name, unitsProduced: producedThisYear, unitsSold, unsoldAtYearEnd, revenue, costOfGoodsSold })
     totalRevenue += revenue
     totalCogs += costOfGoodsSold
-    unitsProducedTotal += product.unitsManufactured
+    unitsProducedTotal += producedThisYear
     unitsSoldTotal += unitsSold
     unsoldTotal += unsoldAtYearEnd
   }
@@ -424,24 +719,66 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   const advertisingCosts = sumLedgerCategoryForYear(working, 'ADVERTISING_COST', year)
 
   const grossProfit = totalRevenue - totalCogs
-  const preTaxProfit = totalRevenue - productionCosts - researchCosts - advertisingCosts - wages - rent
+  const preTaxProfit = totalRevenue - productionCosts - researchCosts - advertisingCosts - wages - rent - operating.total - loanRepaymentsTotal
   const taxes = preTaxProfit > 0 ? Math.round(preTaxProfit * TAX_RATE) : 0
   if (taxes > 0) working = appendTransaction(working, { category: 'TAX', amount: -taxes, description: `Year ${year} tax on profit` })
 
   const lowSatisfactionProducts = updatedProducts.filter((p) => !p.discontinued && p.satisfaction < 45 && p.history.length > 0)
-  const refunds = Math.round(lowSatisfactionProducts.reduce((sum, p) => sum + (p.history[p.history.length - 1]?.revenue ?? 0) * 0.03, 0))
-  if (refunds > 0) working = appendTransaction(working, { category: 'REFUND', amount: -refunds, description: `Year ${year} customer refunds and returns` })
+  const satisfactionRefunds = Math.round(lowSatisfactionProducts.reduce((sum, p) => sum + (p.history[p.history.length - 1]?.revenue ?? 0) * 0.03, 0))
+  if (satisfactionRefunds > 0) working = appendTransaction(working, { category: 'REFUND', amount: -satisfactionRefunds, description: `Year ${year} customer refunds and returns` })
+  const refunds = sumLedgerCategoryForYear(working, 'REFUND', year)
 
   const netProfit = preTaxProfit - taxes - refunds
-  const totalExpenses = productionCosts + researchCosts + advertisingCosts + wages + rent + taxes + refunds
+  const totalExpenses = productionCosts + researchCosts + advertisingCosts + wages + rent + operating.total + loanRepaymentsTotal + taxes + refunds
 
   const newSatisfaction = computeCompanySatisfaction(working.products, working.customerSatisfaction)
-  const newReputation = computeBrandReputation(working.brandReputation, events, newSatisfaction)
+  const newStaffMorale = computeStaffMorale(working.staffMorale, wages, activeProducts.length, working.brandReputation)
+
+  // Every reputation change this year — recalls/misleading-advertising/reliability shifts discovered
+  // above, the yearly events, the ambient satisfaction pull, and a multi-year-stability bonus — is
+  // applied one at a time through the ledger gate, so each is individually explained.
+  for (const adjustment of reputationAdjustments) {
+    working = appendReputationTransaction(working, adjustment)
+  }
+  for (const event of events) {
+    if (event.reputationDelta !== 0 && event.reputationReasonCategory) {
+      working = appendReputationTransaction(working, { delta: event.reputationDelta, reasonCategory: event.reputationReasonCategory, description: event.impact, relatedId: event.targetProductId })
+    }
+  }
+  const satisfactionPull = computeSatisfactionReputationPull(working.brandReputation, newSatisfaction, difficulty)
+  if (satisfactionPull !== 0) {
+    working = appendReputationTransaction(working, {
+      delta: satisfactionPull,
+      reasonCategory: 'SATISFACTION_TREND',
+      description: satisfactionPull > 0 ? 'Customer satisfaction trended upward this year, gently lifting brand reputation with it.' : 'Customer satisfaction trended downward this year, gently pulling brand reputation down with it.',
+    })
+  }
+  const completedYears = working.annualReports.length + 1
+  if ([3, 5, 10, 15, 20].includes(completedYears) && completedYears - reputationAdjustments.filter((a) => a.reasonCategory === 'PRODUCT_RECALL' || a.reasonCategory === 'SCANDAL').length >= 0) {
+    working = appendReputationTransaction(working, {
+      delta: 3,
+      reasonCategory: 'MULTI_YEAR_STABILITY',
+      description: `${working.companyName} has now operated for ${completedYears} years — long-term stability builds lasting trust.`,
+    })
+  }
+
   const marketShare = industry.marketSize > 0 ? Math.min(100, Math.round((unitsSoldTotal / industry.marketSize) * 1000) / 10) : 0
   const updatedCompetitors = updateCompetitorsForYear(working.competitors, marketShare, difficulty, rng)
-  const companyValue = computeCompanyValue(working.cash, working.products, marketShare, newReputation)
+  const companyValue = computeCompanyValue(working.cash, working.products, marketShare, working.brandReputation)
+  const newEconomicCyclePhase = economicIndex >= 1.08 ? 'growth' : economicIndex <= 0.92 ? 'recession' : 'stable'
+  if (newEconomicCyclePhase !== 'stable') factorNotes.push(`Broader economic conditions this year: ${newEconomicCyclePhase}.`)
 
-  working = { ...working, competitors: updatedCompetitors, customerSatisfaction: newSatisfaction, brandReputation: newReputation, marketShare, companyValue, economicIndex, year: year + 1 }
+  working = {
+    ...working,
+    competitors: updatedCompetitors,
+    customerSatisfaction: newSatisfaction,
+    staffMorale: newStaffMorale,
+    marketShare,
+    companyValue,
+    economicIndex,
+    economicCyclePhase: newEconomicCyclePhase,
+    year: year + 1,
+  }
 
   const workedWell: string[] = []
   const causedProblems: string[] = []
@@ -450,15 +787,16 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   if (advertisingCosts > 0 && unitsSoldTotal > 0) workedWell.push('Advertising spending was matched by real sales activity.')
   if (unsoldTotal > unitsProducedTotal * 0.3) causedProblems.push('A large share of production went unsold — consider producing less or pricing more competitively next year.')
   if (netProfit < 0) causedProblems.push('Total expenses were higher than revenue this year.')
-  if (refunds > 0) causedProblems.push('Low customer satisfaction on at least one product led to refunds.')
+  if (refunds > 0) causedProblems.push('Product recalls or low customer satisfaction led to refunds this year.')
   const whyProfitOrLoss = netProfit >= 0
-    ? `Revenue of ${Math.round(totalRevenue).toLocaleString()} covered all production, research, advertising, wage, rent, and tax costs, leaving a net profit of ${Math.round(netProfit).toLocaleString()}.`
+    ? `Revenue of ${Math.round(totalRevenue).toLocaleString()} covered all production, research, advertising, wage, rent, operating, loan, and tax costs, leaving a net profit of ${Math.round(netProfit).toLocaleString()}.`
     : `Total expenses of ${Math.round(totalExpenses).toLocaleString()} were higher than revenue of ${Math.round(totalRevenue).toLocaleString()}, resulting in a net loss of ${Math.round(Math.abs(netProfit)).toLocaleString()}.`
   const considerNextYear: string[] = []
   if (unsoldTotal > 0) considerNextYear.push('Decide what to do with unsold inventory before producing more of the same product.')
   if (marketShare < 5) considerNextYear.push('Consider more research or advertising to better understand and reach your customers.')
   if (newSatisfaction < 55) considerNextYear.push('Customer satisfaction is low — check whether your price matches your product quality.')
-  if (considerNextYear.length === 0) considerNextYear.push('Keep an eye on competitors — they adjust their prices and quality every year too.')
+  if (working.brandReputation < 40) considerNextYear.push('Reputation is weak — review the reputation history to see exactly what has been damaging it.')
+  if (considerNextYear.length === 0) considerNextYear.push('Keep an eye on competitors — they adjust their prices, quality, and advertising every year too.')
 
   const report: AnnualReport = {
     year,
@@ -472,6 +810,8 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     advertisingCosts,
     wages,
     rent,
+    operatingCosts: operating.total,
+    loanRepayments: loanRepaymentsTotal,
     taxes,
     refunds,
     totalExpenses,
@@ -481,7 +821,8 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     companyValue,
     marketShare,
     customerSatisfaction: newSatisfaction,
-    brandReputation: newReputation,
+    brandReputation: working.brandReputation,
+    factorNotes,
     perProduct,
     events,
     learningSummary: { workedWell, causedProblems, whyProfitOrLoss, considerNextYear },

@@ -1,12 +1,14 @@
 'use client'
 
 import { useMemo } from 'react'
-import { AlertTriangle, ArrowRight, Award, Boxes, CalendarCheck2, GraduationCap, Heart, PiggyBank, ShieldCheck, TrendingUp } from 'lucide-react'
+import { Line, LineChart, ResponsiveContainer } from 'recharts'
+import { AlertTriangle, ArrowRight, Award, Boxes, CalendarCheck2, GraduationCap, Heart, PiggyBank, ShieldCheck, Star, TrendingUp } from 'lucide-react'
 import { InfoTip } from '@/components/business-empire/info-tip'
 import type { BusinessEmpireView } from '@/components/business-empire/nav-items'
 import { estimateCurrentYearOutcome } from '@/lib/business-empire/game-state'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
 import { LESSONS } from '@/lib/business-empire/lessons'
+import { getReputationLevel } from '@/lib/business-empire/simulation'
 import type { GameState } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +29,8 @@ export function DashboardPage({ state, onNavigate, onOpenCompleteYear }: Dashboa
   if (activeProducts.length === 0) warnings.push('You have no active products yet — create one to start earning revenue.')
   if (unsoldInventoryUnits > 0) warnings.push(`You are carrying ${unsoldInventoryUnits.toLocaleString()} unsold units — decide what to do with them in Products.`)
   if (state.customerSatisfaction < 45) warnings.push('Customer satisfaction is low — check whether your prices match your product quality.')
+  if (state.brandReputation < 40) warnings.push('Reputation is weak — this is hurting demand, advertising effectiveness, and loan approval. Check the Reputation page to see exactly why.')
+  if (state.loans.length > 0) warnings.push(`You have ${state.loans.length} active loan(s) — repayments are deducted automatically each year.`)
 
   const nextAction = activeProducts.length === 0
     ? { label: 'Create your first product', view: 'products' as const }
@@ -35,6 +39,8 @@ export function DashboardPage({ state, onNavigate, onOpenCompleteYear }: Dashboa
       : { label: 'Review pricing and demand', view: 'pricing' as const }
 
   const nextLesson = LESSONS.find((lesson) => !state.completedLessonIds.includes(lesson.id)) ?? null
+  const reputationChartData = state.reputationHistory.map((entry, index) => ({ index, value: entry.valueAfter }))
+  const reputationLevel = getReputationLevel(state.brandReputation)
 
   return (
     <div className="space-y-5">
@@ -78,6 +84,26 @@ export function DashboardPage({ state, onNavigate, onOpenCompleteYear }: Dashboa
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <div className="glass rounded-2xl p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Star className="size-4 text-amber-300" />Reputation</h2>
+            <span className="text-xs font-semibold text-amber-200">{reputationLevel}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-400">{state.brandReputation}/100 — affects demand, advertising, staff morale, and loan approval.</p>
+          {reputationChartData.length > 1 && (
+            <div className="mt-2 h-12 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={reputationChartData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+                  <Line type="monotone" dataKey="value" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <button type="button" onClick={() => onNavigate('reputation')} className="secondary-action mt-3 w-full text-xs">
+            View reputation history <ArrowRight className="size-3.5" />
+          </button>
+        </div>
+
         <div className="glass rounded-2xl p-5">
           <h2 className="text-sm font-semibold text-white">Products</h2>
           <p className="mt-1 text-xs text-slate-400">{activeProducts.length} active · {state.products.length - activeProducts.length} discontinued</p>

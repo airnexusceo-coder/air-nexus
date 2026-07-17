@@ -1,4 +1,4 @@
-import type { AdvertisingChannel, Industry, IndustryProfile } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, Industry, IndustryChallengeProfile, IndustryProfile } from '@/lib/business-empire/types'
 
 function effectiveness(values: Partial<Record<AdvertisingChannel, number>>): Record<AdvertisingChannel, number> {
   return {
@@ -16,11 +16,26 @@ function effectiveness(values: Partial<Record<AdvertisingChannel, number>>): Rec
   }
 }
 
+function challenges(values: Partial<IndustryChallengeProfile>): IndustryChallengeProfile {
+  return {
+    trendVolatility: 0.05,
+    recallRisk: 0.02,
+    audienceVolatility: 0.05,
+    outdatedPenaltyRate: 0.04,
+    regulationIntensity: 0.25,
+    ...values,
+  }
+}
+
 /**
  * Fifteen fictional-but-realistic industries. Each one deliberately differs
  * on price, cost, competition, research expense, and which advertising
  * channels actually work — so the same decision (e.g. "spend big on
  * influencers") is smart in Cosmetics and wasteful in Renewable Energy.
+ * `seasonality` and `challengeProfile` give each industry a genuinely
+ * different *shape* of difficulty, not just different numbers plugged into
+ * identical formulas — a Food business and a Technology business are hard in
+ * completely different ways.
  */
 export const INDUSTRY_PROFILES: IndustryProfile[] = [
   {
@@ -36,10 +51,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 500_000,
     growthPotential: 4,
+    seasonality: 0.15,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.8, 'video-ads': 0.7, 'search-ads': 0.5, television: 0.4, radio: 0.2, billboards: 0.4, influencer: 0.85, sponsorship: 0.3, 'discount-promo': 0.6 }),
     commonRisks: ['Trends change faster than you can restock', 'Overproduction leads to markdowns', 'Cheap imports undercut price'],
     researchCostFactor: 0.7,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.15, recallRisk: 0.02, audienceVolatility: 0.05, outdatedPenaltyRate: 0.08, regulationIntensity: 0.3 }),
   },
   {
     industry: 'Sportswear',
@@ -54,10 +71,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 400_000,
     growthPotential: 6,
+    seasonality: 0.2,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.75, 'video-ads': 0.7, 'search-ads': 0.5, television: 0.5, radio: 0.2, billboards: 0.35, influencer: 0.8, sponsorship: 0.7, 'discount-promo': 0.5 }),
     commonRisks: ['Demand swings with the seasons', 'Counterfeit competition', 'Sponsorship deals are expensive but hard to skip'],
     researchCostFactor: 0.8,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.12, recallRisk: 0.02, audienceVolatility: 0.05, outdatedPenaltyRate: 0.06, regulationIntensity: 0.2 }),
   },
   {
     industry: 'Food & Beverages',
@@ -72,10 +91,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 900_000,
     growthPotential: 3,
+    seasonality: 0.1,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.6, 'video-ads': 0.55, 'search-ads': 0.3, television: 0.6, radio: 0.4, billboards: 0.5, influencer: 0.5, sponsorship: 0.3, 'discount-promo': 0.7 }),
     commonRisks: ['Stock can spoil before it sells', 'Health and safety regulations add cost', 'Taste trends shift quickly'],
     researchCostFactor: 0.4,
     perishable: true,
+    challengeProfile: challenges({ trendVolatility: 0.08, recallRisk: 0.08, audienceVolatility: 0.05, outdatedPenaltyRate: 0.03, regulationIntensity: 0.6 }),
   },
   {
     industry: 'Restaurants',
@@ -90,10 +111,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 300_000,
     growthPotential: 3,
+    seasonality: 0.15,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.7, 'video-ads': 0.5, 'search-ads': 0.55, television: 0.4, radio: 0.3, billboards: 0.45, influencer: 0.65, sponsorship: 0.2, 'discount-promo': 0.6 }),
     commonRisks: ['Ingredients spoil if not used in time', 'Staffing shortages hurt service quality', 'One bad review can spread quickly'],
     researchCostFactor: 0.4,
     perishable: true,
+    challengeProfile: challenges({ trendVolatility: 0.06, recallRisk: 0.05, audienceVolatility: 0.08, outdatedPenaltyRate: 0.02, regulationIntensity: 0.5 }),
   },
   {
     industry: 'Technology',
@@ -108,10 +131,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'medium',
     marketSize: 250_000,
     growthPotential: 8,
+    seasonality: 0.05,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.55, 'video-ads': 0.6, 'search-ads': 0.7, television: 0.35, radio: 0.1, billboards: 0.2, influencer: 0.55, sponsorship: 0.3, 'discount-promo': 0.3 }),
     commonRisks: ['Research and development is expensive', 'Products can become outdated quickly', 'Bugs or outages damage trust fast'],
     researchCostFactor: 1.8,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.1, recallRisk: 0.04, audienceVolatility: 0.08, outdatedPenaltyRate: 0.18, regulationIntensity: 0.3 }),
   },
   {
     industry: 'Smartphones',
@@ -126,10 +151,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 600_000,
     growthPotential: 5,
+    seasonality: 0.1,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.6, 'video-ads': 0.65, 'search-ads': 0.6, television: 0.5, radio: 0.1, billboards: 0.3, influencer: 0.6, sponsorship: 0.3, 'discount-promo': 0.35 }),
     commonRisks: ['Extremely high research costs', 'Component supply can be disrupted', 'Price wars squeeze margins thin'],
     researchCostFactor: 2.2,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.12, recallRisk: 0.05, audienceVolatility: 0.06, outdatedPenaltyRate: 0.2, regulationIntensity: 0.3 }),
   },
   {
     industry: 'Video Games',
@@ -144,10 +171,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 450_000,
     growthPotential: 7,
+    seasonality: 0.2,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.75, 'video-ads': 0.85, 'search-ads': 0.4, television: 0.3, radio: 0.1, billboards: 0.2, influencer: 0.85, sponsorship: 0.4, 'discount-promo': 0.55 }),
     commonRisks: ['Development delays cost money', 'Piracy cuts into sales', 'A bad launch review can sink demand overnight'],
     researchCostFactor: 1.3,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.1, recallRisk: 0.01, audienceVolatility: 0.2, outdatedPenaltyRate: 0.1, regulationIntensity: 0.15 }),
   },
   {
     industry: 'Cosmetics',
@@ -162,10 +191,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 500_000,
     growthPotential: 6,
+    seasonality: 0.15,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.85, 'video-ads': 0.7, 'search-ads': 0.4, television: 0.35, radio: 0.15, billboards: 0.3, influencer: 0.9, sponsorship: 0.25, 'discount-promo': 0.5 }),
     commonRisks: ['Safety/allergy concerns can trigger returns', 'Trends shift quickly', 'An influencer scandal can hurt the brand'],
     researchCostFactor: 0.6,
     perishable: true,
+    challengeProfile: challenges({ trendVolatility: 0.18, recallRisk: 0.05, audienceVolatility: 0.1, outdatedPenaltyRate: 0.08, regulationIntensity: 0.35 }),
   },
   {
     industry: 'Furniture',
@@ -180,10 +211,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'medium',
     marketSize: 150_000,
     growthPotential: 3,
+    seasonality: 0.1,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.5, 'video-ads': 0.5, 'search-ads': 0.6, television: 0.3, radio: 0.15, billboards: 0.35, influencer: 0.4, sponsorship: 0.15, 'discount-promo': 0.45 }),
     commonRisks: ['Shipping bulky items is expensive', 'Unsold stock ties up a lot of cash', 'Showroom/storage overhead is high'],
     researchCostFactor: 0.6,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.06, recallRisk: 0.02, audienceVolatility: 0.03, outdatedPenaltyRate: 0.03, regulationIntensity: 0.25 }),
   },
   {
     industry: 'Cars',
@@ -198,10 +231,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'medium',
     marketSize: 60_000,
     growthPotential: 2,
+    seasonality: 0.05,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.4, 'video-ads': 0.5, 'search-ads': 0.5, television: 0.55, radio: 0.35, billboards: 0.5, influencer: 0.3, sponsorship: 0.4, 'discount-promo': 0.4 }),
     commonRisks: ['Production costs are enormous', 'Safety recalls are costly and damage trust', 'Customers take a long time to decide'],
     researchCostFactor: 2.5,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.04, recallRisk: 0.1, audienceVolatility: 0.03, outdatedPenaltyRate: 0.05, regulationIntensity: 0.7 }),
   },
   {
     industry: 'Education',
@@ -216,10 +251,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'medium',
     marketSize: 350_000,
     growthPotential: 5,
+    seasonality: 0.25,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.55, 'video-ads': 0.6, 'search-ads': 0.65, television: 0.25, radio: 0.2, billboards: 0.2, influencer: 0.4, sponsorship: 0.3, 'discount-promo': 0.4 }),
     commonRisks: ['Results are hard to prove upfront', 'Enrolment is seasonal', 'Trust takes time to build'],
     researchCostFactor: 0.5,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.05, recallRisk: 0.01, audienceVolatility: 0.05, outdatedPenaltyRate: 0.04, regulationIntensity: 0.4 }),
   },
   {
     industry: 'Fitness',
@@ -234,10 +271,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 400_000,
     growthPotential: 6,
+    seasonality: 0.3,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.8, 'video-ads': 0.75, 'search-ads': 0.5, television: 0.3, radio: 0.2, billboards: 0.3, influencer: 0.85, sponsorship: 0.35, 'discount-promo': 0.45 }),
     commonRisks: ['Demand spikes in January and fades fast', 'Customer churn is high', 'Injury/safety liability'],
     researchCostFactor: 0.6,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.08, recallRisk: 0.02, audienceVolatility: 0.06, outdatedPenaltyRate: 0.05, regulationIntensity: 0.25 }),
   },
   {
     industry: 'Entertainment',
@@ -252,10 +291,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 550_000,
     growthPotential: 5,
+    seasonality: 0.2,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.75, 'video-ads': 0.8, 'search-ads': 0.35, television: 0.45, radio: 0.2, billboards: 0.4, influencer: 0.7, sponsorship: 0.4, 'discount-promo': 0.4 }),
     commonRisks: ['Demand depends on being culturally "hot"', 'Piracy and knock-offs cut into sales', 'Trends fade fast'],
     researchCostFactor: 0.9,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.15, recallRisk: 0.01, audienceVolatility: 0.22, outdatedPenaltyRate: 0.09, regulationIntensity: 0.15 }),
   },
   {
     industry: 'Renewable Energy',
@@ -270,10 +311,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'medium',
     marketSize: 80_000,
     growthPotential: 12,
+    seasonality: 0.05,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.4, 'video-ads': 0.45, 'search-ads': 0.55, television: 0.3, radio: 0.15, billboards: 0.25, influencer: 0.2, sponsorship: 0.35, 'discount-promo': 0.3 }),
     commonRisks: ['Research and installation are expensive', 'Government incentives can change', 'Sales cycles are long'],
     researchCostFactor: 1.9,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.03, recallRisk: 0.03, audienceVolatility: 0.04, outdatedPenaltyRate: 0.06, regulationIntensity: 0.45 }),
   },
   {
     industry: 'Online Retail',
@@ -288,10 +331,12 @@ export const INDUSTRY_PROFILES: IndustryProfile[] = [
     competitionLevel: 'high',
     marketSize: 800_000,
     growthPotential: 9,
+    seasonality: 0.15,
     advertisingEffectiveness: effectiveness({ 'social-media': 0.7, 'video-ads': 0.6, 'search-ads': 0.75, television: 0.2, radio: 0.1, billboards: 0.2, influencer: 0.55, sponsorship: 0.15, 'discount-promo': 0.65 }),
     commonRisks: ['Shipping and returns eat into margin', 'Customers compare prices instantly', 'Marketplace competitors can undercut you overnight'],
     researchCostFactor: 0.6,
     perishable: false,
+    challengeProfile: challenges({ trendVolatility: 0.1, recallRisk: 0.02, audienceVolatility: 0.06, outdatedPenaltyRate: 0.05, regulationIntensity: 0.2 }),
   },
 ]
 

@@ -10,7 +10,6 @@ import {
   BookOpenCheck,
   BrainCircuit,
   BriefcaseBusiness,
-  CalendarCheck,
   Check,
   ChevronDown,
   Code2,
@@ -26,24 +25,21 @@ import {
   Mail,
   Map,
   Menu,
-  MessageCircle,
-  Mic2,
-  PenLine,
   PlayCircle,
   Presentation,
   Rocket,
   Search,
   ShieldCheck,
   Sparkles,
-  Target,
   TrendingUp,
-  Users,
   X,
   Zap,
+  type LucideIcon,
 } from 'lucide-react'
 import { PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
 import { clearAuthSession, getAuthSession, signInWithPassword, signUpWithPassword, type AuthSession } from '@/lib/auth/session'
 import { cn } from '@/lib/utils'
+import { AI_TOOL_CATEGORIES, AI_TOOLS, type AiToolCategory } from '@/lib/ai-tools/catalog'
 import { NexusLogo } from '@/components/brand/nexus-mark'
 import { BrandHeroVisual } from '@/components/brand/hero-visual'
 
@@ -54,28 +50,24 @@ const AirGPTApp = dynamic(
 
 export type MarketingPage = 'home' | 'products' | 'pricing' | 'resources' | 'company' | 'login' | 'signup' | 'airgpt' | 'tool'
 
-const tools = [
-  { slug: 'ai-chat', name: 'AI Chat', description: 'Smart conversations with AirGPT', icon: MessageCircle },
-  { slug: 'voice-ai', name: 'Voice AI', description: 'Speech-to-text and spoken answers', icon: Mic2 },
-  { slug: 'presentation-maker', name: 'Presentation Maker', description: 'Create polished slides in seconds', icon: Presentation },
-  { slug: 'resume-builder', name: 'Resume Builder', description: 'Build professional resumes', icon: BriefcaseBusiness },
-  { slug: 'code-generation', name: 'Code Generation', description: 'Generate, explain, and debug code', icon: Code2 },
-  { slug: 'data-analysis', name: 'Data Analysis', description: 'Turn data into clear insights', icon: BarChart3 },
-  { slug: 'email-assistant', name: 'Email Assistant', description: 'Draft thoughtful emails quickly', icon: Mail },
-  { slug: 'ai-planner', name: 'AI Planner', description: 'Plan tasks, projects, and study', icon: CalendarCheck },
-  { slug: 'file-analysis', name: 'File Analysis', description: 'Understand documents and files', icon: FileSearch },
-  { slug: 'pdf-tools', name: 'PDF Tools', description: 'Summarise and extract PDFs', icon: FileText },
-  { slug: 'sql-assistant', name: 'SQL Assistant', description: 'Write and optimise queries', icon: Database },
-  { slug: 'grammar-checker', name: 'Grammar Checker', description: 'Perfect tone, clarity, and grammar', icon: Check },
-  { slug: 'web-search', name: 'Web Search', description: 'Research with current information', icon: Search },
-  { slug: 'translation', name: 'Translation', description: 'Communicate across languages', icon: Languages },
-  { slug: 'youtube-summarizer', name: 'YouTube Summarizer', description: 'Condense videos into key ideas', icon: Rocket },
-  { slug: 'marketing-copy', name: 'Marketing Copy', description: 'Create high-converting campaigns', icon: Target },
-  { slug: 'image-generation', name: 'Image Generation', description: 'Create distinctive visual concepts', icon: ImageIcon },
-  { slug: 'ai-writer', name: 'AI Writer', description: 'Write better content, faster', icon: PenLine },
-  { slug: 'mind-maps', name: 'Mind Maps', description: 'Visualise ideas and connections', icon: Map },
-  { slug: 'social-media-assistant', name: 'Social Media Assistant', description: 'Plan and create social content', icon: Users },
-]
+const toolIcons: Record<string, LucideIcon> = {
+  'presentation-maker': Presentation,
+  'resume-builder': BriefcaseBusiness,
+  'code-generation': Code2,
+  'data-analysis': BarChart3,
+  'email-assistant': Mail,
+  'file-analysis': FileSearch,
+  'pdf-tools': FileText,
+  'sql-assistant': Database,
+  'grammar-checker': Check,
+  'web-search': Search,
+  translation: Languages,
+  'youtube-summarizer': Rocket,
+  'image-generation': ImageIcon,
+  'mind-maps': Map,
+}
+
+const tools = AI_TOOLS.map((tool) => ({ ...tool, icon: toolIcons[tool.slug] ?? Sparkles }))
 
 const nav = [
   { label: 'Products', href: '/products' },
@@ -108,6 +100,14 @@ function AppLoadingScreen({ label }: { label: string }) {
   return <div className="flex min-h-screen items-center justify-center bg-black text-sm text-zinc-400"><span className="size-5 animate-spin rounded-full border-2 border-white/70 border-t-transparent" /><span className="ml-3">{label}</span></div>
 }
 
+function safeNextPath(value: string | null) {
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/airgpt'
+}
+
+function loginPathForCurrentLocation() {
+  const next = window.location.pathname + window.location.search + window.location.hash
+  return '/login?next=' + encodeURIComponent(next)
+}
 function AirGPTGate() {
   const router = useRouter()
   const [session, setSession] = useState<AuthSession | null | undefined>(undefined)
@@ -118,13 +118,13 @@ function AirGPTGate() {
       .then((current) => {
         if (cancelled) return
         if (!current) {
-          router.replace('/login')
+          router.replace(loginPathForCurrentLocation())
           return
         }
         setSession(current)
       })
       .catch(() => {
-        if (!cancelled) router.replace('/login')
+        if (!cancelled) router.replace(loginPathForCurrentLocation())
       })
     return () => {
       cancelled = true
@@ -135,7 +135,7 @@ function AirGPTGate() {
     return <div className="flex min-h-screen items-center justify-center bg-black text-sm text-zinc-400"><span className="size-5 animate-spin rounded-full border-2 border-white/70 border-t-transparent" /><span className="ml-3">Checking your Air Nexus session…</span></div>
   }
 
-  return <div className="airgpt-product"><AirGPTApp authUser={session} onSignOut={() => { void clearAuthSession().finally(() => router.replace('/login')) }} /></div>
+  return <div className="airgpt-product"><AirGPTApp authUser={session} onSignOut={() => { void clearAuthSession().finally(() => router.replace(loginPathForCurrentLocation())) }} /></div>
 }
 function MarketingNav({ active }: { active: MarketingPage }) {
   const [open, setOpen] = useState(false)
@@ -156,10 +156,10 @@ function MarketingNav({ active }: { active: MarketingPage }) {
 }
 
 const HOME_FEATURES = [
-  { title: 'AI Tutor', description: 'Get step-by-step explanations tailored to your learning.', icon: BrainCircuit },
-  { title: 'Smart Revision', description: 'Turn your learning into flashcards, summaries and practice.', icon: Layers },
-  { title: 'Exam Practice', description: 'Test your understanding with adaptive practice.', icon: ListChecks },
-  { title: 'Track Your Progress', description: 'See what you understand and what to revise next.', icon: TrendingUp },
+  { title: 'AI Tutor', description: 'Get step-by-step explanations tailored to your learning.', icon: BrainCircuit, href: '/airgpt?section=AI%20Tutor' },
+  { title: 'Smart Revision', description: 'Turn your learning into flashcards, summaries and practice.', icon: Layers, href: '/airgpt?section=Flashcards' },
+  { title: 'Exam Practice', description: 'Test your understanding with adaptive practice.', icon: ListChecks, href: '/airgpt?section=AI%20Tutor' },
+  { title: 'Track Your Progress', description: 'See what you understand and what to revise next.', icon: TrendingUp, href: '/airgpt?section=Analytics' },
 ]
 
 function HomePage() {
@@ -197,8 +197,8 @@ function HowItWorks() {
   return (
     <section id="how-it-works" className="mx-auto max-w-[1440px] px-5 py-10 sm:px-8 lg:px-12">
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        {HOME_FEATURES.map(({ title, description, icon: Icon }) => (
-          <Link key={title} href="/airgpt" className="nexus-card group flex flex-col gap-4 p-6 transition hover:border-white/20">
+        {HOME_FEATURES.map(({ title, description, icon: Icon, href }) => (
+          <Link key={title} href={href} className="nexus-card group flex flex-col gap-4 p-6 transition hover:border-white/20">
             <span className="flex size-11 items-center justify-center rounded-2xl border border-white/12 bg-white/5 text-zinc-100"><Icon className="size-5" /></span>
             <h3 className="text-lg font-semibold text-white">{title}</h3>
             <p className="text-sm leading-6 text-zinc-400">{description}</p>
@@ -225,7 +225,7 @@ function ResourcesPage() {
 }
 
 function CompanyPage() {
-  return <PageShell eyebrow="Company" title="Building intelligence people can actually use." description="Air Nexus creates calm, capable AI products that help people do ambitious work without losing control of the process."><div className="grid gap-5 lg:grid-cols-[1.2fr_.8fr]"><article className="nexus-card p-7 sm:p-10"><h2 className="text-2xl font-semibold">Our mission</h2><p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-400">Make advanced AI feel useful, transparent, and accessible—whether someone is studying for an exam, planning a launch, or building the next great product.</p><div className="mt-8 flex flex-wrap gap-3"><span className="nexus-pill">Human-centred</span><span className="nexus-pill">Secure by default</span><span className="nexus-pill">Built in Australia</span></div></article><div className="grid gap-5 sm:grid-cols-3 lg:grid-cols-1">{[['20+', 'AI tools'], ['3', 'Flexible plans'], ['24/7', 'AirGPT access']].map(([value, label]) => <div key={label} className="nexus-card p-6"><p className="text-4xl font-semibold nexus-gradient-text">{value}</p><p className="mt-2 text-sm text-zinc-500">{label}</p></div>)}</div></div></PageShell>
+  return <PageShell eyebrow="Company" title="Building intelligence people can actually use." description="Air Nexus creates calm, capable AI products that help people do ambitious work without losing control of the process."><div className="grid gap-5 lg:grid-cols-[1.2fr_.8fr]"><article className="nexus-card p-7 sm:p-10"><h2 className="text-2xl font-semibold">Our mission</h2><p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-400">Make advanced AI feel useful, transparent, and accessible—whether someone is studying for an exam, planning a launch, or building the next great product.</p><div className="mt-8 flex flex-wrap gap-3"><span className="nexus-pill">Human-centred</span><span className="nexus-pill">Secure by default</span><span className="nexus-pill">Built in Australia</span></div></article><div className="grid gap-5 sm:grid-cols-3 lg:grid-cols-1">{[[String(AI_TOOLS.length), 'focused tools'], ['3', 'Flexible plans'], ['24/7', 'AirGPT access']].map(([value, label]) => <div key={label} className="nexus-card p-6"><p className="text-4xl font-semibold nexus-gradient-text">{value}</p><p className="mt-2 text-sm text-zinc-500">{label}</p></div>)}</div></div></PageShell>
 }
 
 function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
@@ -233,16 +233,20 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [remember, setRemember] = useState(true)
+  const [nextPath, setNextPath] = useState('/airgpt')
 
   useEffect(() => {
     let cancelled = false
+    const destination = safeNextPath(new URLSearchParams(window.location.search).get('next'))
+    const timeoutId = window.setTimeout(() => setNextPath(destination), 0)
     void getAuthSession()
       .then((current) => {
-        if (!cancelled && current) router.replace('/airgpt')
+        if (!cancelled && current) router.replace(destination)
       })
       .catch(() => null)
     return () => {
       cancelled = true
+      window.clearTimeout(timeoutId)
     }
   }, [router])
 
@@ -263,7 +267,7 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
       } else {
         await signInWithPassword({ email, password, remember })
       }
-      router.push('/airgpt')
+      router.push(nextPath)
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Sign-in failed.')
     } finally {
@@ -276,19 +280,92 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
       <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Sign in'}<ArrowRight className="size-4" /></button></form>
     <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-white" /><span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep this Supabase session on this device.</span></span></label>
     {error && <p role="alert" className="mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
-    <p className="mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? "New to Air Nexus? " : 'Already have an account? '}<Link href={mode === 'login' ? '/signup' : '/login'} className="text-white hover:text-zinc-300">{mode === 'login' ? 'Sign up' : 'Login'}</Link></p></div></section>
+    <p className="mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? "New to Air Nexus? " : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="text-white hover:text-zinc-300">{mode === 'login' ? 'Sign up' : 'Login'}</Link></p></div></section>
 }
 function ToolPage({ slug }: { slug: string }) {
   const tool = tools.find((item) => item.slug === slug)
-  if (!tool) return <PageShell eyebrow="Product" title="Tool not found" description="That Air Nexus tool is not available yet."><Link href="/products" className="nexus-outline">Browse products</Link></PageShell>
+  if (!tool) return <PageShell eyebrow="Product" title="Tool not found" description="That Air Nexus tool does not exist."><Link href="/products" className="nexus-outline">Browse working tools</Link></PageShell>
   const Icon = tool.icon
-  return <PageShell eyebrow="Air Nexus product" title={tool.name} description={tool.description + '. Powered by the same secure AirGPT intelligence and connected workspace.'}><div className="nexus-card grid gap-8 p-7 sm:p-10 lg:grid-cols-[auto_1fr_auto] lg:items-center"><span className="flex size-20 items-center justify-center rounded-3xl bg-white/10 text-zinc-100 shadow-[0_0_45px_-12px_rgba(255,255,255,0.5)]"><Icon className="size-9" /></span><div><h2 className="text-2xl font-semibold">Built into AirGPT</h2><p className="mt-3 max-w-2xl leading-7 text-zinc-400">Use {tool.name} alongside chat, files, tasks, voice, and your Nexus Points rewards—without switching between disconnected products.</p></div><Link href="/airgpt" className="nexus-cta whitespace-nowrap">Explore AirGPT <ArrowRight className="size-4" /></Link></div></PageShell>
+  const steps = [
+    ['01', 'Add your context', tool.acceptsFiles ? 'Describe the task and attach the files AirGPT should use.' : 'Describe the task, audience, goal, and constraints.'],
+    ['02', 'Choose your format', tool.optionLabel ? 'Select ' + tool.optionLabel.toLowerCase() + ' before you run the tool.' : 'AirGPT shapes the workflow around your request.'],
+    ['03', 'Use the result', 'Copy, download, refine, or play the finished result inside your workspace.'],
+  ]
+  return (
+    <PageShell eyebrow={tool.category + ' tool · Available now'} title={tool.name} description={tool.description + '. A focused workflow inside the connected AirGPT workspace—not a placeholder or a separate product.'}>
+      <div className="grid gap-5 lg:grid-cols-[1.05fr_.95fr]">
+        <article className="nexus-card relative overflow-hidden p-7 sm:p-10">
+          <div className="absolute -right-20 -top-24 size-64 rounded-full bg-violet-500/15 blur-3xl" />
+          <div className="relative">
+            <span className="flex size-16 items-center justify-center rounded-2xl border border-violet-300/20 bg-violet-400/10 text-violet-100"><Icon className="size-7" /></span>
+            <h2 className="mt-7 text-2xl font-semibold">Start with a real brief</h2>
+            <p className="mt-3 text-sm leading-7 text-zinc-400">{tool.outputHint}</p>
+            <div className="mt-6 rounded-2xl border border-white/9 bg-black/25 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Example</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">{tool.example}</p>
+            </div>
+            <Link href={'/airgpt?tool=' + tool.slug} className="nexus-cta mt-7 px-7 py-4">Open {tool.name} <ArrowRight className="size-4" /></Link>
+          </div>
+        </article>
+        <div className="nexus-card p-6 sm:p-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">How it works</p>
+          <div className="mt-5 space-y-3">
+            {steps.map(([number, title, detail]) => (
+              <div key={number} className="flex gap-4 rounded-2xl border border-white/7 bg-white/[0.025] p-4">
+                <span className="font-mono text-xs text-cyan-200">{number}</span>
+                <div><h3 className="text-sm font-semibold text-white">{title}</h3><p className="mt-1 text-xs leading-5 text-zinc-500">{detail}</p></div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 flex flex-wrap gap-2"><span className="nexus-pill">Connected workspace</span><span className="nexus-pill">Editable output</span>{tool.acceptsFiles && <span className="nexus-pill">File-aware</span>}</div>
+        </div>
+      </div>
+    </PageShell>
+  )
 }
 
 function ToolsGrid({ compact = false }: { compact?: boolean }) {
-  return <section className={cn('mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12', compact ? 'pb-8' : '')}><div className="nexus-card p-4 sm:p-6"><div className="grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">{tools.map(({ slug, name, description, icon: Icon }) => <Link key={slug} href={`/tools/${slug}`} className="group flex min-h-24 gap-3 border-b border-white/7 p-4 transition hover:bg-white/[0.055] sm:border-r"><Icon className="mt-0.5 size-5 shrink-0 text-zinc-300 transition group-hover:scale-110 group-hover:text-white" /><span><span className="block text-sm font-medium text-zinc-100">{name}</span><span className="mt-1 block text-[11px] leading-4 text-zinc-500">{description}</span></span></Link>)}</div><div className="mt-5 flex flex-wrap gap-5 border-t border-white/7 px-3 pt-5 text-xs text-zinc-500"><Trust icon={Globe2} label="20+ AI Tools" /><Trust icon={Sparkles} label="Regularly Updated" /><Trust icon={ShieldCheck} label="Enterprise Grade" /><Trust icon={Code2} label="API Access" /></div></div></section>
-}
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<'All' | AiToolCategory>('All')
+  const categories: Array<'All' | AiToolCategory> = ['All', ...AI_TOOL_CATEGORIES]
+  const filtered = tools.filter((tool) => {
+    const search = query.trim().toLowerCase()
+    return (category === 'All' || tool.category === category) && (!search || (tool.name + ' ' + tool.description + ' ' + tool.category).toLowerCase().includes(search))
+  })
+  const shownTools = compact ? filtered.slice(0, 10) : filtered
 
+  return (
+    <section className={cn('mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12', compact ? 'py-14' : '')}>
+      {compact && <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-200">Tool studio</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">Focused AI for the work in front of you.</h2></div><Link href="/products" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-300 hover:text-white">See all {AI_TOOLS.length} tools <ArrowRight className="size-4" /></Link></div>}
+      <div className="nexus-card overflow-hidden p-3 sm:p-5">
+        {!compact && (
+          <div className="mb-5 flex flex-col gap-3 border-b border-white/7 pb-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative max-w-md flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-600" /><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search AI tools" placeholder="Search tools and workflows…" className="nexus-field pl-10" /></div>
+            <div className="scrollbar-thin flex gap-1 overflow-x-auto">
+              {categories.map((item) => <button key={item} type="button" onClick={() => setCategory(item)} className={cn('whitespace-nowrap rounded-xl px-3 py-2 text-xs font-medium transition', category === item ? 'bg-white text-black' : 'text-zinc-500 hover:bg-white/7 hover:text-white')}>{item}</button>)}
+            </div>
+          </div>
+        )}
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+          {shownTools.map((tool) => {
+            const Icon = tool.icon
+            const accent = tool.category === 'Create' ? 'from-violet-500/15 text-violet-100' : tool.category === 'Research' ? 'from-cyan-500/15 text-cyan-100' : tool.category === 'Communicate' ? 'from-amber-500/15 text-amber-100' : 'from-emerald-500/15 text-emerald-100'
+            return (
+              <Link key={tool.slug} href={'/tools/' + tool.slug} className={cn('group relative flex min-h-44 flex-col overflow-hidden rounded-2xl border border-white/7 bg-gradient-to-br to-transparent p-4 transition hover:-translate-y-1 hover:border-white/20 hover:shadow-xl hover:shadow-black/30', accent)}>
+                <div className="flex items-center justify-between"><span className="flex size-10 items-center justify-center rounded-xl border border-current/15 bg-black/15"><Icon className="size-4.5" /></span><span className="rounded-full border border-white/8 bg-black/15 px-2 py-1 text-[9px] uppercase tracking-wider text-zinc-500">{tool.category}</span></div>
+                <h3 className="mt-5 text-sm font-semibold text-white">{tool.name}</h3>
+                <p className="mt-1 text-[11px] leading-5 text-zinc-500">{tool.description}</p>
+                <span className="mt-auto flex items-center gap-1 pt-4 text-[10px] font-semibold text-zinc-400 transition group-hover:text-white">Open tool <ArrowRight className="size-3 transition group-hover:translate-x-0.5" /></span>
+              </Link>
+            )
+          })}
+        </div>
+        {shownTools.length === 0 && <div className="py-16 text-center"><Search className="mx-auto size-5 text-zinc-700" /><p className="mt-3 text-sm text-zinc-500">No tools match that search.</p></div>}
+        <div className="mt-5 flex flex-wrap gap-5 border-t border-white/7 px-3 pt-5 text-xs text-zinc-500"><Trust icon={Globe2} label={AI_TOOLS.length + ' focused tools'} /><Trust icon={Sparkles} label="Focused workflows" /><Trust icon={ShieldCheck} label="Account protected" /><Trust icon={Code2} label="Connected workspace" /></div>
+      </div>
+    </section>
+  )
+}
 function FeaturedAirGPT() {
   return <section className="mx-auto max-w-[1440px] px-5 py-6 sm:px-8 lg:px-12"><div className="nexus-card flex flex-col gap-6 border-white/15 p-6 sm:flex-row sm:items-center"><NexusLogo className="size-16 shrink-0" /><div className="flex-1"><div className="flex items-center gap-3"><h2 className="text-3xl font-semibold">AirGPT</h2><span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold text-black">AI Assistant</span></div><p className="mt-2 text-zinc-400">Your intelligent assistant for learning, content, code, research, planning, and more.</p></div><Link href="/airgpt" className="nexus-cta px-8 py-4">Explore AirGPT <ArrowRight className="size-4" /></Link></div></section>
 }

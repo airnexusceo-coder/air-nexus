@@ -304,6 +304,12 @@ function toDateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+function addDays(date: Date, days: number) {
+  const next = new Date(date)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
 function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavigate' | 'notify'>) {
   const today = new Date()
   const [viewYear, setViewYear] = useState(today.getFullYear())
@@ -319,6 +325,11 @@ function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavig
   const [eventType, setEventType] = useState<CalendarEventType>('Study')
   const [eventTime, setEventTime] = useState('')
   const [eventTaskId, setEventTaskId] = useState('')
+  const [plannerOpen, setPlannerOpen] = useState(false)
+  const [planGoal, setPlanGoal] = useState('')
+  const [planDeadline, setPlanDeadline] = useState(() => toDateKey(addDays(today, 7)))
+  const [planAvailability, setPlanAvailability] = useState('After school and evenings')
+  const [planning, setPlanning] = useState(false)
 
   const loadEvents = useCallback(async () => {
     setLoading(true)
@@ -396,6 +407,39 @@ function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavig
     }
   }
 
+  const createStudyPlan = async () => {
+    const goal = planGoal.trim()
+    if (!goal || !planDeadline || planning) return
+    setPlanning(true)
+    try {
+      const response = await fetch('/api/calendar-events/plan', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal, deadline: planDeadline, availability: planAvailability }),
+      })
+      const data = await response.json().catch(() => ({})) as { events?: CalendarEventItem[]; error?: string }
+      if (!response.ok || !Array.isArray(data.events)) throw new Error(data.error ?? 'Could not create your study plan.')
+      const plannedEvents = data.events
+      setEvents((current) => [...current, ...plannedEvents].sort((a, b) => a.eventDate.localeCompare(b.eventDate) || a.time.localeCompare(b.time)))
+      const firstEvent = plannedEvents[0]
+      if (firstEvent) {
+        const firstDate = new Date(firstEvent.eventDate + 'T00:00:00')
+        if (!Number.isNaN(firstDate.getTime())) {
+          setViewYear(firstDate.getFullYear())
+          setViewMonth(firstDate.getMonth())
+        }
+      }
+      setPlannerOpen(false)
+      setPlanGoal('')
+      notify(`${plannedEvents.length} study blocks added to your calendar`, 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not create your study plan.', 'warning')
+    } finally {
+      setPlanning(false)
+    }
+  }
+
   const removeEvent = async (id: string) => {
     const previous = events
     setEvents((current) => current.filter((event) => event.id !== id))
@@ -410,7 +454,28 @@ function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavig
 
   return (
     <div className="space-y-6">
-      <PageIntro eyebrow={monthLabel} title="Study calendar" description="See deadlines, exam dates, and focused study blocks in one calm view." action={<button type="button" onClick={() => setAdding((open) => !open)} className="primary-action"><Plus className="size-4" />Add event</button>} />
+      <PageIntro
+        eyebrow={monthLabel}
+        title="Study calendar"
+        description="See deadlines, exam dates, and focused study blocks in one calm view."
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setPlannerOpen((open) => !open)} className="secondary-action"><Sparkles className="size-4" />AI plan</button>
+            <button type="button" onClick={() => setAdding((open) => !open)} className="primary-action"><Plus className="size-4" />Add event</button>
+          </div>
+        )}
+      />
+      {plannerOpen && (
+        <div className="glass grid gap-3 rounded-2xl p-4 lg:grid-cols-[1.3fr_.8fr_1fr_auto]">
+          <input autoFocus value={planGoal} onChange={(event) => setPlanGoal(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void createStudyPlan()} aria-label="Study plan goal" placeholder="Goal, assignment, exam, or topic" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <input type="date" value={planDeadline} onChange={(event) => setPlanDeadline(event.target.value)} aria-label="Study plan deadline" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <input value={planAvailability} onChange={(event) => setPlanAvailability(event.target.value)} aria-label="Study availability" placeholder="After school, weekends, evenings..." className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <button type="button" disabled={!planGoal.trim() || planning} onClick={() => void createStudyPlan()} className="primary-action disabled:cursor-wait disabled:opacity-60">
+            {planning ? <LoaderCircle className="size-4 animate-spin" /> : <CalendarDays className="size-4" />}
+            Create blocks
+          </button>
+        </div>
+      )}
       {adding && (
         <div className="glass grid gap-3 rounded-2xl p-4 sm:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_1fr_auto]">
           <input autoFocus value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void addEvent()} aria-label="Event title" placeholder="Study session or deadline" className="rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm outline-none focus:border-white/40" />

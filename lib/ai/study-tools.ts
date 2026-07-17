@@ -1,8 +1,10 @@
 import { calculateGrade } from '@/lib/calculator-results'
 
+// Flashcards and quizzes are deliberately not tools here: lib/ai/study-artifacts.ts's
+// detectStudyIntent already routes those requests to a dedicated JSON-forcing action that
+// renders a real interactive widget. Defining them here too let this weaker, prose-only path
+// fire instead whenever a message's phrasing missed that regex, silently downgrading the result.
 export const STUDY_TOOL_LABELS = {
-  generate_flashcards: 'Flashcard Generator',
-  generate_quiz: 'Quiz Generator',
   create_exam_plan: 'Exam Planner',
   create_notes: 'Notes',
   calculate: 'Calculator',
@@ -22,8 +24,6 @@ const numberSchema = (description: string, minimum?: number, maximum?: number) =
 const prioritiesSchema = { type: 'array', items: { type: 'string' }, description: 'Subjects or tasks explicitly mentioned by the student' }
 
 export const studyToolDefinitions = [
-  { type: 'function', function: { name: 'generate_flashcards', description: 'Create active-recall flashcards when a student asks to memorise, revise, or turn material into cards.', parameters: objectSchema({ topic: textSchema('Topic or source material'), count: numberSchema('Number of cards', 3, 20), difficulty: textSchema('Student level', ['beginner', 'intermediate', 'advanced']) }, ['topic']) } },
-  { type: 'function', function: { name: 'generate_quiz', description: 'Create a practice quiz when a student wants to test knowledge.', parameters: objectSchema({ topic: textSchema('Topic to test'), question_count: numberSchema('Number of questions', 1, 10), difficulty: textSchema('Quiz difficulty', ['beginner', 'intermediate', 'advanced']) }, ['topic']) } },
   { type: 'function', function: { name: 'create_exam_plan', description: 'Build revision steps for a named exam with a supplied date or timeframe.', parameters: objectSchema({ exam: textSchema('Exam name or subject'), exam_date: textSchema('Date exactly as provided, or empty'), topics: prioritiesSchema }, ['exam']) } },
   { type: 'function', function: { name: 'create_notes', description: 'Transform supplied material into structured study notes.', parameters: objectSchema({ topic: textSchema('Topic or material'), format: textSchema('Note format', ['outline', 'cornell', 'summary', 'cheat-sheet']) }, ['topic']) } },
   { type: 'function', function: { name: 'calculate', description: 'Evaluate arithmetic accurately instead of estimating it.', parameters: objectSchema({ expression: textSchema('Expression using numbers, +, -, *, /, %, ^, parentheses, sqrt, abs, round, floor, or ceil') }, ['expression']) } },

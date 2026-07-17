@@ -15,6 +15,8 @@ import { ProductionPage } from '@/components/business-empire/production-page'
 import { PricingPage } from '@/components/business-empire/pricing-page'
 import { AdvertisingPage } from '@/components/business-empire/advertising-page'
 import { CompetitorsPage } from '@/components/business-empire/competitors-page'
+import { ReputationPage } from '@/components/business-empire/reputation-page'
+import { FundingPage } from '@/components/business-empire/funding-page'
 import { FinancesPage } from '@/components/business-empire/finances-page'
 import { AnnualReportsPage } from '@/components/business-empire/annual-reports-page'
 import { AnnualReportView } from '@/components/business-empire/annual-report-view'
@@ -22,12 +24,14 @@ import { LearningCentre } from '@/components/business-empire/learning-centre'
 import { CompleteYearModal } from '@/components/business-empire/complete-year-modal'
 import type { BusinessEmpireView } from '@/components/business-empire/nav-items'
 import {
+  applyForLoan,
   applyUnsoldInventoryAction,
   completeFinancialYear,
   completeLesson,
   createInitialState,
   createProduct,
   discontinueProduct,
+  investInCommunityProject,
   launchAdvertisingCampaign,
   manufactureMoreUnits,
   purchaseResearch,
@@ -38,7 +42,7 @@ import {
 } from '@/lib/business-empire/game-state'
 import { clearGameState, hasSavedGame, loadGameState, saveGameState } from '@/lib/business-empire/storage'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
-import type { AdvertisingChannel, AnnualReport, GamePreferences, GameState, ResearchLevel, UnsoldInventoryAction } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, AnnualReport, GamePreferences, GameState, LoanPurpose, ResearchLevel, UnsoldInventoryAction } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
@@ -167,6 +171,25 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
     setGameState((current) => updatePreferences(current, partial))
   }
 
+  const handleInvestInCommunity = (budget: number) => {
+    const result = investInCommunityProject(gameState, budget)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Community and environmental initiative funded.', 'success')
+    return {}
+  }
+
+  const handleApplyForLoan = (amount: number, purpose: LoanPurpose) => {
+    const result = applyForLoan(gameState, amount, purpose)
+    if (result.approved) {
+      setGameState(result.state)
+      notify?.(`Loan of ${formatCurrency(amount)} approved.`, 'success')
+    } else if (result.error) {
+      notify?.(result.error, 'warning')
+    }
+    return { error: result.error, approved: result.approved }
+  }
+
   const handleConfirmCompleteYear = () => {
     const { state: next, report } = completeFinancialYear(gameState)
     setGameState(next)
@@ -226,6 +249,8 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
             {view === 'pricing' && <PricingPage state={gameState} onUpdatePrice={handleUpdatePrice} />}
             {view === 'advertising' && <AdvertisingPage state={gameState} onLaunch={handleLaunchAdvertising} />}
             {view === 'competitors' && <CompetitorsPage state={gameState} />}
+            {view === 'reputation' && <ReputationPage state={gameState} onInvestInCommunity={handleInvestInCommunity} />}
+            {view === 'funding' && <FundingPage state={gameState} onApplyForLoan={handleApplyForLoan} />}
             {view === 'finances' && <FinancesPage state={gameState} />}
             {view === 'annual-reports' && <AnnualReportsPage state={gameState} />}
             {view === 'learn' && <LearningCentre completedLessonIds={gameState.completedLessonIds} onCompleteLesson={handleCompleteLesson} />}

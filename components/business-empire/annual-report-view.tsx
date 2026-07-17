@@ -36,7 +36,9 @@ export function AnnualReportView({ report }: AnnualReportViewProps) {
           <LedgerRow label="Research costs" value={-report.researchCosts} />
           <LedgerRow label="Advertising costs" value={-report.advertisingCosts} />
           <LedgerRow label="Employee wages" value={-report.wages} />
-          <LedgerRow label="Rent & operating costs" value={-report.rent} />
+          <LedgerRow label="Rent" value={-report.rent} />
+          <LedgerRow label="Storage, insurance & maintenance" value={-report.operatingCosts} />
+          {report.loanRepayments > 0 && <LedgerRow label="Loan repayments" value={-report.loanRepayments} />}
           <LedgerRow label="Taxes" value={-report.taxes} />
           <LedgerRow label="Refunds & returns" value={-report.refunds} />
           <div className="my-2 h-px bg-white/10" />
@@ -82,6 +84,15 @@ export function AnnualReportView({ report }: AnnualReportViewProps) {
               </tbody>
             </table>
           </div>
+        </section>
+      )}
+
+      {report.factorNotes.length > 0 && (
+        <section>
+          <h3 className="text-sm font-semibold text-white">Other factors that affected this year</h3>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-slate-300">
+            {report.factorNotes.map((note, index) => <li key={index}>{note}</li>)}
+          </ul>
         </section>
       )}
 

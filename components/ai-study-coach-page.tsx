@@ -30,6 +30,7 @@ type AiStudyCoachPageProps = {
   transactions: NexusTransaction[]
   onNavigate: (section: string) => void
   notify: (message: string, tone?: NoticeTone) => void
+  embedded?: boolean
 }
 
 type CoachMessage = { role: 'user' | 'assistant'; content: string }
@@ -314,7 +315,7 @@ function priorityClasses(priority: CoachPriority) {
   return 'bg-amber-400/10 text-amber-200'
 }
 
-export function AiStudyCoachPage({ profileName, transactions, onNavigate, notify }: AiStudyCoachPageProps) {
+export function AiStudyCoachPage({ profileName, transactions, onNavigate, notify, embedded = false }: AiStudyCoachPageProps) {
   const profileKey = profileName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'student'
   const assignmentStorageKey = `airnexus-assignment-workspaces-v1:${profileKey}`
   const cacheKey = `${COACH_CACHE_PREFIX}:${profileKey}`
@@ -400,6 +401,69 @@ export function AiStudyCoachPage({ profileName, transactions, onNavigate, notify
   const currentPlan = plan ?? fallbackCoachPlan(firstName, snapshot, assignments)
   const riskLabel = currentPlan.burnout.level === 'unknown' ? 'Not enough evidence' : currentPlan.burnout.level === 'low' ? 'Load looks balanced' : currentPlan.burnout.level === 'watch' ? 'Watch your workload' : 'High overload signal'
 
+  if (embedded) {
+    return (
+      <section className="space-y-5" aria-labelledby="dashboard-coach-title">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="max-w-3xl">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/7 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-300"><Compass className="size-3.5" /> Integrated AI coach</span>
+            <h3 id="dashboard-coach-title" className="mt-3 text-2xl font-semibold tracking-tight text-white sm:text-3xl">{currentPlan.headline}</h3>
+            <p className="mt-3 text-sm leading-7 text-slate-400">{currentPlan.progressSummary}</p>
+          </div>
+          <button type="button" onClick={() => void generateCoachPlan(true)} disabled={loading} className="secondary-action self-start">
+            {loading ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{loading ? 'Analysing…' : 'Refresh coach'}
+          </button>
+        </div>
+
+        {error && <p role="alert" className="flex items-start gap-2 rounded-2xl border border-amber-300/20 bg-amber-400/8 px-4 py-3 text-sm text-amber-100"><AlertTriangle className="mt-0.5 size-4 shrink-0" />{error}. Showing an activity-based coach view.</p>}
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'Active days', value: snapshot.activeDaysThisWeek, detail: 'this week', icon: Activity },
+            { label: 'Study actions', value: snapshot.studyActionsThisWeek, detail: 'this week', icon: TrendingUp },
+            { label: 'Assignments due', value: snapshot.assignmentsDueSoon, detail: 'next 7 days', icon: Target },
+            { label: 'Assignment progress', value: `${snapshot.averageAssignmentProgress}%`, detail: 'average', icon: Award },
+          ].map((metric) => { const Icon = metric.icon; return <article key={metric.label} className="rounded-2xl border border-white/8 bg-white/[0.035] p-4"><div className="flex items-center justify-between"><span className="text-xs text-slate-500">{metric.label}</span><Icon className="size-4 text-zinc-300" /></div><p className="mt-3 text-2xl font-semibold text-white">{metric.value}</p><p className="mt-1 text-xs text-slate-500">{metric.detail}</p></article> })}
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+          <section className={cn('rounded-3xl border p-5 sm:p-6', riskClasses(currentPlan.burnout.level))}>
+            <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] opacity-70">Workload signal</p><h4 className="mt-1 text-lg font-semibold">{riskLabel}</h4></div><AlertTriangle className="size-5" /></div>
+            <p className="mt-4 text-sm leading-6 opacity-85">{currentPlan.burnout.recommendation}</p>
+            {currentPlan.burnout.signals.length > 0 && <div className="mt-4 space-y-2">{currentPlan.burnout.signals.map((signal, index) => <p key={`${signal}-${index}`} className="rounded-xl bg-black/10 px-3 py-2 text-xs leading-5 opacity-80">{signal}</p>)}</div>}
+            <p className="mt-4 text-[10px] leading-4 opacity-60">This is a workload signal, not a medical assessment.</p>
+          </section>
+
+          <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-300">Next best blocks</p><h4 className="mt-1 text-lg font-semibold text-white">Study sessions to start from Dashboard</h4></div><button type="button" onClick={() => onNavigate('AI Tutor')} className="secondary-action text-xs">Open tutor</button></div>
+            <div className="mt-5 grid gap-3 lg:grid-cols-2">
+              {currentPlan.studySessions.slice(0, 4).map((session, index) => <article key={`${session.subject}-${session.focus}-${index}`} className="rounded-2xl border border-white/8 bg-black/15 p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">{session.subject}</p><h5 className="mt-2 font-semibold text-white">{session.focus}</h5></div><span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs text-slate-300"><Clock3 className="size-3" />{session.durationMinutes}m</span></div><p className="mt-3 text-sm leading-6 text-slate-400">{session.method}</p><p className="mt-2 text-xs leading-5 text-slate-500">Why now: {session.why}</p></article>)}
+            </div>
+          </section>
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-2">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+            <div className="flex items-center gap-3"><Coffee className="size-5 text-emerald-300" /><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Recovery plan</p><h4 className="mt-1 font-semibold text-white">Recommended breaks</h4></div></div>
+            <div className="mt-5 space-y-3">{currentPlan.breaks.slice(0, 3).map((item, index) => <article key={`${item.afterMinutes}-${item.durationMinutes}-${index}`} className="flex items-start gap-4 rounded-2xl border border-white/8 bg-black/15 p-4"><span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-400/10 text-sm font-semibold text-emerald-200">{item.durationMinutes}m</span><div><p className="text-sm font-medium text-white">Break after {item.afterMinutes} minutes</p><p className="mt-1 text-xs leading-5 text-slate-500">{item.reason}</p></div></article>)}</div>
+          </section>
+
+          <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+            <div className="flex items-center gap-3"><BookOpen className="size-5 text-sky-300" /><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">Priority subjects</p><h4 className="mt-1 font-semibold text-white">Where attention will pay off</h4></div></div>
+            <div className="mt-5 space-y-3">{currentPlan.recommendedSubjects.length === 0 ? <p className="rounded-2xl border border-dashed border-white/10 p-4 text-sm leading-6 text-slate-500">Add assignments or study conversations and the coach will adapt automatically.</p> : currentPlan.recommendedSubjects.slice(0, 4).map((item) => <article key={item.subject} className="rounded-2xl border border-white/8 bg-black/15 p-4"><div className="flex items-center justify-between gap-3"><strong className="text-sm text-white">{item.subject}</strong><span className={cn('rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase', priorityClasses(item.priority))}>{item.priority}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{item.reason}</p></article>)}</div>
+          </section>
+        </div>
+
+        {(currentPlan.revisionAdjustments.length > 0 || currentPlan.milestones.length > 0) && (
+          <div className="grid gap-5 xl:grid-cols-2">
+            {currentPlan.revisionAdjustments.length > 0 && <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 sm:p-6"><div className="flex items-center gap-3"><CalendarClock className="size-5 text-zinc-300" /><h4 className="font-semibold text-white">Adaptive revision changes</h4></div><div className="mt-5 grid gap-3">{currentPlan.revisionAdjustments.slice(0, 4).map((item, index) => <article key={`${item.subject}-${index}`} className="rounded-2xl border border-white/8 bg-black/15 p-4"><p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">{item.subject}</p><p className="mt-2 text-sm font-medium text-white">{item.change}</p><p className="mt-2 text-xs leading-5 text-slate-500">{item.reason}</p></article>)}</div></section>}
+            {currentPlan.milestones.length > 0 && <section className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 sm:p-6"><div className="flex items-center gap-3"><Award className="size-5 text-yellow-300" /><h4 className="font-semibold text-white">Coach milestones</h4></div><div className="mt-4 space-y-2">{currentPlan.milestones.slice(0, 4).map((milestone, index) => <p key={`${milestone}-${index}`} className="flex items-start gap-2 rounded-xl bg-yellow-400/8 px-3 py-2 text-sm leading-6 text-yellow-100"><CheckCircle2 className="mt-1 size-4 shrink-0" />{milestone}</p>)}</div></section>}
+          </div>
+        )}
+      </section>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <section className="relative overflow-hidden rounded-[2rem] border border-white/15 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.1),transparent_42%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,0.99))] p-6 sm:p-8">
@@ -420,7 +484,7 @@ export function AiStudyCoachPage({ profileName, transactions, onNavigate, notify
         <section className="glass rounded-3xl p-5 sm:p-6">
           <div className="flex items-center gap-3"><span className="flex size-11 items-center justify-center rounded-2xl bg-white/12 text-white"><BrainCircuit className="size-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-300">Progress analysis</p><h3 className="mt-1 text-lg font-semibold text-white">What the coach sees</h3></div></div>
           <p className="mt-5 text-sm leading-7 text-slate-300">{currentPlan.progressSummary}</p>
-          <button type="button" onClick={() => onNavigate('Daily Dashboard')} className="mt-5 inline-flex items-center gap-1 text-xs font-semibold text-white hover:text-zinc-300">Open detailed progress <ArrowRight className="size-3.5" /></button>
+          <button type="button" onClick={() => onNavigate('Dashboard')} className="mt-5 inline-flex items-center gap-1 text-xs font-semibold text-white hover:text-zinc-300">Open detailed progress <ArrowRight className="size-3.5" /></button>
         </section>
 
         <section className={cn('rounded-3xl border p-5 sm:p-6', riskClasses(currentPlan.burnout.level))}>

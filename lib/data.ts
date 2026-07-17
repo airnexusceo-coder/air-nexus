@@ -6,7 +6,6 @@ import {
   Users,
   BookOpen,
   ClipboardList,
-  Compass,
   CheckSquare,
   Calendar,
   Calculator,
@@ -38,11 +37,8 @@ export type NavGroup = {
 }
 
 /**
- * Grouped for the sidebar's information architecture. Every item from the
- * original flat list is still here under a new group — nothing removed,
- * only organized. Section routing keys off `label` strings elsewhere
- * (see SectionWorkspace in workspace.tsx), so group membership/order here
- * is purely presentational.
+ * Grouped primary sidebar navigation. Dedicated function tools live in the
+ * sidebar Other Functions dropdown, so they do not appear as duplicate nav rows.
  */
 export const navGroups: NavGroup[] = [
   {
@@ -57,7 +53,6 @@ export const navGroups: NavGroup[] = [
     items: [
       { label: 'AI Tutor', icon: GraduationCap },
       { label: 'AI Chat', icon: MessageSquareText },
-      { label: 'Study Coach', icon: Compass },
       { label: 'Courses', icon: BookOpen },
       { label: 'Market Masters', icon: TrendingUp },
       { label: 'Business Empire', icon: Briefcase },

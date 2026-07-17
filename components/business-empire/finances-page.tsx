@@ -17,6 +17,7 @@ const CATEGORY_LABEL: Record<CashTransactionCategory, string> = {
   ADVERTISING_COST: 'Advertising cost',
   WAGES: 'Wages',
   RENT: 'Rent',
+  OPERATING_COSTS: 'Operating costs',
   SALES_REVENUE: 'Sales revenue',
   TAX: 'Tax',
   REFUND: 'Refund',

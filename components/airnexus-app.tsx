@@ -24,6 +24,8 @@ import {
 import { getMotivationStats, loadMotivationState, recordMotivationActivity, type MotivationCelebration } from '@/lib/motivation'
 import { avatarGradientFor, getCosmetic, type CosmeticCategory } from '@/lib/cosmetics'
 import { COURSE_PURCHASE_COST } from '@/lib/courses/vce-catalog'
+import { AI_TOOLS, isAiToolSlug } from '@/lib/ai-tools/catalog'
+import { navItems } from '@/lib/data'
 
 export type AppDialog = 'upgrade-required' | 'insufficient-points' | 'profile' | 'nexus-tutorial' | null
 export type NoticeTone = 'success' | 'info' | 'warning'
@@ -72,6 +74,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const streakStorageKey = `${STREAK_REWARD_STORAGE_KEY}:${authUser.id}`
   const tutorialStorageKey = `${NEXUS_TUTORIAL_STORAGE_KEY}:${authUser.id}`
   const [activeSection, setActiveSection] = useState('AI Chat')
+  const [activeToolSlug, setActiveToolSlug] = useState<string | null>(null)
   const [mainChatOpen, setMainChatOpen] = useState(true)
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null)
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
@@ -104,6 +107,26 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [motivationCelebration, setMotivationCelebration] = useState<MotivationCelebration | null>(null)
   const [hasStripeSubscription, setHasStripeSubscription] = useState(false)
   const [billingBusy, setBillingBusy] = useState(false)
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search)
+      const tool = params.get('tool')
+      if (isAiToolSlug(tool)) {
+        setActiveToolSlug(tool)
+        setActiveSection('AI Tools')
+        setMainChatOpen(false)
+        return
+      }
+      const rawSection = params.get('section')
+      const section = rawSection === 'Study Coach' ? 'Dashboard' : rawSection
+      if (!section || section === 'Settings' || !navItems.some((item) => item.label === section)) return
+      setActiveToolSlug(null)
+      setActiveSection(section)
+      setMainChatOpen(section === 'AI Chat')
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
 
 
   useEffect(() => {
@@ -273,7 +296,20 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     setSidebarOpen(false)
   }
 
-  const navigate = (section: string) => {
+  const openTool = useCallback((slug: string) => {
+    if (!isAiToolSlug(slug)) return
+    setActiveToolSlug(slug)
+    setActiveSection('AI Tools')
+    setMainChatOpen(false)
+    setSidebarOpen(false)
+    const url = new URL(window.location.href)
+    url.searchParams.set('tool', slug)
+    url.searchParams.delete('section')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [])
+
+  const navigate = (requestedSection: string) => {
+    const section = requestedSection === 'Study Coach' ? 'Dashboard' : requestedSection
     if (section === 'Settings') {
       setDialog('profile')
       setSidebarOpen(false)
@@ -285,11 +321,24 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       requestUpgrade(section, requiredPlan)
       return
     }
+    if (section === 'AI Tools') {
+      const nextToolSlug = activeToolSlug ?? AI_TOOLS[0]?.slug ?? null
+      setActiveToolSlug(nextToolSlug)
+      if (nextToolSlug) {
+        const url = new URL(window.location.href)
+        url.searchParams.set('tool', nextToolSlug)
+        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+      }
+    } else {
+      setActiveToolSlug(null)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('tool')
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    }
     setActiveSection(section)
     setMainChatOpen(section === 'AI Chat')
     setSidebarOpen(false)
   }
-
   const openMainChat = () => {
     setActiveSection((section) => (section === 'AI Chat' ? section : 'Documents'))
     setMainChatOpen(true)
@@ -542,7 +591,8 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const equippedBadgeCosmetic = getCosmetic(equippedBadge)
 
   return (
-    <div className={cn('relative flex h-[var(--app-height,100dvh)] w-full overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] lg:h-dvh lg:pb-0', focusMode && 'focus-mode')}>
+    <div className={cn('relative flex h-[var(--app-height,100dvh)] w-full overflow-hidden bg-[linear-gradient(135deg,oklch(0.075_0.012_260),oklch(0.11_0.018_235)_46%,oklch(0.085_0.014_175))] pb-[calc(4rem+env(safe-area-inset-bottom))] text-white lg:h-dvh lg:pb-0', focusMode && 'focus-mode')}>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.025)_1px,transparent_1px)] bg-[size:52px_52px] opacity-35" />
       <AppSidebar
         active={activeSection}
         activeRoomId={activeRoomId}
@@ -550,6 +600,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         nexusPoints={nexusPoints}
         profileName={profileName}
         motivationUserId={authUser.id}
+        activeToolSlug={activeToolSlug}
         avatarGradient={avatarGradientFor(equippedAvatar)}
         badge={getCosmetic(equippedBadge)}
         mobileOpen={sidebarOpen}
@@ -557,6 +608,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         onCloseMobile={() => setSidebarOpen(false)}
         onToggleDesktopCollapse={() => setSidebarCollapsed((collapsed) => !collapsed)}
         onNavigate={navigate}
+        onSelectTool={openTool}
         onSelectRoom={(roomId) => {
           setActiveRoomId(roomId)
           setActiveSection('Collaboration Rooms')
@@ -576,6 +628,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
 
       <Workspace
         activeSection={activeSection}
+        activeToolSlug={activeToolSlug}
         mainChatOpen={mainChatOpen}
         onOpenMainChat={openMainChat}
         onCloseMainChat={closeMainChat}

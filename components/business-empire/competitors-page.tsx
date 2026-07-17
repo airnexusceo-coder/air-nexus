@@ -17,7 +17,7 @@ export function CompetitorsPage({ state }: CompetitorsPageProps) {
     <div className="space-y-5">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-semibold text-white"><Swords className="size-5 text-amber-300" />Competitors</h1>
-        <p className="mt-1 text-sm text-slate-400">Fictional companies in your industry — they set their own prices, adjust quality, and react to the market every year, just like you do.</p>
+        <p className="mt-1 text-sm text-slate-400">Fictional companies in your industry — they set their own prices, invest in advertising, occasionally improve their quality, and react to the market every year, just like you do.</p>
       </div>
 
       <div className="glass flex items-center justify-between rounded-2xl p-4">
@@ -33,7 +33,7 @@ export function CompetitorsPage({ state }: CompetitorsPageProps) {
 
       <div className="overflow-x-auto rounded-2xl border border-white/10">
         <table className="w-full min-w-[640px] text-left text-sm">
-          <caption className="sr-only">Competitor comparison: name, price, quality, market share, reputation, strengths, and weaknesses.</caption>
+          <caption className="sr-only">Competitor comparison: name, price, quality, market share, reputation, advertising intensity, strengths, and weaknesses.</caption>
           <thead>
             <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
               <th scope="col" className="px-4 py-2.5 font-medium">Company</th>
@@ -41,6 +41,7 @@ export function CompetitorsPage({ state }: CompetitorsPageProps) {
               <th scope="col" className="px-4 py-2.5 font-medium">Quality</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Market share</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Reputation</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Advertising</th>
               <th scope="col" className="px-4 py-2.5 font-medium">Strengths &amp; weaknesses</th>
             </tr>
           </thead>
@@ -52,6 +53,7 @@ export function CompetitorsPage({ state }: CompetitorsPageProps) {
                 <td className="px-4 py-2.5 capitalize text-slate-300">{competitor.quality}</td>
                 <td className="px-4 py-2.5 text-slate-300">{competitor.marketShare}%</td>
                 <td className={cn('px-4 py-2.5 font-medium', competitor.reputation >= 60 ? 'text-emerald-300' : competitor.reputation < 40 ? 'text-rose-300' : 'text-slate-300')}>{competitor.reputation}/100</td>
+                <td className="px-4 py-2.5 text-slate-300">{competitor.advertisingIntensity >= 0.5 ? 'Heavy' : competitor.advertisingIntensity >= 0.3 ? 'Moderate' : 'Light'}</td>
                 <td className="px-4 py-2.5 text-xs text-slate-400">
                   <p className="text-emerald-300/80">+ {competitor.strengths.join(', ')}</p>
                   <p className="text-rose-300/80">− {competitor.weaknesses.join(', ')}</p>

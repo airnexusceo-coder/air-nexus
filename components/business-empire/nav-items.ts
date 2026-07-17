@@ -6,9 +6,11 @@ import {
   FlaskConical,
   Globe2,
   GraduationCap,
+  Landmark,
   Layers,
   Megaphone,
   Settings as SettingsIcon,
+  Star,
   Swords,
   Wallet,
   type LucideIcon,
@@ -23,6 +25,8 @@ export type BusinessEmpireView =
   | 'pricing'
   | 'advertising'
   | 'competitors'
+  | 'reputation'
+  | 'funding'
   | 'finances'
   | 'annual-reports'
   | 'learn'
@@ -39,6 +43,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'pricing', label: 'Pricing', icon: Wallet },
   { id: 'advertising', label: 'Advertising', icon: Megaphone },
   { id: 'competitors', label: 'Competitors', icon: Swords },
+  { id: 'reputation', label: 'Reputation', icon: Star },
+  { id: 'funding', label: 'Funding', icon: Landmark },
   { id: 'finances', label: 'Finances', icon: BarChart3 },
   { id: 'annual-reports', label: 'Annual Reports', icon: Award },
   { id: 'learn', label: 'Learning Centre', icon: GraduationCap },
