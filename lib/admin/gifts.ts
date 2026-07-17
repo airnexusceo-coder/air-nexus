@@ -12,7 +12,7 @@ function encode(value: string) {
 
 const PLAN_RANK: Record<NexusPlan, number> = { Free: 0, Plus: 1, Premium: 2 }
 const MAX_GIFT_DAYS = 3650
-const MAX_POINTS_GIFT = 1_000_000
+const MAX_POINTS_ADJUSTMENT = 1_000_000
 
 type ProfileGiftRow = {
   plan: string | null
@@ -70,19 +70,35 @@ function effectivePlanFor(row: ProfileGiftRow | undefined): Pick<AdminGrantStatu
 }
 
 async function fetchProfileGiftRow(userId: string): Promise<ProfileGiftRow | undefined> {
-  const response = await supabaseServiceFetch(
-    `/profiles?user_id=eq.${encode(userId)}&select=plan,plan_expires_at,subscription_status,admin_granted_plan,admin_plan_expires_at`,
-  )
-  const rows = await readSupabaseRestJson<ProfileGiftRow[]>(response, 'Failed to load user plan grants')
-  return rows[0]
+  try {
+    const response = await supabaseServiceFetch(
+      `/profiles?user_id=eq.${encode(userId)}&select=plan,plan_expires_at,subscription_status,admin_granted_plan,admin_plan_expires_at`,
+    )
+    const rows = await readSupabaseRestJson<ProfileGiftRow[]>(response, 'Failed to load user plan grants')
+    return rows[0]
+  } catch (error) {
+    if (!(error instanceof SupabaseRequestError)) throw error
+    const response = await supabaseServiceFetch(`/profiles?user_id=eq.${encode(userId)}&select=plan,plan_expires_at,subscription_status`)
+    const rows = await readSupabaseRestJson<Array<Omit<ProfileGiftRow, 'admin_granted_plan' | 'admin_plan_expires_at'>>>(response, 'Failed to load user plan grants')
+    const row = rows[0]
+    return row ? { ...row, admin_granted_plan: null, admin_plan_expires_at: null } : undefined
+  }
 }
 
 async function fetchPendingPointGrantSummary(userId: string): Promise<{ pendingNexusPoints: number; pendingGrantCount: number }> {
-  const response = await supabaseServiceFetch(`/nexus_point_grants?user_id=eq.${encode(userId)}&claimed_at=is.null&select=amount`)
-  const rows = await readSupabaseRestJson<PendingGrantRow[]>(response, 'Failed to load Nexus Points grants')
-  return {
-    pendingNexusPoints: rows.reduce((total, row) => total + (Number.isFinite(row.amount) ? row.amount : 0), 0),
-    pendingGrantCount: rows.length,
+  try {
+    const response = await supabaseServiceFetch(`/nexus_point_grants?user_id=eq.${encode(userId)}&claimed_at=is.null&select=amount`)
+    const rows = await readSupabaseRestJson<PendingGrantRow[]>(response, 'Failed to load Nexus Points grants')
+    return {
+      pendingNexusPoints: rows.reduce((total, row) => total + (Number.isFinite(row.amount) ? row.amount : 0), 0),
+      pendingGrantCount: rows.length,
+    }
+  } catch (error) {
+    // Keep admin user lists usable before the latest Supabase migrations are applied.
+    if (error instanceof SupabaseRequestError && error.message.toLowerCase().includes('nexus_point_grants')) {
+      return { pendingNexusPoints: 0, pendingGrantCount: 0 }
+    }
+    throw error
   }
 }
 
@@ -141,13 +157,20 @@ export async function revokeGiftSubscription(admin: AdminUser, userId: string): 
   return getUserGrantStatus(userId)
 }
 
-export async function grantNexusPoints(admin: AdminUser, userId: string, amount: number, description: string): Promise<AdminGrantStatus> {
-  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_POINTS_GIFT) {
-    throw new SupabaseRequestError(`Enter a Nexus Points amount between 1 and ${MAX_POINTS_GIFT.toLocaleString()}.`, 400)
+async function writeNexusPointsAdjustment(
+  admin: AdminUser,
+  userId: string,
+  signedAmount: number,
+  description: string,
+  action: 'nexus_points.grant' | 'nexus_points.remove',
+): Promise<AdminGrantStatus> {
+  if (!Number.isFinite(signedAmount) || signedAmount === 0 || Math.abs(signedAmount) > MAX_POINTS_ADJUSTMENT) {
+    throw new SupabaseRequestError(`Enter a Nexus Points amount between 1 and ${MAX_POINTS_ADJUSTMENT.toLocaleString()}.`, 400)
   }
-  const roundedAmount = Math.round(amount)
-  const trimmedDescription = description.trim() || 'Admin Nexus Points gift'
-  if (trimmedDescription.length > 160) throw new SupabaseRequestError('Gift note must be 160 characters or fewer.', 400)
+  const roundedAmount = Math.round(signedAmount)
+  const fallback = roundedAmount > 0 ? 'Admin Nexus Points gift' : 'Admin Nexus Points removal'
+  const trimmedDescription = description.trim() || fallback
+  if (trimmedDescription.length > 160) throw new SupabaseRequestError('Adjustment note must be 160 characters or fewer.', 400)
 
   const response = await supabaseServiceFetch('/nexus_point_grants', {
     method: 'POST',
@@ -159,9 +182,29 @@ export async function grantNexusPoints(admin: AdminUser, userId: string, amount:
       granted_by: admin.id,
     }),
   })
-  const rows = await readSupabaseRestJson<unknown[]>(response, 'Could not gift Nexus Points')
-  if (rows.length === 0) throw new SupabaseRequestError('Could not create Nexus Points gift.', 502)
 
-  await recordAuditLog(admin, 'nexus_points.grant', 'user', userId, { amount: roundedAmount, description: trimmedDescription })
+  let rows: unknown[]
+  try {
+    rows = await readSupabaseRestJson<unknown[]>(response, roundedAmount > 0 ? 'Could not gift Nexus Points' : 'Could not remove Nexus Points')
+  } catch (error) {
+    if (error instanceof SupabaseRequestError) {
+      const message = error.message.toLowerCase()
+      if (message.includes('nexus_point_grants') || message.includes('amount') || message.includes('constraint')) {
+        throw new SupabaseRequestError('Nexus Points admin controls need the latest Supabase migrations applied: 0019_admin_gifts.sql and 0020_nexus_point_adjustments.sql.', 503)
+      }
+    }
+    throw error
+  }
+  if (rows.length === 0) throw new SupabaseRequestError('Could not create Nexus Points adjustment.', 502)
+
+  await recordAuditLog(admin, action, 'user', userId, { amount: Math.abs(roundedAmount), signedAmount: roundedAmount, description: trimmedDescription })
   return getUserGrantStatus(userId)
+}
+
+export async function grantNexusPoints(admin: AdminUser, userId: string, amount: number, description: string): Promise<AdminGrantStatus> {
+  return writeNexusPointsAdjustment(admin, userId, Math.abs(amount), description, 'nexus_points.grant')
+}
+
+export async function removeNexusPoints(admin: AdminUser, userId: string, amount: number, description: string): Promise<AdminGrantStatus> {
+  return writeNexusPointsAdjustment(admin, userId, -Math.abs(amount), description, 'nexus_points.remove')
 }

@@ -29,11 +29,11 @@ export async function claimNexusPointGrants(userId: string): Promise<ClaimedNexu
       body: JSON.stringify({ claimed_at: new Date().toISOString() }),
     },
   )
-  const rows = await readSupabaseRestJson<ClaimedGrantRow[]>(response, 'Could not claim Nexus Points gifts')
+  const rows = await readSupabaseRestJson<ClaimedGrantRow[]>(response, 'Could not claim Nexus Points adjustments')
   return rows.map((row) => ({
     id: row.id,
     amount: row.amount,
-    description: row.description || 'Admin Nexus Points gift',
+    description: row.description || (row.amount >= 0 ? 'Admin Nexus Points gift' : 'Admin Nexus Points removal'),
     createdAt: row.created_at,
   }))
 }

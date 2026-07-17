@@ -227,13 +227,17 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       void fetch('/api/profile/nexus-grants/claim', { method: 'POST', credentials: 'include' })
         .then((response) => response.ok ? response.json() as Promise<{ grants: Array<{ id: string; amount: number; description: string; createdAt: string }>; total: number }> : null)
         .then((data) => {
-          if (!data || data.total <= 0) return
-          setNexusPoints((points) => points + data.total)
+          if (!data || data.grants.length === 0) return
+          const positiveTotal = data.grants.reduce((sum, grant) => sum + Math.max(0, grant.amount), 0)
+          const negativeTotal = data.grants.reduce((sum, grant) => sum + Math.max(0, -grant.amount), 0)
+          setNexusPoints((points) => Math.max(0, points + data.total))
           setTransactions((current) => [
-            ...data.grants.map((grant) => createTransaction('earned', grant.amount, grant.description || 'Admin Nexus Points gift')),
+            ...data.grants.map((grant) => createTransaction(grant.amount >= 0 ? 'earned' : 'spent', Math.abs(grant.amount), grant.description || (grant.amount >= 0 ? 'Admin Nexus Points gift' : 'Admin Nexus Points removal'))),
             ...current,
           ])
-          notify(`Admin gift claimed: +${data.total.toLocaleString()} Nexus Points`, 'success')
+          if (positiveTotal > 0 && negativeTotal > 0) notify(`Admin point adjustments applied: +${positiveTotal.toLocaleString()} / -${negativeTotal.toLocaleString()} Nexus Points`, 'success')
+          else if (positiveTotal > 0) notify(`Admin gift claimed: +${positiveTotal.toLocaleString()} Nexus Points`, 'success')
+          else notify(`Admin removal applied: -${negativeTotal.toLocaleString()} Nexus Points`, 'warning')
         })
         .catch(() => undefined)
     }, 0)

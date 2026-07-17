@@ -33,6 +33,11 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function formatSignedPoints(value: number) {
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${Math.abs(value).toLocaleString()}`
+}
+
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [users, setUsers] = useState<AdminUserView[]>([])
@@ -40,7 +45,7 @@ export default function AdminDashboardPage() {
   const [giftPlan, setGiftPlan] = useState<PaidPlan>('Plus')
   const [giftDays, setGiftDays] = useState('30')
   const [pointsAmount, setPointsAmount] = useState('500')
-  const [pointsDescription, setPointsDescription] = useState('Dashboard Nexus Points gift')
+  const [pointsDescription, setPointsDescription] = useState('Dashboard Nexus Points adjustment')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ tone: 'success' | 'warning'; text: string } | null>(null)
 
@@ -64,7 +69,7 @@ export default function AdminDashboardPage() {
     return () => window.clearTimeout(timeoutId)
   }, [load])
 
-  const runPower = async (kind: 'plan' | 'points') => {
+  const runPower = async (kind: 'plan' | 'grant-points' | 'remove-points') => {
     if (!selectedUser) return
     setBusy(true)
     setMessage(null)
@@ -75,14 +80,14 @@ export default function AdminDashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(kind === 'plan'
           ? { action: 'gift', plan: giftPlan, durationDays: Number(giftDays) }
-          : { amount: Number(pointsAmount), description: pointsDescription }),
+          : { action: kind === 'remove-points' ? 'remove' : 'grant', amount: Number(pointsAmount), description: pointsDescription }),
       })
       if (!response.ok) {
         const data = await response.json().catch(() => null) as { error?: string } | null
         setMessage({ tone: 'warning', text: data?.error ?? 'Power action failed.' })
         return
       }
-      setMessage({ tone: 'success', text: kind === 'plan' ? `Gifted ${giftPlan} to ${selectedUser.displayName}.` : `Queued ${Number(pointsAmount).toLocaleString()} Nexus Points for ${selectedUser.displayName}.` })
+      setMessage({ tone: 'success', text: kind === 'plan' ? `Gifted ${giftPlan} to ${selectedUser.displayName}.` : kind === 'remove-points' ? `Queued removal of ${Number(pointsAmount).toLocaleString()} Nexus Points for ${selectedUser.displayName}.` : `Queued ${Number(pointsAmount).toLocaleString()} Nexus Points for ${selectedUser.displayName}.` })
       await load()
     } finally {
       setBusy(false)
@@ -138,7 +143,7 @@ export default function AdminDashboardPage() {
               <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-3 text-xs text-white/55">
                 Current plan <strong className="text-white">{selectedUser.plan}</strong>
                 {selectedUser.adminGrantedPlan && <> · gift <strong className="text-white">{selectedUser.adminGrantedPlan}</strong> until {formatDate(selectedUser.adminPlanExpiresAt)}</>}
-                {selectedUser.pendingNexusPoints > 0 && <> · pending <strong className="text-white">{selectedUser.pendingNexusPoints.toLocaleString()}</strong> points</>}
+                {selectedUser.pendingNexusPoints !== 0 && <> - pending <strong className="text-white">{formatSignedPoints(selectedUser.pendingNexusPoints)}</strong> points</>}
               </div>
             )}
           </div>
@@ -156,11 +161,12 @@ export default function AdminDashboardPage() {
           </div>
 
           <div className="mt-3 grid gap-3 rounded-2xl border border-amber-300/15 bg-amber-400/[0.045] p-4">
-            <p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><Coins className="size-4" /> Gift Nexus Points</p>
-            <div className="grid gap-2 sm:grid-cols-[120px_1fr_auto]">
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><Coins className="size-4" /> Adjust Nexus Points</p>
+            <div className="grid gap-2 sm:grid-cols-[120px_1fr_auto_auto]">
               <input value={pointsAmount} onChange={(event) => setPointsAmount(event.target.value)} type="number" min={1} max={1000000} className="calculator-input py-2 text-sm" aria-label="Nexus Points amount" />
-              <input value={pointsDescription} onChange={(event) => setPointsDescription(event.target.value)} maxLength={160} className="calculator-input py-2 text-sm" aria-label="Nexus Points gift note" />
-              <button type="button" disabled={busy || !selectedUser} onClick={() => void runPower('points')} className="primary-action justify-center px-4 py-2 text-xs disabled:opacity-50">Send points</button>
+              <input value={pointsDescription} onChange={(event) => setPointsDescription(event.target.value)} maxLength={160} className="calculator-input py-2 text-sm" aria-label="Nexus Points adjustment note" />
+              <button type="button" disabled={busy || !selectedUser} onClick={() => void runPower('grant-points')} className="primary-action justify-center px-4 py-2 text-xs disabled:opacity-50">Grant</button>
+              <button type="button" disabled={busy || !selectedUser} onClick={() => void runPower('remove-points')} className="secondary-action border-rose-300/25 px-4 py-2 text-xs text-rose-100 disabled:opacity-50">Remove</button>
             </div>
           </div>
 

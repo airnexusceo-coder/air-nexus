@@ -62,26 +62,42 @@ type PendingPointGrantSummary = {
 async function fetchProfilesByIds(ids: string[]): Promise<Map<string, ProfileRow>> {
   const unique = Array.from(new Set(ids))
   if (unique.length === 0) return new Map()
-  const response = await supabaseServiceFetch(
-    `/profiles?user_id=in.(${unique.map(encode).join(',')})&select=user_id,display_name,suspended_until,suspended_reason,banned_at,banned_reason,deleted_at,plan,plan_expires_at,subscription_status,admin_granted_plan,admin_plan_expires_at`,
-  )
-  const rows = await readSupabaseRestJson<ProfileRow[]>(response, 'Failed to load profiles')
-  return new Map(rows.map((row) => [row.user_id, row]))
+  const idFilter = unique.map(encode).join(',')
+  const baseSelect = 'user_id,display_name,suspended_until,suspended_reason,banned_at,banned_reason,deleted_at,plan,plan_expires_at,subscription_status'
+  try {
+    const response = await supabaseServiceFetch(
+      `/profiles?user_id=in.(${idFilter})&select=${baseSelect},admin_granted_plan,admin_plan_expires_at`,
+    )
+    const rows = await readSupabaseRestJson<ProfileRow[]>(response, 'Failed to load profiles')
+    return new Map(rows.map((row) => [row.user_id, row]))
+  } catch (error) {
+    if (!(error instanceof SupabaseRequestError)) throw error
+    // Production may receive the app deploy before the latest Supabase migration.
+    // Do not let missing admin gift columns stop admins from loading people.
+    const response = await supabaseServiceFetch(`/profiles?user_id=in.(${idFilter})&select=${baseSelect}`)
+    const rows = await readSupabaseRestJson<Array<Omit<ProfileRow, 'admin_granted_plan' | 'admin_plan_expires_at'>>>(response, 'Failed to load profiles')
+    return new Map(rows.map((row) => [row.user_id, { ...row, admin_granted_plan: null, admin_plan_expires_at: null }]))
+  }
 }
 
 async function fetchPendingPointGrantsByUserIds(ids: string[]): Promise<Map<string, PendingPointGrantSummary>> {
   const unique = Array.from(new Set(ids))
   if (unique.length === 0) return new Map()
-  const response = await supabaseServiceFetch(`/nexus_point_grants?user_id=in.(${unique.map(encode).join(',')})&claimed_at=is.null&select=user_id,amount`)
-  const rows = await readSupabaseRestJson<PendingPointGrantRow[]>(response, 'Failed to load Nexus Points gifts')
-  const map = new Map<string, PendingPointGrantSummary>()
-  for (const row of rows) {
-    const current = map.get(row.user_id) ?? { amount: 0, count: 0 }
-    current.amount += Number.isFinite(row.amount) ? row.amount : 0
-    current.count += 1
-    map.set(row.user_id, current)
+  try {
+    const response = await supabaseServiceFetch(`/nexus_point_grants?user_id=in.(${unique.map(encode).join(',')})&claimed_at=is.null&select=user_id,amount`)
+    const rows = await readSupabaseRestJson<PendingPointGrantRow[]>(response, 'Failed to load Nexus Points gifts')
+    const map = new Map<string, PendingPointGrantSummary>()
+    for (const row of rows) {
+      const current = map.get(row.user_id) ?? { amount: 0, count: 0 }
+      current.amount += Number.isFinite(row.amount) ? row.amount : 0
+      current.count += 1
+      map.set(row.user_id, current)
+    }
+    return map
+  } catch (error) {
+    if (error instanceof SupabaseRequestError && error.message.toLowerCase().includes('nexus_point_grants')) return new Map()
+    throw error
   }
-  return map
 }
 
 function resolvePlan(profile: ProfileRow | undefined): Pick<AdminUserView, 'plan' | 'planExpiresAt' | 'subscriptionStatus' | 'hasActiveSubscription' | 'adminGrantedPlan' | 'adminPlanExpiresAt' | 'adminPlanActive'> {

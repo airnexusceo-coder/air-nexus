@@ -47,6 +47,11 @@ function formatDate(value: string | null) {
   return new Date(value).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
+function formatSignedPoints(value: number) {
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  return `${sign}${Math.abs(value).toLocaleString()}`
+}
+
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUserView[] | null>(null)
   const [selected, setSelected] = useState<AdminUserView | null>(null)
@@ -120,7 +125,7 @@ export default function AdminUsersPage() {
                     <span className="mt-2 flex flex-wrap items-center gap-2">
                       <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', planTone(user.plan))}>{user.plan}</span>
                       {user.adminPlanActive && <span className="rounded-full border border-violet-300/20 bg-violet-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-100">Gifted until {formatDate(user.adminPlanExpiresAt)}</span>}
-                      {user.pendingNexusPoints > 0 && <span className="rounded-full border border-amber-300/20 bg-amber-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">+{user.pendingNexusPoints.toLocaleString()} pending points</span>}
+                      {user.pendingNexusPoints !== 0 && <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide', user.pendingNexusPoints > 0 ? 'border-amber-300/20 bg-amber-400/10 text-amber-100' : 'border-rose-300/20 bg-rose-400/10 text-rose-100')}>{formatSignedPoints(user.pendingNexusPoints)} pending points</span>}
                     </span>
                   </span>
                   <span className="flex flex-wrap items-center gap-2 md:justify-end">
@@ -211,7 +216,7 @@ function UserDetailModal({ user, onClose, onChanged, onDeleted }: { user: AdminU
   const [giftPlan, setGiftPlan] = useState<PaidPlan>('Plus')
   const [giftDays, setGiftDays] = useState('30')
   const [pointsAmount, setPointsAmount] = useState('500')
-  const [pointsDescription, setPointsDescription] = useState('Admin Nexus Points gift')
+  const [pointsDescription, setPointsDescription] = useState('Admin Nexus Points adjustment')
 
   useEffect(() => {
     void fetch(`/api/admin/users/${user.id}/xp`, { credentials: 'include', cache: 'no-store' })
@@ -303,7 +308,7 @@ function UserDetailModal({ user, onClose, onChanged, onDeleted }: { user: AdminU
     }
   }
 
-  const giftPoints = async () => {
+  const adjustPoints = async (action: 'grant' | 'remove') => {
     setBusy(true)
     setError(null)
     try {
@@ -311,11 +316,11 @@ function UserDetailModal({ user, onClose, onChanged, onDeleted }: { user: AdminU
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: Number(pointsAmount), description: pointsDescription }),
+        body: JSON.stringify({ action, amount: Number(pointsAmount), description: pointsDescription }),
       })
       if (!response.ok) {
         const data = await response.json().catch(() => null) as { error?: string } | null
-        setError(data?.error ?? 'Could not gift Nexus Points.')
+        setError(data?.error ?? 'Could not adjust Nexus Points.')
         return
       }
       await onChanged()
@@ -374,12 +379,13 @@ function UserDetailModal({ user, onClose, onChanged, onDeleted }: { user: AdminU
         </section>
 
         <section className="rounded-2xl border border-amber-300/15 bg-amber-400/[0.045] p-4">
-          <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-100"><Coins className="size-3.5" /> Gift Nexus Points</p>
-          <p className="mt-1 text-[11px] text-white/50">Pending unclaimed gifts: {user.pendingNexusPointGrantCount} · {user.pendingNexusPoints.toLocaleString()} points.</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-[110px_1fr_auto]">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-100"><Coins className="size-3.5" /> Adjust Nexus Points</p>
+          <p className="mt-1 text-[11px] text-white/50">Pending unclaimed adjustments: {user.pendingNexusPointGrantCount} - {formatSignedPoints(user.pendingNexusPoints)} points.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[110px_1fr_auto_auto]">
             <input value={pointsAmount} onChange={(event) => setPointsAmount(event.target.value)} type="number" min={1} max={1000000} className="calculator-input py-2 text-xs" aria-label="Nexus Points amount" />
-            <input value={pointsDescription} onChange={(event) => setPointsDescription(event.target.value)} maxLength={160} className="calculator-input py-2 text-xs" placeholder="Gift note" />
-            <button type="button" disabled={busy} onClick={() => void giftPoints()} className="primary-action justify-center px-3 py-2 text-[11px]"><Sparkles className="size-3.5" /> Send</button>
+            <input value={pointsDescription} onChange={(event) => setPointsDescription(event.target.value)} maxLength={160} className="calculator-input py-2 text-xs" placeholder="Adjustment note" />
+            <button type="button" disabled={busy} onClick={() => void adjustPoints('grant')} className="primary-action justify-center px-3 py-2 text-[11px]"><Sparkles className="size-3.5" /> Grant</button>
+            <button type="button" disabled={busy} onClick={() => void adjustPoints('remove')} className="secondary-action border-rose-300/25 px-3 py-2 text-[11px] text-rose-100">Remove</button>
           </div>
         </section>
 

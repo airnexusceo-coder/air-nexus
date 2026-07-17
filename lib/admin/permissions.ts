@@ -54,7 +54,7 @@ export const ADMIN_PERMISSIONS: AdminPermission[] = (Object.entries(ADMIN_PERMIS
  */
 const LIVE_PERMISSIONS: AdminPermission[] = [
   'users.view', 'users.create', 'users.edit', 'users.suspend', 'users.ban', 'users.delete',
-  'nexus_points.view', 'nexus_points.grant', 'nexus_points.audit',
+  'nexus_points.view', 'nexus_points.grant', 'nexus_points.remove', 'nexus_points.audit',
   'subscriptions.view', 'subscriptions.gift', 'subscriptions.revoke',
   'xp.view', 'xp.grant', 'xp.remove', 'xp.set',
   'clashes.view', 'clashes.cancel', 'clashes.force_result',
@@ -72,13 +72,12 @@ export function isPermissionLive(permission: AdminPermission): boolean {
   return LIVE_SET.has(permission)
 }
 
-const LIMITED_NEXUS_LEDGER = 'Nexus Points now support admin gifts, but arbitrary remove/set needs a full server balance ledger rather than the user-local wallet.'
+const LIMITED_NEXUS_LEDGER = 'Nexus Points now support admin grant/remove adjustments, but set needs a full server balance ledger rather than the user-local wallet.'
 const NO_SYSTEM = (name: string) => `No ${name} system exists in AirNexus yet.`
 const NO_SEMANTICS = (what: string) => `No real ${what} to act on yet.`
 
 export const PERMISSION_LOCKED_REASON: Partial<Record<AdminPermission, string>> = {
   'users.impersonate': 'Requires a Supabase Admin API session-exchange design — a separate security feature, not built this pass.',
-  'nexus_points.remove': LIMITED_NEXUS_LEDGER,
   'nexus_points.set': LIMITED_NEXUS_LEDGER,
   'levels.view': NO_SYSTEM('numeric level'),
   'levels.edit': NO_SYSTEM('numeric level'),

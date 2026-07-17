@@ -13,6 +13,14 @@ export type AdminDashboardStats = {
   systemStatus: 'ok' | 'degraded'
 }
 
+async function safeCount(path: string): Promise<number> {
+  try {
+    return await countRows(path)
+  } catch {
+    return 0
+  }
+}
+
 export async function getDashboardStats(): Promise<AdminDashboardStats> {
   const startOfToday = new Date()
   startOfToday.setHours(0, 0, 0, 0)
@@ -23,8 +31,8 @@ export async function getDashboardStats(): Promise<AdminDashboardStats> {
     countRows('/profiles?select=user_id'),
     countClashesSince(startOfToday.toISOString()),
     countClashesSince(startOfWeek.toISOString()),
-    countRows(`/profiles?select=user_id&admin_granted_plan=not.is.null&admin_plan_expires_at=gt.${encodeURIComponent(now)}`),
-    countRows('/nexus_point_grants?select=id&claimed_at=is.null'),
+    safeCount(`/profiles?select=user_id&admin_granted_plan=not.is.null&admin_plan_expires_at=gt.${encodeURIComponent(now)}`),
+    safeCount('/nexus_point_grants?select=id&claimed_at=is.null'),
     supabaseServiceFetch('/profiles?select=user_id&limit=1').catch(() => null),
   ])
 
