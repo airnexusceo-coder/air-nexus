@@ -4,6 +4,7 @@ import { AI_TOOLS, buildAiToolPrompt, getAiTool, isAiToolSlug, TRANSLATION_LANGU
 import { buildPowerPoint, DECK_THEMES, detectDeckTheme, parsePresentationSlides } from '../lib/ai-tools/powerpoint'
 import { clearToolHistory, deleteToolHistoryEntry, loadToolHistory, saveToolHistoryEntry } from '../lib/ai-tools/history'
 import { AI_TELL_PHRASES, computeStylometricStats, formatStatsForPrompt } from '../lib/ai-tools/ai-detector'
+import { buildHumaniserAnalysis, buildHumaniserAugmentedInput, HUMANISER_STRENGTHS, humaniserStrengthInstructions, splitHumaniserReply } from '../lib/ai-tools/humaniser'
 
 assert.equal(AI_TOOLS.length, 16, 'The public catalogue should only include the 16 focused tools that are wired to real app workflows')
 assert.equal(new Set(AI_TOOLS.map((tool) => tool.slug)).size, AI_TOOLS.length, 'Tool slugs must be unique')
@@ -58,6 +59,13 @@ for (const removed of ['ai-chat', 'voice-ai', 'ai-planner', 'marketing-copy', 'a
   assert.ok(translation, 'translation must be registered')
   assert.deepEqual(translation!.options, TRANSLATION_LANGUAGES, 'the translation tool should draw its options from the shared language list')
   assert.ok(translation!.instruction.toLowerCase().includes('source language'), 'translation instruction must explain the direction format')
+}
+
+// Email Assistant must ask for a parseable "Subject: ..." line so the UI can render a real email card.
+{
+  const email = getAiTool('email-assistant')
+  assert.ok(email, 'email-assistant must be registered')
+  assert.ok(email!.instruction.toLowerCase().includes('subject:'), 'email-assistant instruction must specify the "Subject:" line format')
 }
 
 // The Detector must never claim certainty, and must carry its own reliability caveat in the prompt.
@@ -177,6 +185,60 @@ assert.equal(new Set(AI_TELL_PHRASES).size, AI_TELL_PHRASES.length, 'AI-tell phr
   const block = formatStatsForPrompt(stats)
   assert.ok(block.startsWith('[Automated text statistics'), 'the prompt block is clearly delimited as computed, not part of the passage')
   assert.ok(block.includes(String(stats.wordCount)), 'the prompt block reports the actual word count')
+}
+
+// --- AI Humaniser --------------------------------------------------------------
+
+assert.equal(new Set(HUMANISER_STRENGTHS).size, HUMANISER_STRENGTHS.length, 'Humaniser strength options should not contain duplicates')
+{
+  const instructions = HUMANISER_STRENGTHS.map((strength) => humaniserStrengthInstructions(strength))
+  assert.equal(new Set(instructions).size, instructions.length, 'each humanising strength should produce distinct guidance')
+  assert.equal(humaniserStrengthInstructions('not-a-real-strength').toLowerCase().includes('medium'), true, 'an unrecognised strength value falls back to Medium mode')
+  assert.equal(humaniserStrengthInstructions(undefined).toLowerCase().includes('medium'), true, 'a missing strength value falls back to Medium mode')
+}
+
+{
+  const { stats, augmentedInput } = buildHumaniserAugmentedInput('This is a short sample draft that a student might paste in for humanising.', 'Aggressive')
+  assert.ok(augmentedInput.includes('Writing pattern diagnostics'), 'the augmented input must clearly label the diagnostics block as separate from the passage')
+  assert.ok(augmentedInput.includes('Aggressive mode'), 'the augmented input must include the strength-specific instructions')
+  assert.ok(augmentedInput.includes('What changed:'), 'the augmented input must ask for the What changed section')
+  assert.equal(stats.wordCount, computeStylometricStats('This is a short sample draft that a student might paste in for humanising.').wordCount, 'stats are computed from the original text')
+}
+
+{
+  const withMarker = 'Here is the rewritten passage.\n\nWhat changed:\n- Varied sentence length\n- Removed a stock phrase'
+  const split = splitHumaniserReply(withMarker)
+  assert.equal(split.rewritten, 'Here is the rewritten passage.')
+  assert.ok(split.changes.startsWith('What changed:'))
+
+  const withHeadingMarker = 'Here is the rewritten passage.\n\n## What changed:\n- Varied sentence length'
+  const splitHeading = splitHumaniserReply(withHeadingMarker)
+  assert.equal(splitHeading.rewritten, 'Here is the rewritten passage.', 'a markdown heading before "What changed:" is still recognised as the marker')
+
+  const withoutMarker = 'Just the rewritten passage with no changes section.'
+  assert.deepEqual(splitHumaniserReply(withoutMarker), { rewritten: withoutMarker, changes: '' })
+}
+
+{
+  const uniformText = [
+    'The cat sat on the soft mat today.', 'The dog ran across the green field fast.',
+    'The bird flew over the tall old tree.', 'The fish swam inside the clear blue pond.',
+    'The child played with the small red ball.', 'The teacher wrote on the wide white board.',
+    'The farmer worked in the large brown barn.', 'The driver parked near the busy train station.',
+  ].join(' ')
+  const variedText = [
+    'Rain.', 'I ran outside without my coat because I was late for the bus and did not want to miss it again, so I hurried.',
+    'Cold.', 'The wind hit my face hard, but I kept going anyway, laughing a little at how silly I must have looked.',
+  ].join(' ')
+  const before = computeStylometricStats(uniformText)
+  const analysis = buildHumaniserAnalysis(before, variedText, 'Medium')
+  assert.equal(analysis.mode, 'Medium')
+  assert.ok(before.score !== null && analysis.after.score !== null, 'setup: both passages are long enough to score')
+  assert.ok(analysis.riskChange !== null && analysis.riskChange > 0, 'rewriting a uniform passage into a more varied one should lower the robotic-pattern score (positive riskChange)')
+
+  const shortBefore = computeStylometricStats('Too short to score.')
+  const shortAnalysis = buildHumaniserAnalysis(shortBefore, 'Also too short.', 'Easy')
+  assert.equal(shortAnalysis.riskChange, null, 'riskChange is null when either side has too little text to score reliably')
 }
 
 /** Crude but dependency-free well-formedness check: every opening tag must have a matching, correctly-nested closing tag. Catches the kind of corruption (unclosed/mismatched tags) that would make PowerPoint refuse to open the file. */

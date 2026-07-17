@@ -56,10 +56,30 @@ import {
   saveToolHistoryEntry,
   type ToolHistoryEntry,
 } from '@/lib/ai-tools/history'
+import { splitHumaniserReply } from '@/lib/ai-tools/humaniser'
 import { useVoiceInput } from '@/lib/voice/use-voice-input'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
+
+type StylometricStatsResult = {
+  wordCount: number
+  sentenceCount: number
+  burstiness: number | null
+  vocabDiversity: number | null
+  aiPhraseHits: string[]
+  contractionsPer100Words: number
+  score: number | null
+}
+
+type HumaniserStatsResult = {
+  before: StylometricStatsResult
+  after: StylometricStatsResult
+  riskChange: number | null
+  removedAiPhraseHits: string[]
+  remainingAiPhraseHits: string[]
+  mode: string
+}
 
 type ToolResult = {
   reply?: string
@@ -73,15 +93,8 @@ type ToolResult = {
   model?: string
   tools?: string[]
   sources?: Array<{ title: string; url: string }>
-  stylometricStats?: {
-    wordCount: number
-    sentenceCount: number
-    burstiness: number | null
-    vocabDiversity: number | null
-    aiPhraseHits: string[]
-    contractionsPer100Words: number
-    score: number | null
-  }
+  stylometricStats?: StylometricStatsResult
+  humaniserStats?: HumaniserStatsResult
 }
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -127,7 +140,7 @@ const CATEGORY_STYLE: Record<AiToolCategory, { card: string; icon: string; dot: 
 }
 
 /** Tools whose result gets a dedicated structured preview above the raw reply — for these, the raw markdown collapses into a scrollable "full text" fallback instead of being the main view. */
-const STRUCTURED_PREVIEW_SLUGS = new Set(['presentation-maker', 'mind-maps', 'code-generation', 'sql-assistant', 'grammar-checker', 'translation', 'resume-builder', 'ai-detector', 'ai-humaniser'])
+const STRUCTURED_PREVIEW_SLUGS = new Set(['presentation-maker', 'mind-maps', 'code-generation', 'sql-assistant', 'grammar-checker', 'translation', 'resume-builder', 'ai-detector', 'ai-humaniser', 'email-assistant'])
 
 function initialToolSlug() {
   if (typeof window === 'undefined') return 'presentation-maker'
@@ -496,7 +509,8 @@ export function AiToolsPage({
                     {selectedTool.slug === 'translation' && <TranslationPreview original={input} reply={result.reply} notify={notify} />}
                     {selectedTool.slug === 'resume-builder' && <ResumePreview text={result.reply} />}
                     {selectedTool.slug === 'ai-detector' && <AiDetectorPreview text={result.reply} stats={result.stylometricStats} />}
-                    {selectedTool.slug === 'ai-humaniser' && <HumaniserPreview original={input} reply={result.reply} notify={notify} />}
+                    {selectedTool.slug === 'ai-humaniser' && <HumaniserPreview original={input} reply={result.reply} stats={result.humaniserStats} notify={notify} />}
+                    {selectedTool.slug === 'email-assistant' && <EmailPreview text={result.reply} notify={notify} />}
                     <div className={cn('rounded-2xl border border-white/8 bg-white/[0.025] p-5 text-sm leading-7 text-zinc-300', STRUCTURED_PREVIEW_SLUGS.has(selectedTool.slug) && 'max-h-[26rem] overflow-y-auto')}>
                       <AiMarkdown>{result.reply}</AiMarkdown>
                     </div>
@@ -770,13 +784,13 @@ function parseDetectorReply(text: string): DetectorVerdict | null {
   }
 }
 
-function ScoreMeter({ score }: { score: number }) {
+function ScoreMeter({ score, label = 'AI likelihood' }: { score: number; label?: string }) {
   const tone = score >= 66 ? 'bg-amber-400' : score >= 34 ? 'bg-violet-400' : 'bg-emerald-400'
   return (
     <div>
       <div className="flex items-baseline justify-between">
         <span className="text-3xl font-bold text-white">{score}<span className="text-sm font-medium text-zinc-500">/100</span></span>
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">AI likelihood</span>
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</span>
       </div>
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
         <div className={cn('h-full rounded-full transition-all', tone)} style={{ width: `${score}%` }} />
@@ -831,40 +845,140 @@ function AiDetectorPreview({ text, stats }: { text: string; stats?: DetectorStat
   )
 }
 
-/** AI Humaniser's instruction asks for the rewritten text followed by a "What changed" note — split on that boundary, mirroring splitTranslationReply's approach. */
-function splitHumaniserReply(reply: string): { rewritten: string; changes: string } {
-  const markerPattern = /\n{1,2}\*{0,2}What changed\*{0,2}:?\s*\n/i
-  const match = reply.match(markerPattern)
-  if (match && match.index !== undefined && match.index > 10) return { rewritten: reply.slice(0, match.index).trim(), changes: reply.slice(match.index).trim() }
-  return { rewritten: reply.trim(), changes: '' }
+type HumaniserStats = NonNullable<ToolResult['humaniserStats']>
+
+function RiskScoreCard({ label, score }: { label: string; score: number | null }) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{label}</p>
+      {score === null ? (
+        <p className="mt-3 text-sm font-semibold text-zinc-300">Not enough text to score</p>
+      ) : (
+        <div className="mt-2"><ScoreMeter score={score} label="Pattern risk" /></div>
+      )}
+    </div>
+  )
 }
 
-function HumaniserPreview({ original, reply, notify }: { original: string; reply: string; notify: (message: string, tone?: NoticeTone) => void }) {
+function statValue(value: number | null, digits = 2) {
+  return value === null ? '?' : value.toFixed(digits)
+}
+
+function HumaniserPreview({ original, reply, stats, notify }: { original: string; reply: string; stats?: HumaniserStats; notify: (message: string, tone?: NoticeTone) => void }) {
   const { rewritten, changes } = useMemo(() => splitHumaniserReply(reply), [reply])
   if (!original.trim() || !rewritten.trim()) return null
   const copySide = async (text: string, label: string) => {
     await navigator.clipboard.writeText(text)
     notify(`${label} copied`, 'success')
   }
+  const riskChange = stats?.riskChange ?? null
+  const changeTone = riskChange === null
+    ? 'border-white/10 bg-white/[0.035] text-zinc-300'
+    : riskChange > 0
+      ? 'border-emerald-300/20 bg-emerald-400/10 text-emerald-100'
+      : riskChange < 0
+        ? 'border-amber-300/20 bg-amber-400/10 text-amber-100'
+        : 'border-violet-300/20 bg-violet-400/10 text-violet-100'
+  const changeLabel = riskChange === null
+    ? 'Needs 40+ words for score'
+    : riskChange > 0
+      ? `${riskChange} point risk drop`
+      : riskChange < 0
+        ? `${Math.abs(riskChange)} point risk rise`
+        : 'No score change'
+
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10">
-      <div className="grid divide-y divide-white/8 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-        <div className="p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Original</p>
-            <button type="button" onClick={() => void copySide(original, 'Original')} aria-label="Copy original text" className="interactive-icon size-7"><Clipboard className="size-3.5" /></button>
+    <div className="space-y-3">
+      {stats && (
+        <div className="rounded-2xl border border-cyan-300/15 bg-[radial-gradient(circle_at_100%_0%,rgba(34,211,238,.14),transparent_40%),rgba(8,15,23,.76)] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80">Detector-risk check</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">Pattern matching is a guide, not a guarantee — this shows whether the rewrite reduced common robotic tells.</p>
+            </div>
+            <span className="rounded-full border border-white/10 bg-white/7 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-300">{stats.mode} mode</span>
           </div>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{original}</p>
-        </div>
-        <div className="bg-white/[0.02] p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80">Humanised</p>
-            <button type="button" onClick={() => void copySide(rewritten, 'Humanised text')} aria-label="Copy humanised text" className="interactive-icon size-7"><Clipboard className="size-3.5" /></button>
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <RiskScoreCard label="Before" score={stats.before.score} />
+            <RiskScoreCard label="After" score={stats.after.score} />
+            <div className={cn('flex min-w-36 flex-col justify-center rounded-2xl border p-4', changeTone)}>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">Change</p>
+              <p className="mt-2 text-lg font-bold">{changeLabel}</p>
+            </div>
           </div>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white">{rewritten}</p>
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 rounded-2xl border border-white/8 bg-black/20 p-4 text-xs text-zinc-300 sm:grid-cols-4">
+            <dt className="text-zinc-600">Rhythm before</dt><dd>{statValue(stats.before.burstiness)}</dd>
+            <dt className="text-zinc-600">Rhythm after</dt><dd>{statValue(stats.after.burstiness)}</dd>
+            <dt className="text-zinc-600">Stock phrases before</dt><dd>{stats.before.aiPhraseHits.length}</dd>
+            <dt className="text-zinc-600">Stock phrases after</dt><dd>{stats.after.aiPhraseHits.length}</dd>
+          </dl>
+          {stats.removedAiPhraseHits.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">Removed</span>
+              {stats.removedAiPhraseHits.map((phrase) => <span key={phrase} className="rounded-full border border-emerald-300/15 bg-emerald-400/10 px-2 py-1 text-[10px] text-emerald-100">{phrase}</span>)}
+            </div>
+          )}
+          {stats.remainingAiPhraseHits.length > 0 && (
+            <p className="mt-3 text-[11px] leading-4 text-amber-100/70">Still worth checking: {stats.remainingAiPhraseHits.join(', ')}</p>
+          )}
         </div>
+      )}
+
+      <div className="overflow-hidden rounded-2xl border border-white/10">
+        <div className="grid divide-y divide-white/8 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+          <div className="p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Original</p>
+              <button type="button" onClick={() => void copySide(original, 'Original')} aria-label="Copy original text" className="interactive-icon size-7"><Clipboard className="size-3.5" /></button>
+            </div>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{original}</p>
+          </div>
+          <div className="bg-white/[0.02] p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200/80">Humanised</p>
+              <button type="button" onClick={() => void copySide(rewritten, 'Humanised text')} aria-label="Copy humanised text" className="interactive-icon size-7"><Clipboard className="size-3.5" /></button>
+            </div>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white">{rewritten}</p>
+          </div>
+        </div>
+        {changes && <div className="border-t border-white/8 px-4 py-3 text-xs leading-5 text-zinc-500"><AiMarkdown>{changes}</AiMarkdown></div>}
       </div>
-      {changes && <div className="border-t border-white/8 px-4 py-3 text-xs leading-5 text-zinc-500"><AiMarkdown>{changes}</AiMarkdown></div>}
+    </div>
+  )
+}
+
+/** Email Assistant's instruction asks for "Subject: <line>" then a blank line then the body — parse that into a proper email-client-style card. */
+function parseEmailReply(text: string): { subject: string; body: string } | null {
+  const match = text.match(/^\*{0,2}Subject:?\*{0,2}\s*(.+?)\r?\n\r?\n([\s\S]+)$/i)
+  if (!match) return null
+  const subject = match[1].trim().replace(/\*\*/g, '')
+  const body = match[2].trim()
+  if (!subject || !body) return null
+  return { subject, body }
+}
+
+function EmailPreview({ text, notify }: { text: string; notify: (message: string, tone?: NoticeTone) => void }) {
+  const parsed = useMemo(() => parseEmailReply(text), [text])
+  if (!parsed) return null
+  const copyPart = async (value: string, label: string) => {
+    await navigator.clipboard.writeText(value)
+    notify(`${label} copied`, 'success')
+  }
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-white text-zinc-900 shadow-xl">
+      <div className="flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50 px-5 py-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Subject</p>
+          <p className="truncate text-sm font-semibold text-zinc-900">{parsed.subject}</p>
+        </div>
+        <button type="button" onClick={() => void copyPart(parsed.subject, 'Subject')} className="shrink-0 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-[11px] font-medium text-zinc-600 transition hover:border-zinc-400 hover:text-zinc-900">Copy subject</button>
+      </div>
+      <div className="px-5 py-4">
+        <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-800">{parsed.body}</p>
+      </div>
+      <div className="flex justify-end border-t border-zinc-200 bg-zinc-50 px-5 py-3">
+        <button type="button" onClick={() => void copyPart(`Subject: ${parsed.subject}\n\n${parsed.body}`, 'Email')} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-[11px] font-medium text-zinc-600 transition hover:border-zinc-400 hover:text-zinc-900">Copy full email</button>
+      </div>
     </div>
   )
 }

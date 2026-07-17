@@ -7,6 +7,7 @@ import { sanitizeResponse } from '@/lib/ai/sanitize-response'
 import { buildAiToolPrompt, getAiTool, type AiToolDefinition } from '@/lib/ai-tools/catalog'
 import { buildPowerPoint, detectDeckTheme, parsePresentationSlides, POWERPOINT_MIME, presentationFilename } from '@/lib/ai-tools/powerpoint'
 import { computeStylometricStats, formatStatsForPrompt } from '@/lib/ai-tools/ai-detector'
+import { buildHumaniserAnalysis, buildHumaniserAugmentedInput, splitHumaniserReply } from '@/lib/ai-tools/humaniser'
 import { getServerAuthSession, SupabaseConfigurationError } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -318,7 +319,9 @@ async function runPresentationTool(tool: AiToolDefinition, input: string, option
 async function runAiDetectorTool(tool: AiToolDefinition, input: string, option: string, documents: ToolDocument[], signal: AbortSignal) {
   const analysisText = input.trim() || documents.map((document) => document.text).join('\n\n')
   const stats = computeStylometricStats(analysisText)
-  const augmentedInput = `${input}\n\n${formatStatsForPrompt(stats)}`
+  const augmentedInput = input.trim()
+    ? `${input}\n\n${formatStatsForPrompt(stats)}`
+    : `Use the attached material as the passage to analyse.\n\n${formatStatsForPrompt(stats)}`
   const result = await runTextTool(tool, augmentedInput, option, documents, signal)
   return {
     ...result,
@@ -331,6 +334,17 @@ async function runAiDetectorTool(tool: AiToolDefinition, input: string, option: 
       contractionsPer100Words: stats.contractionsPer100Words,
       score: stats.score,
     },
+  }
+}
+
+async function runAiHumaniserTool(tool: AiToolDefinition, input: string, option: string, documents: ToolDocument[], signal: AbortSignal) {
+  const { stats: beforeStats, augmentedInput } = buildHumaniserAugmentedInput(input, option)
+  const result = await runTextTool(tool, augmentedInput, option, documents, signal)
+  const { rewritten } = splitHumaniserReply(result.reply)
+  const humaniserStats = buildHumaniserAnalysis(beforeStats, rewritten || result.reply, option)
+  return {
+    ...result,
+    humaniserStats,
   }
 }
 
@@ -358,6 +372,7 @@ export async function POST(request: Request) {
       if (tool.kind === 'image') return NextResponse.json(await runImageTool(tool, input, option, controller.signal))
       if (tool.slug === 'presentation-maker') return NextResponse.json(await runPresentationTool(tool, input, option, controller.signal))
       if (tool.slug === 'ai-detector') return NextResponse.json(await runAiDetectorTool(tool, input, option, documents, controller.signal))
+      if (tool.slug === 'ai-humaniser') return NextResponse.json(await runAiHumaniserTool(tool, input, option, documents, controller.signal))
       return NextResponse.json(await runTextTool(tool, input, option, documents, controller.signal))
     } finally {
       clearTimeout(timeoutId)
