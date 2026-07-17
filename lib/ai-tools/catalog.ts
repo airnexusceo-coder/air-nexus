@@ -24,6 +24,14 @@ export type AiToolDefinition = {
 
 export const AI_TOOL_CATEGORIES: readonly AiToolCategory[] = ['Create', 'Research', 'Communicate', 'Build']
 
+/** Shared by the Translation tool's source and target pickers, so both draw from one canonical list. */
+export const TRANSLATION_LANGUAGES: readonly string[] = [
+  'Arabic', 'Bengali', 'Cantonese', 'Dutch', 'English', 'Filipino (Tagalog)', 'French', 'German',
+  'Greek', 'Hebrew', 'Hindi', 'Indonesian', 'Italian', 'Japanese', 'Korean', 'Māori', 'Mandarin Chinese',
+  'Persian (Farsi)', 'Polish', 'Portuguese', 'Punjabi', 'Russian', 'Samoan', 'Spanish', 'Swahili',
+  'Swedish', 'Tamil', 'Thai', 'Turkish', 'Ukrainian', 'Urdu', 'Vietnamese',
+]
+
 export const AI_TOOLS: readonly AiToolDefinition[] = [
   {
     slug: 'presentation-maker',
@@ -211,13 +219,13 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
     category: 'Communicate',
     kind: 'text',
     inputLabel: 'Text to translate',
-    placeholder: 'Paste the text and choose a target language...',
+    placeholder: 'Paste the text and choose a source and target language...',
     example: 'Thank you for helping me settle into the class. I really appreciate your patience.',
     actionLabel: 'Translate',
     outputHint: 'A natural translation plus a short note about important wording choices.',
-    instruction: 'Translate faithfully and naturally into the selected language. Preserve names, numbers, formatting, and tone. If a phrase is ambiguous, choose the most likely meaning and briefly note the ambiguity.',
-    optionLabel: 'Target language',
-    options: ['French', 'Spanish', 'Mandarin Chinese', 'Japanese', 'Hindi', 'Arabic'],
+    instruction: 'The selected option describes the translation direction as "Source language → Target language" (for example "English → French"). Translate the supplied text from the stated source language into the stated target language, faithfully and naturally. Preserve names, numbers, formatting, and tone. If the text does not actually appear to be written in the stated source language, still translate it as accurately as possible into the target language and briefly note the mismatch. If a phrase is ambiguous, choose the most likely meaning and briefly note the ambiguity.',
+    optionLabel: 'Translation direction',
+    options: TRANSLATION_LANGUAGES,
     defaultOption: 'French',
     action: 'draft',
     purpose: 'study-generation',
@@ -268,8 +276,8 @@ export const AI_TOOLS: readonly AiToolDefinition[] = [
     placeholder: 'Paste the text you want checked for AI-writing patterns...',
     example: 'The rapid advancement of technology has significantly transformed the way individuals communicate in the modern era. This transformation has brought about numerous benefits as well as challenges that must be carefully considered.',
     actionLabel: 'Analyse text',
-    outputHint: 'A likelihood band with the specific patterns behind it — never a certainty.',
-    instruction: 'Analyse the supplied text for stylistic signals of AI generation: uniform sentence length and rhythm, generic transitional phrases, formulaic structure, unusually broad or "safe" vocabulary, absence of specific personal detail or minor natural imperfections, and overly balanced or listy argument structure. Weigh genre against this: formal reports and structured writing naturally sound more uniform even when human-written. Respond in exactly this format: a "## Verdict" line using one of "Likely human-written", "Mixed signals", or "Likely AI-written"; a "## Confidence" line using "Low", "Moderate", or "High"; a "## Signals detected" section with 3-6 bullet points naming concrete patterns found in this specific text (quote short fragments where useful); and a "## Reasoning" paragraph explaining the call. Never claim certainty — this is a pattern-based estimate, not proof of authorship, and must never be presented as grounds for an accusation on its own.',
+    outputHint: 'A 0-100 AI-likelihood score with the specific evidence behind it — never a certainty.',
+    instruction: 'Analyse the supplied text for stylistic signals of AI generation. Immediately after the passage you will receive an "Automated text statistics" block computed independently (sentence-length variation, vocabulary diversity, AI-favoured stock phrases found, contraction rate) — treat it as evidence to weigh, not as the final answer, alongside your own qualitative reading: uniform sentence length and rhythm, generic transitional phrases, formulaic structure, unusually broad or "safe" vocabulary, absence of specific personal detail or minor natural imperfections, and overly balanced or listy argument structure. Weigh genre against this: formal reports and structured writing naturally sound more uniform even when human-written, so do not over-index on the statistics alone. Respond in exactly this format: a "## AI likelihood score" line with a single integer from 0 to 100 (0 = certainly human-written, 100 = certainly AI-written; use the full range — extreme values near 0 or 100 should be rare and only used when the evidence is strong); a "## Verdict" line using one of "Likely human-written", "Mixed signals", or "Likely AI-written" consistent with the score; a "## Confidence" line using "Low", "Moderate", or "High"; a "## Signals detected" section with 3-6 bullet points naming concrete patterns found in this specific text, referencing the provided statistics where relevant (quote short fragments where useful); and a "## Reasoning" paragraph explaining the call. Never claim certainty — this is a pattern-based estimate, not proof of authorship, and must never be presented as grounds for an accusation on its own.',
     acceptsFiles: true,
     action: 'teach',
     purpose: 'document-analysis',

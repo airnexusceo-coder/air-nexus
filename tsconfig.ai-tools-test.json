@@ -13,6 +13,7 @@
     "tests/ai-tools.test.ts",
     "lib/ai-tools/catalog.ts",
     "lib/ai-tools/powerpoint.ts",
-    "lib/ai-tools/history.ts"
+    "lib/ai-tools/history.ts",
+    "lib/ai-tools/ai-detector.ts"
   ]
 }

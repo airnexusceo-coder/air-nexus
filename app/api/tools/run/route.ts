@@ -6,6 +6,7 @@ import { ProviderApiError, ProviderConfigurationError } from '@/lib/ai/providers
 import { sanitizeResponse } from '@/lib/ai/sanitize-response'
 import { buildAiToolPrompt, getAiTool, type AiToolDefinition } from '@/lib/ai-tools/catalog'
 import { buildPowerPoint, detectDeckTheme, parsePresentationSlides, POWERPOINT_MIME, presentationFilename } from '@/lib/ai-tools/powerpoint'
+import { computeStylometricStats, formatStatsForPrompt } from '@/lib/ai-tools/ai-detector'
 import { getServerAuthSession, SupabaseConfigurationError } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
@@ -314,6 +315,25 @@ async function runPresentationTool(tool: AiToolDefinition, input: string, option
   }
 }
 
+async function runAiDetectorTool(tool: AiToolDefinition, input: string, option: string, documents: ToolDocument[], signal: AbortSignal) {
+  const analysisText = input.trim() || documents.map((document) => document.text).join('\n\n')
+  const stats = computeStylometricStats(analysisText)
+  const augmentedInput = `${input}\n\n${formatStatsForPrompt(stats)}`
+  const result = await runTextTool(tool, augmentedInput, option, documents, signal)
+  return {
+    ...result,
+    stylometricStats: {
+      wordCount: stats.wordCount,
+      sentenceCount: stats.sentenceCount,
+      burstiness: stats.burstiness,
+      vocabDiversity: stats.vocabDiversity,
+      aiPhraseHits: stats.aiPhraseHits,
+      contractionsPer100Words: stats.contractionsPer100Words,
+      score: stats.score,
+    },
+  }
+}
+
 export async function POST(request: Request) {
   const body = await readBody(request)
   const tool = typeof body?.slug === 'string' ? getAiTool(body.slug) : undefined
@@ -337,6 +357,7 @@ export async function POST(request: Request) {
       if (tool.kind === 'web') return NextResponse.json(await runWebTool(tool, input, option, controller.signal))
       if (tool.kind === 'image') return NextResponse.json(await runImageTool(tool, input, option, controller.signal))
       if (tool.slug === 'presentation-maker') return NextResponse.json(await runPresentationTool(tool, input, option, controller.signal))
+      if (tool.slug === 'ai-detector') return NextResponse.json(await runAiDetectorTool(tool, input, option, documents, controller.signal))
       return NextResponse.json(await runTextTool(tool, input, option, documents, controller.signal))
     } finally {
       clearTimeout(timeoutId)

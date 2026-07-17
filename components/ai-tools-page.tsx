@@ -38,6 +38,7 @@ import {
   AI_TOOLS,
   getAiTool,
   isAiToolSlug,
+  TRANSLATION_LANGUAGES,
   type AiToolCategory,
   type AiToolDefinition,
 } from '@/lib/ai-tools/catalog'
@@ -72,6 +73,15 @@ type ToolResult = {
   model?: string
   tools?: string[]
   sources?: Array<{ title: string; url: string }>
+  stylometricStats?: {
+    wordCount: number
+    sentenceCount: number
+    burstiness: number | null
+    vocabDiversity: number | null
+    aiPhraseHits: string[]
+    contractionsPer100Words: number
+    score: number | null
+  }
 }
 
 const TOOL_ICONS: Record<string, LucideIcon> = {
@@ -160,12 +170,14 @@ export function AiToolsPage({
   const [busy, setBusy] = useState(false)
   const [history, setHistory] = useState<ToolHistoryEntry[]>(() => loadToolHistory(selectedTool.slug))
   const [showHistory, setShowHistory] = useState(false)
+  const [sourceLanguage, setSourceLanguage] = useState('English')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setInput('')
       setOption(selectInitialOption(selectedTool))
+      setSourceLanguage('English')
       setAttachments([])
       setResult(null)
       setError('')
@@ -219,6 +231,7 @@ export function AiToolsPage({
     setError('')
     setResult(null)
     try {
+      const submittedOption = selectedTool.slug === 'translation' ? `${sourceLanguage} → ${option}` : option
       const response = await fetch('/api/tools/run', {
         method: 'POST',
         credentials: 'include',
@@ -226,7 +239,7 @@ export function AiToolsPage({
         body: JSON.stringify({
           slug: selectedTool.slug,
           input,
-          option,
+          option: submittedOption,
           documents: readyFiles.map(({ name, text }) => ({ name, text })),
         }),
       })
@@ -245,7 +258,13 @@ export function AiToolsPage({
 
   const loadHistoryEntry = (entry: ToolHistoryEntry) => {
     setInput(entry.input)
-    setOption(entry.option || selectInitialOption(selectedTool))
+    const directionMatch = selectedTool.slug === 'translation' ? entry.option.match(/^(.+?)\s*→\s*(.+)$/) : null
+    if (directionMatch) {
+      setSourceLanguage(directionMatch[1].trim())
+      setOption(directionMatch[2].trim())
+    } else {
+      setOption(entry.option || selectInitialOption(selectedTool))
+    }
     setResult({ reply: entry.reply, provider: entry.provider })
     setError('')
     setShowHistory(false)
@@ -340,7 +359,26 @@ export function AiToolsPage({
                 </div>
               </div>
 
-              {selectedTool.options && selectedTool.options.length > 0 && (
+              {selectedTool.slug === 'translation' ? (
+                <fieldset className="mt-5">
+                  <legend className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-300">Translation direction</legend>
+                  <div className="mt-2 grid grid-cols-1 items-end gap-3 sm:grid-cols-[1fr_auto_1fr]">
+                    <label className="block">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">From</span>
+                      <select value={sourceLanguage} onChange={(event) => setSourceLanguage(event.target.value)} className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/30">
+                        {TRANSLATION_LANGUAGES.map((language) => <option key={language} value={language} className="bg-zinc-900">{language}</option>)}
+                      </select>
+                    </label>
+                    <ArrowRight className="hidden size-4 shrink-0 text-zinc-600 sm:mb-3 sm:block" />
+                    <label className="block">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">To</span>
+                      <select value={option} onChange={(event) => setOption(event.target.value)} className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-white outline-none transition focus:border-white/30">
+                        {TRANSLATION_LANGUAGES.map((language) => <option key={language} value={language} className="bg-zinc-900">{language}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                </fieldset>
+              ) : selectedTool.options && selectedTool.options.length > 0 && (
                 <fieldset className="mt-5">
                   <legend className="text-[11px] font-semibold uppercase tracking-[0.15em] text-zinc-300">{selectedTool.optionLabel}</legend>
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -446,7 +484,7 @@ export function AiToolsPage({
                     {selectedTool.slug === 'grammar-checker' && <GrammarDiffPreview original={input} reply={result.reply} />}
                     {selectedTool.slug === 'translation' && <TranslationPreview original={input} reply={result.reply} notify={notify} />}
                     {selectedTool.slug === 'resume-builder' && <ResumePreview text={result.reply} />}
-                    {selectedTool.slug === 'ai-detector' && <AiDetectorPreview text={result.reply} />}
+                    {selectedTool.slug === 'ai-detector' && <AiDetectorPreview text={result.reply} stats={result.stylometricStats} />}
                     {selectedTool.slug === 'ai-humaniser' && <HumaniserPreview original={input} reply={result.reply} notify={notify} />}
                     <div className={cn('rounded-2xl border border-white/8 bg-white/[0.025] p-5 text-sm leading-7 text-zinc-300', STRUCTURED_PREVIEW_SLUGS.has(selectedTool.slug) && 'max-h-[26rem] overflow-y-auto')}>
                       <AiMarkdown>{result.reply}</AiMarkdown>
@@ -700,11 +738,12 @@ function ResumePreview({ text }: { text: string }) {
   )
 }
 
-type DetectorVerdict = { verdict: string; confidence: string; signals: string[]; reasoning: string }
+type DetectorVerdict = { score: number | null; verdict: string; confidence: string; signals: string[]; reasoning: string }
 
 function parseDetectorReply(text: string): DetectorVerdict | null {
   const verdictMatch = text.match(/##\s*Verdict:?\s*(.+)/i)
   if (!verdictMatch) return null
+  const scoreMatch = text.match(/##\s*AI likelihood score:?\s*(\d{1,3})/i)
   const confidenceMatch = text.match(/##\s*Confidence:?\s*(.+)/i)
   const signalsSection = text.match(/##\s*Signals detected\s*\n([\s\S]*?)(?=\n##|$)/i)
   const signals = signalsSection
@@ -712,6 +751,7 @@ function parseDetectorReply(text: string): DetectorVerdict | null {
     : []
   const reasoningSection = text.match(/##\s*Reasoning\s*\n([\s\S]*?)(?=\n##|$)/i)
   return {
+    score: scoreMatch ? Math.min(100, Math.max(0, parseInt(scoreMatch[1], 10))) : null,
     verdict: verdictMatch[1].trim().replace(/\*\*/g, ''),
     confidence: confidenceMatch?.[1].trim().replace(/\*\*/g, '') ?? 'Unknown',
     signals,
@@ -719,10 +759,28 @@ function parseDetectorReply(text: string): DetectorVerdict | null {
   }
 }
 
+function ScoreMeter({ score }: { score: number }) {
+  const tone = score >= 66 ? 'bg-amber-400' : score >= 34 ? 'bg-violet-400' : 'bg-emerald-400'
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-3xl font-bold text-white">{score}<span className="text-sm font-medium text-zinc-500">/100</span></span>
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">AI likelihood</span>
+      </div>
+      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
+        <div className={cn('h-full rounded-full transition-all', tone)} style={{ width: `${score}%` }} />
+      </div>
+    </div>
+  )
+}
+
+type DetectorStats = NonNullable<ToolResult['stylometricStats']>
+
 /** AI-writing detectors (including this one) are pattern-matching, not proof — the caveat below is rendered unconditionally rather than trusted to the model's own reply text. */
-function AiDetectorPreview({ text }: { text: string }) {
+function AiDetectorPreview({ text, stats }: { text: string; stats?: DetectorStats }) {
   const parsed = useMemo(() => parseDetectorReply(text), [text])
   if (!parsed) return null
+  const score = parsed.score ?? stats?.score ?? null
   const verdictTone = /likely ai/i.test(parsed.verdict)
     ? 'border-amber-300/25 bg-amber-400/10 text-amber-100'
     : /mixed/i.test(parsed.verdict)
@@ -731,8 +789,8 @@ function AiDetectorPreview({ text }: { text: string }) {
   return (
     <div className="space-y-3">
       <div className={cn('rounded-2xl border p-4', verdictTone)}>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">Verdict</p>
-        <p className="mt-1 text-lg font-semibold">{parsed.verdict}</p>
+        {score !== null && <ScoreMeter score={score} />}
+        <p className={cn('font-semibold', score !== null ? 'mt-3 text-base' : 'text-lg')}>{parsed.verdict}</p>
         <p className="mt-1 text-xs opacity-80">Confidence: {parsed.confidence}</p>
       </div>
       {parsed.signals.length > 0 && (
@@ -741,6 +799,18 @@ function AiDetectorPreview({ text }: { text: string }) {
           <ul className="mt-2 space-y-1.5 text-xs leading-5 text-zinc-300">
             {parsed.signals.map((signal, index) => <li key={index} className="flex gap-2"><span className="text-zinc-600">•</span><span>{signal}</span></li>)}
           </ul>
+        </div>
+      )}
+      {stats && stats.wordCount >= 40 && (
+        <div className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Computed text statistics</p>
+          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-zinc-300">
+            <dt className="text-zinc-600">Sentence rhythm variation</dt><dd>{stats.burstiness !== null ? stats.burstiness.toFixed(2) : '—'}</dd>
+            <dt className="text-zinc-600">Vocabulary diversity</dt><dd>{stats.vocabDiversity !== null ? stats.vocabDiversity.toFixed(2) : '—'}</dd>
+            <dt className="text-zinc-600">Contractions / 100 words</dt><dd>{stats.contractionsPer100Words.toFixed(1)}</dd>
+            <dt className="text-zinc-600">AI-favoured phrases found</dt><dd>{stats.aiPhraseHits.length}</dd>
+          </dl>
+          {stats.aiPhraseHits.length > 0 && <p className="mt-2 text-[11px] leading-4 text-zinc-500">Found: {stats.aiPhraseHits.join(', ')}</p>}
         </div>
       )}
       <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-[11px] leading-5 text-zinc-500">
