@@ -413,6 +413,7 @@ export function IntelligentDashboardPage({ profileName, motivationUserId, transa
       const conversationContext = buildConversationContext(threads)
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: `Create today's personalised student dashboard for ${profileName || 'this student'}.

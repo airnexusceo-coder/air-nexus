@@ -377,6 +377,7 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
     try {
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text.slice(0, 8_000), mode: 'auto', action: 'writing-suggestions', history: [], documents: [] }),
       })
@@ -406,6 +407,7 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
       const currentText = editorRef.current?.innerText?.trim() ?? ''
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: `Rewrite this whole document to apply one specific improvement, keeping everything else as close to the original as possible.\nImprovement to apply: ${suggestion.title} — ${suggestion.detail}\n\nCurrent document:\n${currentText.slice(0, 8_000)}`,
@@ -441,6 +443,7 @@ export function DocsPage({ activeDocId, onOpenDoc, onOpenSidebar, onOpenContext,
       const contextNote = currentText ? `\n\nFor context, here is the document so far:\n${currentText.slice(0, 4_000)}` : ''
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: `Write this for my document: ${prompt}${contextNote}`, mode: 'auto', action: 'draft', purpose: 'planning', history: [], documents: [] }),
       })

@@ -544,6 +544,7 @@ export function Workspace({
     try {
       const response = await fetchWithRetry(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content || 'Please review and summarize the attached documents.',
@@ -626,6 +627,7 @@ export function Workspace({
     try {
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: content,

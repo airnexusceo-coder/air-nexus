@@ -341,6 +341,7 @@ export function ContextPanel({
       ]
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text || 'Please review and summarize the attached documents.',

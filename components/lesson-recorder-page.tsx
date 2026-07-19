@@ -53,6 +53,7 @@ export function LessonRecorderPage({ onNavigate, notify }: LessonRecorderPagePro
   const generateNotesFromTranscript = async (transcript: string) => {
     const response = await fetch(apiUrl('/api/chat'), {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: `Turn this lesson recording transcript into clear, structured study notes:\n\n${transcript.slice(0, 20_000)}`,

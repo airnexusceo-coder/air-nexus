@@ -371,6 +371,7 @@ export function AiStudyCoachPage({ profileName, transactions, onNavigate, notify
       const context = JSON.stringify({ date, metrics: snapshot, assignments, recentStudentMessages, recentCompletedActions }, null, 2).slice(0, MAX_COACH_CONTEXT)
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: `Create today's proactive study-coach briefing for ${profileName || 'this student'} using only this AirNexus evidence:\n${context}`, mode: 'auto', action: 'study-coach', history: [], documents: [], isPlus: true }),
       })

@@ -20,7 +20,7 @@ import { AiMarkdown } from '@/components/ai-markdown'
 import { QuizCard } from '@/components/study/quiz-card'
 import { FlashcardDeckPlayer } from '@/components/study/flashcard-deck-player'
 import { Modal } from '@/components/ui/modal'
-import { apiUrl } from '@/lib/api-client'
+import { apiUrl, fetchWithRetry } from '@/lib/api-client'
 import { DOCUMENT_ACCEPT, readDocument } from '@/lib/documents/client'
 import { TUTOR_MODES, type TutorAction, type TutorHistoryMessage, type TutorMode } from '@/lib/ai/tutor-types'
 import { loadFlashcardDecks, parseFlashcardDeck, parseQuiz, saveFlashcardDeck, type FlashcardDeck, type Quiz } from '@/lib/ai/study-artifacts'
@@ -102,8 +102,9 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
     setLoading(true)
     setTutorError('')
     try {
-      const response = await fetch(apiUrl('/api/chat'), {
+      const response = await fetchWithRetry(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: content, mode, action, purpose: 'tutoring', history, documents: [], isPlus: true }),
       })
@@ -146,6 +147,7 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
       try {
         const response = await fetch(apiUrl('/api/chat'), {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: promptText, mode, action: 'quiz', purpose: 'tutoring', history, documents: [], isPlus: true }),
         })
@@ -208,8 +210,9 @@ export function AiTutorPage({ activeTab, onNavigate, notify }: AiTutorPageProps)
     setGeneratingCards(true)
     setFlashcardError('')
     try {
-      const response = await fetch(apiUrl('/api/chat'), {
+      const response = await fetchWithRetry(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: `Create ${cardCount} high-quality active-recall flashcards from these notes. Cover the most important ideas without adding facts that are not present.\n\n${material.slice(0, MAX_FLASHCARD_NOTES)}`,

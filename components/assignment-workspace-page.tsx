@@ -322,6 +322,7 @@ ${assignment.draft.slice(0, 6_000)}`
     try {
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: buildGenerationPrompt(assignment), mode: 'auto', action: 'assignment-plan', history: [], documents: [], isPlus: true }),
       })
@@ -345,6 +346,7 @@ ${assignment.draft.slice(0, 6_000)}`
     try {
       const response = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: buildReviewPrompt(assignment), mode: 'auto', action: 'assignment-review', history: [], documents: [], isPlus: true }),
       })
