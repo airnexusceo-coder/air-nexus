@@ -34,6 +34,7 @@ import { CHAT_HISTORY_STORAGE_KEY } from '@/lib/chat-history'
 import { FLASHCARD_DECK_STORAGE_KEY, parseStoredFlashcardDeck, saveFlashcardDeck } from '@/lib/ai/study-artifacts'
 import { motivationStorageKey, parseMotivationState, MOTIVATION_UPDATED_EVENT } from '@/lib/motivation'
 import { NEXUS_REWARDS_STORAGE_KEY, parseRewardsState } from '@/lib/nexus-points'
+import { buildIcsCalendar, guessIcsEventType, parseIcsEvents, type IcsSourceEvent } from '@/lib/calendar/ics'
 
 type NoticeTone = 'success' | 'info' | 'warning'
 
@@ -688,11 +689,12 @@ type IntegrationPreview = { id: string; name: string; detail: string; icon: type
 
 const comingSoonIntegrations: IntegrationPreview[] = [
   { id: 'drive', name: 'Google Drive', detail: 'Sync notes, documents, and assignments.', icon: Cloud },
-  { id: 'calendar', name: 'Google Calendar', detail: 'Keep exams and study blocks in sync.', icon: CalendarDays },
   { id: 'notion', name: 'Notion', detail: 'Bring study databases into AirGPT.', icon: BookOpen },
   { id: 'discord', name: 'Discord', detail: 'Share safe study-room updates.', icon: MessageSquareText },
   { id: 'teams', name: 'Microsoft Teams', detail: 'Connect class files and meetings.', icon: Users },
 ]
+
+type IcsCalendarEventRow = { id: string; title: string; type: IcsSourceEvent['type']; eventDate: string; time: string }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -700,6 +702,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps, 'notify' | 'motivationUserId'>) {
   const importRef = useRef<HTMLInputElement>(null)
+  const icsImportRef = useRef<HTMLInputElement>(null)
+  const [calendarBusy, setCalendarBusy] = useState<'export' | 'import' | null>(null)
+
+  const exportCalendarIcs = async () => {
+    setCalendarBusy('export')
+    try {
+      const response = await fetch('/api/calendar-events', { credentials: 'include', cache: 'no-store' })
+      if (!response.ok) throw new Error('Could not load your calendar.')
+      const data = await response.json() as { events: IcsCalendarEventRow[] }
+      if (data.events.length === 0) {
+        notify('Your calendar has no events to export yet', 'info')
+        return
+      }
+      const ics = buildIcsCalendar(data.events)
+      const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }))
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = 'airnexus-calendar.ics'
+      anchor.click()
+      URL.revokeObjectURL(url)
+      notify('Calendar exported — import the .ics file into Google Calendar, Outlook, or Apple Calendar', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not export your calendar.', 'warning')
+    } finally {
+      setCalendarBusy(null)
+    }
+  }
+
+  const importCalendarIcs = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setCalendarBusy('import')
+    try {
+      const text = await file.text()
+      const parsed = parseIcsEvents(text)
+      if (parsed.length === 0) {
+        notify(`${file.name} didn't contain any events AirGPT could read`, 'warning')
+        return
+      }
+      let imported = 0
+      for (const item of parsed) {
+        const response = await fetch('/api/calendar-events', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: item.title, type: guessIcsEventType(item.title), eventDate: item.eventDate, time: item.time }),
+        })
+        if (response.ok) imported += 1
+      }
+      notify(imported > 0 ? `Imported ${imported} event${imported === 1 ? '' : 's'} from ${file.name}` : `Couldn't import any events from ${file.name}`, imported > 0 ? 'success' : 'warning')
+    } catch {
+      notify(`${file.name} isn't a valid calendar file`, 'warning')
+    } finally {
+      setCalendarBusy(null)
+      event.target.value = ''
+    }
+  }
 
   const exportData = () => {
     const rewardsKey = `${NEXUS_REWARDS_STORAGE_KEY}:${motivationUserId}`
@@ -783,7 +842,30 @@ function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps
 
   return (
     <div className="space-y-6">
-      <PageIntro eyebrow="Connected workspace" title="Integrations" description="Third-party connections aren't live yet. In the meantime, keep a real, portable backup of your AirNexus data below." />
+      <PageIntro eyebrow="Connected workspace" title="Integrations" description="Real connections where AirGPT can offer them without a third-party login you'd have to trust us with — everything else is an honest coming-soon." />
+      <section className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-4">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white"><CalendarDays className="size-5" /></span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold">Google Calendar, Outlook &amp; Apple Calendar</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Two-way sync via the standard .ics calendar format — no account login needed, works with any calendar app.</p>
+          </div>
+          <span className="flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300"><CheckCircle2 className="size-3" /> Works now</span>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button type="button" onClick={() => void exportCalendarIcs()} disabled={calendarBusy !== null} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white">{calendarBusy === 'export' ? <LoaderCircle className="size-5 animate-spin" /> : <Download className="size-5" />}</span>
+            <span className="flex-1"><span className="block text-sm font-medium">Export to calendar app</span><span className="mt-0.5 block text-xs text-slate-500">Download your AirGPT events as .ics</span></span>
+            <ChevronRight className="size-4 text-slate-600" />
+          </button>
+          <button type="button" onClick={() => icsImportRef.current?.click()} disabled={calendarBusy !== null} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-60">
+            <span className="flex size-10 items-center justify-center rounded-xl bg-white/8 text-zinc-300">{calendarBusy === 'import' ? <LoaderCircle className="size-5 animate-spin" /> : <FileInput className="size-5" />}</span>
+            <span className="flex-1"><span className="block text-sm font-medium">Import from calendar app</span><span className="mt-0.5 block text-xs text-slate-500">Choose an .ics file exported from Google/Outlook/Apple</span></span>
+            <Upload className="size-4 text-slate-600" />
+          </button>
+          <input ref={icsImportRef} type="file" accept=".ics,text/calendar" onChange={(event) => void importCalendarIcs(event)} className="hidden" />
+        </div>
+      </section>
       <div className="grid gap-3 md:grid-cols-2">{comingSoonIntegrations.map((item) => { const Icon = item.icon; return (
         <article key={item.id} className="flex items-center gap-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.015] p-4 sm:p-5">
           <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/5 text-white/35"><Icon className="size-5" /></span>
