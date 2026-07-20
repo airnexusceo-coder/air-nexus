@@ -15,6 +15,7 @@ import {
   Cloud,
   Download,
   FileInput,
+  FileText,
   Gauge,
   LoaderCircle,
   Lock,
@@ -23,11 +24,13 @@ import {
   Search,
   Sparkles,
   Target,
+  Unplug,
   Upload,
   Users,
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Modal } from '@/components/ui/modal'
 import { MotivationPage } from '@/components/motivation-page'
 import type { NotificationDTO, NotificationType } from '@/lib/notifications/types'
 import { CHAT_HISTORY_STORAGE_KEY } from '@/lib/chat-history'
@@ -90,7 +93,7 @@ export function WorkspacePages({ page, onNavigate, notify, onEarnNexusPoints, mo
   if (page === 'Analytics') return <AnalyticsPage />
   if (page === 'Leaderboard') return <MotivationPage userId={motivationUserId} profileName={profileName} notify={notify} />
   if (page === 'Notifications') return <NotificationsPage notify={notify} />
-  if (page === 'Integrations') return <IntegrationsPage notify={notify} motivationUserId={motivationUserId} />
+  if (page === 'Integrations') return <IntegrationsPage notify={notify} motivationUserId={motivationUserId} onNavigate={onNavigate} />
   return null
 }
 
@@ -688,22 +691,63 @@ function CheckCheckIcon() { return <span className="relative size-4"><Check clas
 type IntegrationPreview = { id: string; name: string; detail: string; icon: typeof Cloud }
 
 const comingSoonIntegrations: IntegrationPreview[] = [
-  { id: 'drive', name: 'Google Drive', detail: 'Sync notes, documents, and assignments.', icon: Cloud },
   { id: 'notion', name: 'Notion', detail: 'Bring study databases into AirGPT.', icon: BookOpen },
   { id: 'discord', name: 'Discord', detail: 'Share safe study-room updates.', icon: MessageSquareText },
   { id: 'teams', name: 'Microsoft Teams', detail: 'Connect class files and meetings.', icon: Users },
 ]
 
 type IcsCalendarEventRow = { id: string; title: string; type: IcsSourceEvent['type']; eventDate: string; time: string }
+type DriveFileRow = { id: string; name: string; mimeType: string; modifiedTime: string; size: string | null; importable: boolean }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps, 'notify' | 'motivationUserId'>) {
+function IntegrationsPage({ notify, motivationUserId, onNavigate }: Pick<WorkspacePagesProps, 'notify' | 'motivationUserId' | 'onNavigate'>) {
   const importRef = useRef<HTMLInputElement>(null)
   const icsImportRef = useRef<HTMLInputElement>(null)
   const [calendarBusy, setCalendarBusy] = useState<'export' | 'import' | null>(null)
+
+  const [googleConfigured, setGoogleConfigured] = useState(true)
+  const [googleConnected, setGoogleConnected] = useState(false)
+  const [googleStatusLoading, setGoogleStatusLoading] = useState(true)
+  const [googlePickerOpen, setGooglePickerOpen] = useState(false)
+  const [googleDisconnecting, setGoogleDisconnecting] = useState(false)
+
+  const loadGoogleStatus = useCallback(async () => {
+    setGoogleStatusLoading(true)
+    try {
+      const response = await fetch('/api/integrations/google/status', { credentials: 'include', cache: 'no-store' })
+      const data = await response.json().catch(() => ({})) as { configured?: boolean; connected?: boolean }
+      setGoogleConfigured(Boolean(data.configured))
+      setGoogleConnected(Boolean(data.connected))
+    } catch {
+      setGoogleConfigured(false)
+      setGoogleConnected(false)
+    } finally {
+      setGoogleStatusLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => void loadGoogleStatus(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadGoogleStatus])
+
+  const disconnectGoogleDrive = async () => {
+    setGoogleDisconnecting(true)
+    try {
+      const response = await fetch('/api/integrations/google/disconnect', { method: 'POST', credentials: 'include' })
+      const data = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) throw new Error(data.error ?? 'Could not disconnect Google Drive.')
+      setGoogleConnected(false)
+      notify('Google Drive disconnected', 'success')
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not disconnect Google Drive.', 'warning')
+    } finally {
+      setGoogleDisconnecting(false)
+    }
+  }
 
   const exportCalendarIcs = async () => {
     setCalendarBusy('export')
@@ -866,6 +910,48 @@ function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps
           <input ref={icsImportRef} type="file" accept=".ics,text/calendar" onChange={(event) => void importCalendarIcs(event)} className="hidden" />
         </div>
       </section>
+      <section className="glass rounded-2xl p-5">
+        <div className="flex items-center gap-4">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white"><Cloud className="size-5" /></span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold">Google Drive</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Browse your Drive and import notes, docs, and slides straight into AirGPT Documents.</p>
+          </div>
+          {!googleStatusLoading && (
+            googleConnected ? (
+              <span className="flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300"><CheckCircle2 className="size-3" /> Connected</span>
+            ) : googleConfigured ? (
+              <span className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/40">Not connected</span>
+            ) : (
+              <span className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/35"><Lock className="size-3" /> Not set up</span>
+            )
+          )}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {googleStatusLoading ? (
+            <span className="flex items-center gap-2 text-xs text-slate-500"><LoaderCircle className="size-4 animate-spin" />Checking connection…</span>
+          ) : googleConnected ? (
+            <>
+              <button type="button" onClick={() => setGooglePickerOpen(true)} className="primary-action"><FileText className="size-4" />Browse &amp; import files</button>
+              <button type="button" onClick={() => void disconnectGoogleDrive()} disabled={googleDisconnecting} className="secondary-action disabled:cursor-not-allowed disabled:opacity-60">{googleDisconnecting ? <LoaderCircle className="size-4 animate-spin" /> : <Unplug className="size-4" />}Disconnect</button>
+            </>
+          ) : googleConfigured ? (
+            <button type="button" onClick={() => { window.location.href = '/api/integrations/google/authorize' }} className="primary-action"><Cloud className="size-4" />Connect Google Drive</button>
+          ) : (
+            <p className="text-xs text-white/40">The server has not been configured with Google OAuth credentials yet.</p>
+          )}
+        </div>
+      </section>
+      {googlePickerOpen && (
+        <GoogleDrivePickerModal
+          notify={notify}
+          onClose={() => setGooglePickerOpen(false)}
+          onImported={() => {
+            setGooglePickerOpen(false)
+            onNavigate('Documents')
+          }}
+        />
+      )}
       <div className="grid gap-3 md:grid-cols-2">{comingSoonIntegrations.map((item) => { const Icon = item.icon; return (
         <article key={item.id} className="flex items-center gap-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.015] p-4 sm:p-5">
           <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/5 text-white/35"><Icon className="size-5" /></span>
@@ -878,6 +964,92 @@ function IntegrationsPage({ notify, motivationUserId }: Pick<WorkspacePagesProps
       )})}</div>
       <section className="glass rounded-2xl p-5"><h3 className="font-semibold">Data tools</h3><p className="mt-1 text-xs text-slate-500">Download a real backup of your study progress, Nexus Points, chat history, and flashcards — or restore one on this device.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><button type="button" onClick={exportData} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><Download className="size-5" /></span><span className="flex-1"><span className="block text-sm font-medium">Export data</span><span className="mt-0.5 block text-xs text-slate-500">Download a JSON backup</span></span><ChevronRight className="size-4 text-slate-600" /></button><button type="button" onClick={() => importRef.current?.click()} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8"><span className="flex size-10 items-center justify-center rounded-xl bg-white/8 text-zinc-300"><FileInput className="size-5" /></span><span className="flex-1"><span className="block text-sm font-medium">Restore backup</span><span className="mt-0.5 block text-xs text-slate-500">Choose a previously exported JSON file</span></span><Upload className="size-4 text-slate-600" /></button><input ref={importRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" /></div></section>
     </div>
+  )
+}
+
+function GoogleDrivePickerModal({ notify, onClose, onImported }: { notify: (message: string, tone?: NoticeTone) => void; onClose: () => void; onImported: (docId: string) => void }) {
+  const [search, setSearch] = useState('')
+  const [files, setFiles] = useState<DriveFileRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [importingId, setImportingId] = useState<string | null>(null)
+
+  const loadFiles = useCallback(async (query: string) => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      const response = await fetch(`/api/integrations/google/files${query ? `?q=${encodeURIComponent(query)}` : ''}`, { credentials: 'include', cache: 'no-store' })
+      const data = await response.json().catch(() => ({})) as { files?: DriveFileRow[]; error?: string }
+      if (!response.ok) throw new Error(data.error ?? 'Could not load your Drive files.')
+      setFiles(data.files ?? [])
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Could not load your Drive files.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => void loadFiles(''), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadFiles])
+
+  const importFile = async (file: DriveFileRow) => {
+    setImportingId(file.id)
+    try {
+      const response = await fetch('/api/integrations/google/import', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: file.id, fileName: file.name, mimeType: file.mimeType }),
+      })
+      const data = await response.json().catch(() => ({})) as { docId?: string; error?: string }
+      if (!response.ok || !data.docId) throw new Error(data.error ?? 'Could not import this file.')
+      notify(`Imported "${file.name}" to Documents`, 'success')
+      onImported(data.docId)
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not import this file.', 'warning')
+    } finally {
+      setImportingId(null)
+    }
+  }
+
+  return (
+    <Modal open title="Import from Google Drive" description="Choose a file to bring into AirGPT as a new Document." onClose={onClose}>
+      <div className="space-y-4">
+        <form onSubmit={(event) => { event.preventDefault(); void loadFiles(search) }} className="flex gap-2">
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your Drive" className="w-full rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-sm outline-none focus:border-white/40" />
+          <button type="submit" className="secondary-action shrink-0 px-3"><Search className="size-4" /></button>
+        </form>
+        {loading ? (
+          <div className="flex justify-center py-8"><LoaderCircle className="size-5 animate-spin text-slate-400" /></div>
+        ) : loadError ? (
+          <p role="alert" className="rounded-xl border border-rose-300/20 bg-rose-400/10 px-3 py-3 text-sm text-rose-200">{loadError}</p>
+        ) : files.length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-500">No files found in your Drive.</p>
+        ) : (
+          <div className="max-h-96 space-y-2 overflow-y-auto">
+            {files.map((file) => (
+              <div key={file.id} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-white/8 text-slate-300"><FileText className="size-4" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-white">{file.name}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{new Date(file.modifiedTime).toLocaleDateString()}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void importFile(file)}
+                  disabled={!file.importable || importingId !== null}
+                  className="secondary-action shrink-0 px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {importingId === file.id ? <LoaderCircle className="size-3.5 animate-spin" /> : file.importable ? 'Import' : 'Unsupported'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 

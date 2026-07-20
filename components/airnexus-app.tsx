@@ -286,6 +286,25 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     }
   }, [fetchBillingStatus, notify])
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search)
+      const googleResult = params.get('google')
+      if (googleResult === 'connected') {
+        notify('Google Drive connected', 'success')
+      } else if (googleResult === 'error') {
+        notify(params.get('message') || 'Could not connect Google Drive.', 'warning')
+      }
+      if (googleResult) {
+        params.delete('google')
+        params.delete('message')
+        const query = params.toString()
+        window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash)
+      }
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [notify])
+
   const openBillingPortal = async () => {
     setBillingBusy(true)
     try {
