@@ -318,6 +318,27 @@ export type AdvertisingCampaign = {
   createdAt: string
 }
 
+/** The strategic archetype driving a competitor's yearly decisions — replaces pure random-walk behaviour with deliberate, explainable actions. */
+export type CompetitorStrategyType =
+  | 'price-cutter'
+  | 'luxury-leader'
+  | 'innovation-leader'
+  | 'marketing-giant'
+  | 'efficient-operator'
+  | 'aggressive-expander'
+  | 'ethical-brand'
+  | 'corporate-predator'
+
+export type CompetitorStrategyProfile = {
+  id: CompetitorStrategyType
+  label: string
+  description: string
+  /** Relative likelihood weights for each action this archetype favours — need not sum to 1. */
+  actionWeights: Partial<Record<CompetitorActionType, number>>
+  /** -1..1 — negative archetypes trend prices down over time, positive trend prices up. */
+  priceBias: number
+}
+
 export type Competitor = {
   id: string
   name: string
@@ -330,6 +351,52 @@ export type Competitor = {
   weaknesses: string[]
   /** 0-1 — how aggressively this competitor advertises; random-walks year to year like price and reputation, and factors into how threatening they are. */
   advertisingIntensity: number
+  strategyType: CompetitorStrategyType
+  /** 0-1 — how likely this competitor is to take a bold action (product launch, market entry, acquisition) versus holding steady. */
+  riskTolerance: number
+  /** 0-1 — how often this competitor's action is a quality improvement or product launch. */
+  researchAbility: number
+  /** 0-1 — how often this competitor's action is an advertising push, and how effective it is. */
+  marketingStrength: number
+  /** 0-1 — how efficiently this competitor produces, softening their own cost pressure when they cut prices. */
+  productionEfficiency: number
+}
+
+/** One deliberate move a competitor makes in a given year, driven by their strategy archetype. */
+export type CompetitorActionType =
+  | 'price-change'
+  | 'product-launch'
+  | 'quality-improvement'
+  | 'ad-campaign'
+  | 'market-entry'
+  | 'wage-increase'
+  | 'hiring'
+  | 'acquisition-attempt'
+  | 'hold-steady'
+
+/** One entry in the competitor activity feed — a real action, its concrete effect on that competitor, and an estimate of how it moved the player's forecast demand, so nothing is a silent number. */
+export type CompetitorActivityEvent = {
+  id: string
+  year: number
+  competitorId: string
+  competitorName: string
+  strategyType: CompetitorStrategyType
+  actionType: CompetitorActionType
+  headline: string
+  detail: string
+  /** Signed — the estimated effect on the player's forecast demand this year, in percentage points. Negative hurts the player, positive helps. */
+  demandImpactPercent: number
+}
+
+export const COMPETITOR_STRATEGY_PROFILES: Record<CompetitorStrategyType, CompetitorStrategyProfile> = {
+  'price-cutter': { id: 'price-cutter', label: 'Price Cutter', description: 'Wins on price, constantly undercutting the market.', actionWeights: { 'price-change': 5, 'ad-campaign': 1, 'quality-improvement': 0.4 }, priceBias: -0.7 },
+  'luxury-leader': { id: 'luxury-leader', label: 'Luxury Leader', description: 'Competes on prestige and quality, rarely discounts.', actionWeights: { 'quality-improvement': 3, 'ad-campaign': 1.5, 'price-change': 0.6 }, priceBias: 0.5 },
+  'innovation-leader': { id: 'innovation-leader', label: 'Innovation Leader', description: 'Invests heavily in R&D and frequent product launches.', actionWeights: { 'product-launch': 4, 'quality-improvement': 3, 'ad-campaign': 1 }, priceBias: 0.1 },
+  'marketing-giant': { id: 'marketing-giant', label: 'Marketing Giant', description: 'Wins through brand awareness and heavy advertising spend.', actionWeights: { 'ad-campaign': 5, 'product-launch': 1.2, 'price-change': 0.8 }, priceBias: 0 },
+  'efficient-operator': { id: 'efficient-operator', label: 'Efficient Operator', description: 'Focuses on lean production and steady, sustainable pricing.', actionWeights: { 'quality-improvement': 1.5, 'price-change': 1, 'hiring': 1 }, priceBias: -0.2 },
+  'aggressive-expander': { id: 'aggressive-expander', label: 'Aggressive Expander', description: 'Chases market share through rapid growth and new-market entry.', actionWeights: { 'market-entry': 4, 'product-launch': 2, 'acquisition-attempt': 1.2, 'hiring': 1.5 }, priceBias: -0.1 },
+  'ethical-brand': { id: 'ethical-brand', label: 'Ethical Brand', description: 'Builds trust through fair wages and responsible practices.', actionWeights: { 'wage-increase': 3, 'hiring': 1.5, 'quality-improvement': 1.2 }, priceBias: 0.1 },
+  'corporate-predator': { id: 'corporate-predator', label: 'Corporate Predator', description: 'Plays hardball — undercuts rivals and looks to absorb the weak.', actionWeights: { 'acquisition-attempt': 3, 'price-change': 3, 'market-entry': 1.5 }, priceBias: -0.4 },
 }
 
 export type CashTransactionCategory =
@@ -364,6 +431,9 @@ export type Loan = {
 }
 
 export type ReputationLevel = 'Disastrous' | 'Poor' | 'Average' | 'Strong' | 'Excellent'
+
+/** Six independently-tracked reputation fronts — a decision can move more than one at once (e.g. closing a factory can lift investor confidence while damaging employee and government reputation). `brandReputation` remains the single overall score every existing formula reads; these are the explained breakdown of where it comes from. */
+export type ReputationCategory = 'customer' | 'employee' | 'investor' | 'government' | 'environmental' | 'supplier'
 
 /** Every distinct trigger that can move company reputation — used so a reputation change is always traceable to a specific, named cause, never a bare number. */
 export type ReputationReasonCategory =
@@ -403,6 +473,8 @@ export type ReputationTransaction = {
   valueBefore: number
   valueAfter: number
   reasonCategory: ReputationReasonCategory
+  /** Which of the six reputation fronts this transaction moved — most reasons touch one, a few (founding, a crisis, a recall) touch several. */
+  category: ReputationCategory[]
   description: string
   relatedId?: string
   createdAt: string
@@ -468,6 +540,8 @@ export type AnnualReport = {
     costOfGoodsSold: number
   }[]
   events: BusinessEvent[]
+  /** Every deliberate competitor action taken this year, in the same order the activity feed shows them. */
+  competitorActions: CompetitorActivityEvent[]
   learningSummary: {
     workedWell: string[]
     causedProblems: string[]
@@ -534,6 +608,8 @@ export type GameState = {
   brandReputation: number
   /** The single source of truth for every reputation change this company has ever had. `brandReputation` must always equal `reputationHistory[0].valueBefore` plus the sum of every entry's `delta`. */
   reputationHistory: ReputationTransaction[]
+  /** The six-front breakdown of reputation — moved by the same transactions as `brandReputation`, via the `category` tag on each `ReputationTransaction`. */
+  reputationCategories: Record<ReputationCategory, number>
   /** 0-100 — staff morale, driven by wages relative to industry norms and by company reputation; low morale raises effective wage costs (turnover) and slightly lowers output quality. */
   staffMorale: number
   loans: Loan[]
@@ -550,4 +626,4 @@ export type GameState = {
   saveVersion: number
 }
 
-export const CURRENT_SAVE_VERSION = 2
+export const CURRENT_SAVE_VERSION = 3

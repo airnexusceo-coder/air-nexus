@@ -1,23 +1,29 @@
 import { getIndustryProfile } from '@/lib/business-empire/industries'
-import type {
-  AdvertisingCampaign,
-  AdvertisingChannel,
-  BusinessEvent,
-  CashTransaction,
-  CashTransactionCategory,
-  Competitor,
-  DifficultyProfile,
-  GameState,
-  IndustryProfile,
-  Product,
-  ProductQuality,
-  ProductionMethod,
-  PackagingQuality,
-  ProductReview,
-  ReputationLevel,
-  ReputationReasonCategory,
-  ReputationTransaction,
-  ReviewSentiment,
+import {
+  COMPETITOR_STRATEGY_PROFILES,
+  type AdvertisingCampaign,
+  type AdvertisingChannel,
+  type BusinessEvent,
+  type CashTransaction,
+  type CashTransactionCategory,
+  type Competitor,
+  type CompetitorActionType,
+  type CompetitorActivityEvent,
+  type CompetitorStrategyProfile,
+  type CompetitorStrategyType,
+  type DifficultyProfile,
+  type GameState,
+  type IndustryProfile,
+  type Product,
+  type ProductQuality,
+  type ProductionMethod,
+  type PackagingQuality,
+  type ProductReview,
+  type ReputationCategory,
+  type ReputationLevel,
+  type ReputationReasonCategory,
+  type ReputationTransaction,
+  type ReviewSentiment,
 } from '@/lib/business-empire/types'
 
 export function createId(prefix: string): string {
@@ -93,10 +99,50 @@ export function getReputationLevel(score: number): ReputationLevel {
 }
 
 /**
+ * Maps every reputation trigger to the reputation front(s) it moves. Most
+ * triggers touch one front; a few genuinely span several (founding a company
+ * establishes baseline trust everywhere, a mishandled crisis damages both
+ * investor confidence and customer trust at once, a save migration seeds all
+ * six fronts from the carried-over score).
+ */
+export const REPUTATION_CATEGORY_MAP: Record<ReputationReasonCategory, ReputationCategory[]> = {
+  COMPANY_FOUNDED: ['customer', 'employee', 'investor', 'government', 'environmental', 'supplier'],
+  RELIABLE_PRODUCT: ['customer'],
+  QUALITY_ISSUE: ['customer'],
+  COMPLAINT_HANDLED: ['customer'],
+  COMPLAINT_IGNORED: ['customer'],
+  ON_TIME_DELIVERY: ['customer'],
+  PRODUCTION_DELAY: ['supplier'],
+  FAIR_TREATMENT: ['employee'],
+  SUPPLIER_PAYMENT_LATE: ['supplier'],
+  CRISIS_HANDLED_WELL: ['investor', 'customer'],
+  CRISIS_MISHANDLED: ['investor', 'customer'],
+  HONEST_ADVERTISING: ['customer'],
+  MISLEADING_ADVERTISING: ['customer'],
+  COMMUNITY_SUPPORT: ['environmental'],
+  ENVIRONMENTAL_RESPONSIBILITY: ['environmental'],
+  ENVIRONMENTAL_HARM: ['environmental', 'government'],
+  SATISFACTION_STREAK: ['customer'],
+  SATISFACTION_TREND: ['customer'],
+  PRODUCT_RECALL: ['customer', 'government'],
+  SCANDAL: ['government', 'investor'],
+  REGULATION_BREACH: ['government'],
+  UNFAIR_PRICING: ['customer'],
+  PRODUCT_CANCELLED_POORLY: ['customer'],
+  REPEATED_STOCKOUT: ['customer'],
+  MULTI_YEAR_STABILITY: ['investor'],
+  MEDIA_COVERAGE: ['customer', 'investor'],
+  SAVE_MIGRATION: ['customer', 'employee', 'investor', 'government', 'environmental', 'supplier'],
+}
+
+/**
  * The one function allowed to change `GameState.brandReputation`. Mirrors
  * `appendTransaction` exactly: every reputation change is clamped to 0-100,
  * logged with a before/after value and a mandatory human-readable reason, and
- * appended to `reputationHistory` — reputation can never move silently.
+ * appended to `reputationHistory` — reputation can never move silently. The
+ * same delta also moves every reputation front the reason maps to, via
+ * `REPUTATION_CATEGORY_MAP`, so the six-front breakdown can never desync from
+ * the overall score — they are driven by the exact same transaction.
  */
 export function appendReputationTransaction(
   state: GameState,
@@ -105,6 +151,7 @@ export function appendReputationTransaction(
   const valueBefore = state.brandReputation
   const valueAfter = clamp(Math.round(valueBefore + params.delta), 0, 100)
   const actualDelta = valueAfter - valueBefore
+  const categories = REPUTATION_CATEGORY_MAP[params.reasonCategory]
   const transaction: ReputationTransaction = {
     id: createId('rep'),
     year: state.year,
@@ -112,11 +159,16 @@ export function appendReputationTransaction(
     valueBefore,
     valueAfter,
     reasonCategory: params.reasonCategory,
+    category: categories,
     description: params.description,
     relatedId: params.relatedId,
     createdAt: new Date().toISOString(),
   }
-  return { ...state, brandReputation: valueAfter, reputationHistory: [...state.reputationHistory, transaction] }
+  let reputationCategories = state.reputationCategories
+  for (const category of categories) {
+    reputationCategories = { ...reputationCategories, [category]: clamp(Math.round(reputationCategories[category] + params.delta), 0, 100) }
+  }
+  return { ...state, brandReputation: valueAfter, reputationHistory: [...state.reputationHistory, transaction], reputationCategories }
 }
 
 export function sumReputationHistory(state: GameState): number {
@@ -359,10 +411,19 @@ function generateCompetitorName(rng: () => number, used: Set<string>): string {
 
 const QUALITY_ORDER: ProductQuality[] = ['budget', 'standard', 'premium', 'luxury']
 
+function pickStrategyForQuality(quality: ProductQuality, rng: () => number): CompetitorStrategyType {
+  if (quality === 'luxury') return rng() < 0.6 ? 'luxury-leader' : 'innovation-leader'
+  if (quality === 'premium') return rng() < 0.5 ? 'innovation-leader' : 'ethical-brand'
+  if (quality === 'budget') return rng() < 0.6 ? 'price-cutter' : 'efficient-operator'
+  const standardPool: CompetitorStrategyType[] = ['efficient-operator', 'marketing-giant', 'aggressive-expander', 'corporate-predator']
+  return standardPool[Math.floor(rng() * standardPool.length)]
+}
+
 export function createCompetitorsForIndustry(industry: IndustryProfile, difficulty: DifficultyProfile, rng: () => number = Math.random): Competitor[] {
   const used = new Set<string>()
   return Array.from({ length: difficulty.competitorCount }, () => {
     const quality = QUALITY_ORDER[Math.floor(rng() * QUALITY_ORDER.length)]
+    const strategyType = pickStrategyForQuality(quality, rng)
     return {
       id: createId('competitor'),
       name: generateCompetitorName(rng, used),
@@ -374,39 +435,213 @@ export function createCompetitorsForIndustry(industry: IndustryProfile, difficul
       strengths: [quality === 'luxury' || quality === 'premium' ? 'Strong brand reputation' : 'Aggressive pricing'],
       weaknesses: [quality === 'budget' ? 'Inconsistent quality' : 'Higher prices than average'],
       advertisingIntensity: Math.round(randomInRange(0.2, 0.6, rng) * 100) / 100,
+      strategyType,
+      riskTolerance: Math.round(randomInRange(0.2, 0.8, rng) * 100) / 100,
+      researchAbility: Math.round(randomInRange(0.2, 0.8, rng) * 100) / 100,
+      marketingStrength: Math.round(randomInRange(0.2, 0.8, rng) * 100) / 100,
+      productionEfficiency: Math.round(randomInRange(0.2, 0.8, rng) * 100) / 100,
     }
   })
 }
 
+/** Deterministic, explainable backfill for save-migration — quality/price/advertising already carry a "personality", this just names it and gives it the new trait numbers. */
+export function backfillCompetitorStrategy(competitor: Competitor, index: number): Competitor {
+  const rng = mulberry32(hashSeed(competitor.id) + index)
+  const strategyType = pickStrategyForQuality(competitor.quality, rng)
+  return {
+    ...competitor,
+    strategyType,
+    riskTolerance: Math.round(randomInRange(0.3, 0.7, rng) * 100) / 100,
+    researchAbility: Math.round(randomInRange(0.3, 0.7, rng) * 100) / 100,
+    marketingStrength: Math.round(randomInRange(0.3, 0.7, rng) * 100) / 100,
+    productionEfficiency: Math.round(randomInRange(0.3, 0.7, rng) * 100) / 100,
+  }
+}
+
+function hashSeed(value: string): number {
+  let hash = 0
+  for (let i = 0; i < value.length; i++) hash = (hash * 31 + value.charCodeAt(i)) | 0
+  return hash >>> 0
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed
+  return () => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+export type CompetitorPlayerContext = {
+  averagePrice: number
+  /** 0-100 quality score, comparable to `computeQualityScore`'s output. */
+  averageQualityScore: number
+  marketShare: number
+}
+
+const COMPETITOR_ACTION_TYPES: CompetitorActionType[] = ['price-change', 'product-launch', 'quality-improvement', 'ad-campaign', 'market-entry', 'wage-increase', 'hiring', 'acquisition-attempt']
+
+function pickWeightedAction(profile: CompetitorStrategyProfile, competitor: Competitor, player: CompetitorPlayerContext, rng: () => number, allowAcquisition: boolean): CompetitorActionType | 'hold-steady' {
+  const holdChance = clamp(0.45 - competitor.riskTolerance * 0.35, 0.05, 0.5)
+  if (rng() < holdChance) return 'hold-steady'
+
+  const weights: Partial<Record<CompetitorActionType, number>> = { ...profile.actionWeights }
+  // Respond to the player's own strategy, not just their own archetype.
+  if (player.averagePrice > 0 && player.averagePrice < competitor.price * 0.9) {
+    weights['price-change'] = (weights['price-change'] ?? 0.15) + 1.5
+  }
+  if (player.averageQualityScore > QUALITY_BASE_SCORE[competitor.quality] + 15) {
+    weights['quality-improvement'] = (weights['quality-improvement'] ?? 0.15) + 1.2
+  }
+  if (player.marketShare > 25) {
+    weights['market-entry'] = (weights['market-entry'] ?? 0.15) + 0.8
+  }
+
+  const entries = COMPETITOR_ACTION_TYPES
+    .filter((action) => action !== 'acquisition-attempt' || allowAcquisition)
+    .map((action): [CompetitorActionType, number] => [action, weights[action] ?? 0.15])
+    .filter(([, weight]) => weight > 0)
+  const totalWeight = entries.reduce((sum, [, weight]) => sum + weight, 0)
+  if (totalWeight <= 0) return 'hold-steady'
+  let roll = rng() * totalWeight
+  for (const [action, weight] of entries) {
+    roll -= weight
+    if (roll <= 0) return action
+  }
+  return entries[entries.length - 1][0]
+}
+
+function makeActivityEvent(competitor: Competitor, year: number, actionType: CompetitorActionType, headline: string, detail: string, demandImpactPercent: number): CompetitorActivityEvent {
+  return { id: createId('competitor-action'), year, competitorId: competitor.id, competitorName: competitor.name, strategyType: competitor.strategyType, actionType, headline, detail, demandImpactPercent: Math.round(demandImpactPercent) }
+}
+
 /**
- * Competitors are not static: price and reputation already random-walked
- * each year; now quality can step up (simulating competitor R&D — never
- * down, competitors don't get worse on purpose) and advertising intensity
- * random-walks like price/reputation. Both feed how "threatening" a
- * competitor looks in the demand formula.
+ * Competitors take one deliberate action a year, driven by their strategy
+ * archetype and how they read the player's current price/quality/market
+ * share — replacing the old pure random walk. Runs before this year's demand
+ * is computed, so a competitor's price cut or product launch actually
+ * affects the same year's sales, matching the activity-feed explanation the
+ * player sees (`demandImpactPercent` is an estimate for that explanation;
+ * the real effect flows through the updated `Competitor` fields into
+ * `computeDemand`'s existing competition formula).
  */
-export function updateCompetitorsForYear(competitors: Competitor[], playerMarketShare: number, difficulty: DifficultyProfile, rng: () => number = Math.random): Competitor[] {
-  const remainingShare = Math.max(0, 100 - playerMarketShare)
-  const totalCompetitorWeight = competitors.reduce((sum, c) => sum + c.marketShare, 0) || 1
-  return competitors.map((competitor) => {
-    const priceDrift = randomInRange(-0.05, 0.05, rng) * difficulty.volatility
-    const reputationDrift = randomInRange(-3, 3, rng) * difficulty.volatility
-    const adIntensityDrift = randomInRange(-0.08, 0.08, rng) * difficulty.volatility
-    const shareWeight = competitor.marketShare / totalCompetitorWeight
+export function runCompetitorActionsForYear(
+  competitors: Competitor[],
+  player: CompetitorPlayerContext,
+  year: number,
+  rng: () => number = Math.random,
+): { competitors: Competitor[]; activity: CompetitorActivityEvent[] } {
+  const activity: CompetitorActivityEvent[] = []
+  const removedIds = new Set<string>()
+  const nextPool: Competitor[] = []
 
-    const qualityImprovementChance = 0.08 * difficulty.volatility
-    const currentQualityIndex = QUALITY_ORDER.indexOf(competitor.quality)
-    const quality = rng() < qualityImprovementChance && currentQualityIndex < QUALITY_ORDER.length - 1 ? QUALITY_ORDER[currentQualityIndex + 1] : competitor.quality
+  for (const competitor of competitors) {
+    if (removedIds.has(competitor.id)) continue
+    const profile = COMPETITOR_STRATEGY_PROFILES[competitor.strategyType]
+    const activeCount = competitors.length - removedIds.size
+    const allowAcquisition = activeCount > 2 && (competitor.strategyType === 'corporate-predator' || competitor.strategyType === 'aggressive-expander')
+    const action = pickWeightedAction(profile, competitor, player, rng, allowAcquisition)
 
-    return {
-      ...competitor,
-      price: Math.max(1, Math.round(competitor.price * (1 + priceDrift) * 100) / 100),
-      quality,
-      reputation: clamp(Math.round(competitor.reputation + reputationDrift), 10, 95),
-      marketShare: clamp(Math.round(remainingShare * shareWeight), 1, 60),
-      advertisingIntensity: clamp(Math.round((competitor.advertisingIntensity + adIntensityDrift) * 100) / 100, 0.05, 0.9),
+    if (action === 'hold-steady') {
+      nextPool.push(competitor)
+      continue
     }
-  })
+
+    if (action === 'price-change') {
+      const magnitude = randomInRange(0.03, 0.15, rng) * (0.5 + competitor.riskTolerance)
+      const direction = profile.priceBias + randomInRange(-0.3, 0.3, rng) >= 0 ? 1 : -1
+      const newPrice = Math.max(1, Math.round(competitor.price * (1 + direction * magnitude) * 100) / 100)
+      nextPool.push({ ...competitor, price: newPrice })
+      const changePercent = Math.round(magnitude * 100)
+      activity.push(makeActivityEvent(competitor, year, 'price-change',
+        direction < 0 ? `${competitor.name} cut its price by ${changePercent}%` : `${competitor.name} raised its price by ${changePercent}%`,
+        direction < 0 ? 'Your product is now relatively less attractive to price-sensitive customers.' : 'Your product now looks relatively better value by comparison.',
+        direction < 0 ? -changePercent * 0.4 : changePercent * 0.22))
+      continue
+    }
+
+    if (action === 'quality-improvement') {
+      const currentIndex = QUALITY_ORDER.indexOf(competitor.quality)
+      const nextIndex = Math.min(QUALITY_ORDER.length - 1, currentIndex + 1)
+      if (nextIndex === currentIndex) { nextPool.push(competitor); continue }
+      nextPool.push({ ...competitor, quality: QUALITY_ORDER[nextIndex] })
+      activity.push(makeActivityEvent(competitor, year, 'quality-improvement',
+        `${competitor.name} upgraded its product to ${QUALITY_ORDER[nextIndex]} quality`,
+        'Customers comparing quality now see less of a gap between your product and theirs.',
+        -randomInRange(2, 6, rng)))
+      continue
+    }
+
+    if (action === 'ad-campaign') {
+      const boost = randomInRange(0.15, 0.3, rng) * (0.5 + competitor.marketingStrength)
+      nextPool.push({ ...competitor, advertisingIntensity: clamp(Math.round((competitor.advertisingIntensity + boost) * 100) / 100, 0.05, 0.95) })
+      activity.push(makeActivityEvent(competitor, year, 'ad-campaign',
+        `${competitor.name} launched a major advertising campaign`,
+        'Their increased visibility pulled some attention away from your products this year.',
+        -randomInRange(2, 7, rng) * (0.5 + competitor.marketingStrength)))
+      continue
+    }
+
+    if (action === 'product-launch') {
+      const shareBump = randomInRange(2, 5, rng)
+      nextPool.push({ ...competitor, marketShare: clamp(Math.round(competitor.marketShare + shareBump), 1, 60), advertisingIntensity: clamp(Math.round((competitor.advertisingIntensity + 0.05) * 100) / 100, 0.05, 0.95) })
+      activity.push(makeActivityEvent(competitor, year, 'product-launch',
+        `${competitor.name} launched a new product`,
+        'Customers now have an additional option in the market, softening demand for your products.',
+        -randomInRange(3, 8, rng)))
+      continue
+    }
+
+    if (action === 'market-entry') {
+      const shareBump = randomInRange(5, 10, rng) * (0.5 + competitor.riskTolerance)
+      nextPool.push({ ...competitor, marketShare: clamp(Math.round(competitor.marketShare + shareBump), 1, 60) })
+      activity.push(makeActivityEvent(competitor, year, 'market-entry',
+        `${competitor.name} expanded aggressively into new customer segments`,
+        'Their expansion reached customers who might otherwise have considered your products.',
+        -randomInRange(5, 12, rng)))
+      continue
+    }
+
+    if (action === 'wage-increase' || action === 'hiring') {
+      const repBump = Math.round(randomInRange(2, 5, rng))
+      nextPool.push({ ...competitor, reputation: clamp(competitor.reputation + repBump, 10, 95) })
+      activity.push(makeActivityEvent(competitor, year, action,
+        action === 'wage-increase' ? `${competitor.name} raised wages to retain staff` : `${competitor.name} expanded its workforce`,
+        'This strengthened their standing as an employer, with little direct effect on your sales.',
+        0))
+      continue
+    }
+
+    if (action === 'acquisition-attempt') {
+      const targets = competitors.filter((c) => c.id !== competitor.id && !removedIds.has(c.id))
+      const target = targets.reduce<Competitor | null>((weakest, c) => (weakest === null || c.marketShare < weakest.marketShare ? c : weakest), null)
+      if (!target) { nextPool.push(competitor); continue }
+      const acquirerStrength = competitor.marketingStrength + competitor.productionEfficiency + competitor.riskTolerance
+      const successChance = clamp(0.25 + acquirerStrength * 0.15 - target.reputation / 300, 0.1, 0.75)
+      if (rng() < successChance) {
+        removedIds.add(target.id)
+        nextPool.push({ ...competitor, marketShare: clamp(Math.round(competitor.marketShare + target.marketShare), 1, 70) })
+        activity.push(makeActivityEvent(competitor, year, 'acquisition-attempt',
+          `${competitor.name} acquired ${target.name}`,
+          'The combined company now holds a larger share of the market, increasing competitive pressure on you.',
+          -randomInRange(4, 10, rng)))
+      } else {
+        nextPool.push(competitor)
+        activity.push(makeActivityEvent(competitor, year, 'acquisition-attempt',
+          `${competitor.name} attempted to acquire ${target.name}, but the deal fell through`,
+          'No immediate effect on your business, though the industry took notice of the attempt.',
+          0))
+      }
+      continue
+    }
+
+    nextPool.push(competitor)
+  }
+
+  return { competitors: nextPool, activity }
 }
 
 // --- Yearly events ---------------------------------------------------------------

@@ -1,5 +1,5 @@
-import { CURRENT_SAVE_VERSION, type AdvertisingCampaign, type AnnualReport, type Competitor, type GameState, type Product, type ReputationTransaction } from '@/lib/business-empire/types'
-import { computeProductRating, createId, verifyLedgerIntegrity } from '@/lib/business-empire/simulation'
+import { CURRENT_SAVE_VERSION, type AdvertisingCampaign, type AnnualReport, type Competitor, type GameState, type Product, type ReputationCategory, type ReputationTransaction } from '@/lib/business-empire/types'
+import { REPUTATION_CATEGORY_MAP, backfillCompetitorStrategy, computeProductRating, createId, verifyLedgerIntegrity } from '@/lib/business-empire/simulation'
 
 const STORAGE_PREFIX = 'airnexus-business-empire'
 
@@ -56,7 +56,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     : []
 
   const competitors: Competitor[] = Array.isArray(parsed.competitors)
-    ? (parsed.competitors as Record<string, unknown>[]).map((c) => ({ ...c, advertisingIntensity: 0.3 }) as unknown as Competitor)
+    ? (parsed.competitors as Record<string, unknown>[]).map((c, index) => backfillCompetitorStrategy({ ...c, advertisingIntensity: 0.3 } as unknown as Competitor, index))
     : []
 
   const advertisingCampaigns: AdvertisingCampaign[] = Array.isArray(parsed.advertisingCampaigns)
@@ -64,7 +64,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     : []
 
   const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
-    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, loanRepayments: 0, factorNotes: [] }) as unknown as AnnualReport)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, loanRepayments: 0, factorNotes: [], competitorActions: [] }) as unknown as AnnualReport)
     : []
 
   const migrationEntry: ReputationTransaction = {
@@ -74,8 +74,17 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     valueBefore: legacyReputation,
     valueAfter: legacyReputation,
     reasonCategory: 'SAVE_MIGRATION',
+    category: REPUTATION_CATEGORY_MAP.SAVE_MIGRATION,
     description: 'This save was upgraded to the new reputation-tracking system. The reputation score itself was carried over unchanged; only its history starts fresh from here.',
     createdAt: new Date().toISOString(),
+  }
+  const reputationCategories: Record<ReputationCategory, number> = {
+    customer: legacyReputation,
+    employee: legacyReputation,
+    investor: legacyReputation,
+    government: legacyReputation,
+    environmental: legacyReputation,
+    supplier: legacyReputation,
   }
 
   return {
@@ -96,6 +105,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     customerSatisfaction: typeof parsed.customerSatisfaction === 'number' ? parsed.customerSatisfaction : 70,
     brandReputation: legacyReputation,
     reputationHistory: [migrationEntry],
+    reputationCategories,
     staffMorale: 70,
     loans: [],
     economicIndex: typeof parsed.economicIndex === 'number' ? parsed.economicIndex : 1,
@@ -110,10 +120,75 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
 }
 
 /**
+ * Upgrades a save from the pre-competitor-strategy format (version 2) into
+ * the current shape (version 3). Cash, products, the reputation score, loans
+ * and everything else already correct in v2 pass through unchanged.
+ * Competitors are given a strategy archetype backfilled from their existing
+ * quality/price "personality" rather than a blank default. Every existing
+ * reputation transaction is tagged with the category (or categories) its
+ * reason maps to, and the six-category breakdown starts from the current
+ * overall score via one transparent "save upgraded" entry, exactly like the
+ * v1 -> v2 migration did for reputation history itself.
+ */
+export function migrateV2ToV3(parsed: Record<string, unknown>): GameState | null {
+  if (typeof parsed.cash !== 'number' || !Array.isArray(parsed.cashLedger) || !isRecord(parsed.preferences)) return null
+  if (typeof parsed.companyName !== 'string' || typeof parsed.industry !== 'string' || typeof parsed.year !== 'number') return null
+  if (typeof parsed.brandReputation !== 'number' || !Array.isArray(parsed.reputationHistory)) return null
+
+  const legacyReputation = parsed.brandReputation
+
+  const competitors: Competitor[] = Array.isArray(parsed.competitors)
+    ? (parsed.competitors as Record<string, unknown>[]).map((c, index) => backfillCompetitorStrategy(c as unknown as Competitor, index))
+    : []
+
+  const reputationHistory: ReputationTransaction[] = (parsed.reputationHistory as Record<string, unknown>[]).map((entry) => {
+    const reasonCategory = (typeof entry.reasonCategory === 'string' ? entry.reasonCategory : 'SAVE_MIGRATION') as ReputationTransaction['reasonCategory']
+    return { ...entry, category: REPUTATION_CATEGORY_MAP[reasonCategory] ?? REPUTATION_CATEGORY_MAP.SAVE_MIGRATION } as unknown as ReputationTransaction
+  })
+
+  const migrationEntry: ReputationTransaction = {
+    id: createId('rep'),
+    year: typeof parsed.year === 'number' ? parsed.year : 1,
+    delta: 0,
+    valueBefore: legacyReputation,
+    valueAfter: legacyReputation,
+    reasonCategory: 'SAVE_MIGRATION',
+    category: REPUTATION_CATEGORY_MAP.SAVE_MIGRATION,
+    description: 'This save was upgraded to track six separate reputation categories (customer, employee, investor, government, environmental, supplier). Each starts from the current overall score.',
+    createdAt: new Date().toISOString(),
+  }
+  const reputationCategories: Record<ReputationCategory, number> = {
+    customer: legacyReputation,
+    employee: legacyReputation,
+    investor: legacyReputation,
+    government: legacyReputation,
+    environmental: legacyReputation,
+    supplier: legacyReputation,
+  }
+
+  const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => {
+        const record = r as { competitorActions?: unknown }
+        return { ...r, competitorActions: Array.isArray(record.competitorActions) ? record.competitorActions : [] } as unknown as AnnualReport
+      })
+    : []
+
+  return {
+    ...(parsed as unknown as GameState),
+    competitors,
+    reputationHistory: [...reputationHistory, migrationEntry],
+    reputationCategories,
+    annualReports,
+    saveVersion: CURRENT_SAVE_VERSION,
+    lastSavedAt: new Date().toISOString(),
+  }
+}
+
+/**
  * Never trusts a stored `cash` number on faith — it is only accepted if the
  * ledger it shipped with actually sums to that cash value. A save at the
- * current version is loaded directly; a save at the known older version is
- * upgraded through `migrateLegacySave`; anything else is treated as
+ * current version is loaded directly; a save at a known older version is
+ * upgraded through the matching migration step; anything else is treated as
  * unrecoverable rather than silently repaired with a guessed balance.
  */
 export function loadGameState(userId: string): LoadResult {
@@ -130,6 +205,8 @@ export function loadGameState(userId: string): LoadResult {
     let candidate: GameState | null = null
     if (parsed.saveVersion === CURRENT_SAVE_VERSION && typeof parsed.cash === 'number' && Array.isArray(parsed.cashLedger) && isRecord(parsed.preferences)) {
       candidate = parsed as GameState
+    } else if (parsed.saveVersion === 2) {
+      candidate = migrateV2ToV3(parsed as Record<string, unknown>)
     } else if (parsed.saveVersion === 1 || parsed.saveVersion === undefined) {
       candidate = migrateLegacySave(parsed as Record<string, unknown>)
     }

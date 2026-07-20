@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, Lightbulb, Newspaper, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, Lightbulb, Newspaper, Swords, TriangleAlert } from 'lucide-react'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
 import type { AnnualReport } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
@@ -105,6 +105,27 @@ export function AnnualReportView({ report }: AnnualReportViewProps) {
                 <p className="text-sm font-medium text-white">{event.headline}</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">{event.body}</p>
                 <p className="mt-1 text-xs leading-5 text-amber-200/90">{event.impact}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {report.competitorActions.length > 0 && (
+        <section>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-white"><Swords className="size-4 text-amber-300" />Competitor activity this year</h3>
+          <div className="mt-2 space-y-2">
+            {report.competitorActions.map((event) => (
+              <div key={event.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-sm font-medium text-white">{event.headline}</p>
+                  {event.demandImpactPercent !== 0 && (
+                    <span className={cn('shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold', event.demandImpactPercent < 0 ? 'bg-rose-400/10 text-rose-300' : 'bg-emerald-400/10 text-emerald-300')}>
+                      {event.demandImpactPercent > 0 ? '+' : ''}{event.demandImpactPercent}% demand
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{event.detail}</p>
               </div>
             ))}
           </div>

@@ -16,6 +16,7 @@ import {
 } from '../lib/business-empire/game-state'
 import { sumCashLedger } from '../lib/business-empire/simulation'
 import { appendReputationTransaction, checkForProductRecall, computeDemand, computeQualityScore, verifyReputationIntegrity } from '../lib/business-empire/simulation'
+import { REPUTATION_CATEGORY_MAP, runCompetitorActionsForYear } from '../lib/business-empire/simulation'
 import { getIndustryProfile } from '../lib/business-empire/industries'
 import {
   assignJobByDegreeQuality,
@@ -30,7 +31,7 @@ import {
   scoreInterviewAnswers,
   UNIVERSITY_ENTRANCE_QUIZ,
 } from '../lib/business-empire/hardcore-career'
-import { migrateLegacySave } from '../lib/business-empire/storage'
+import { migrateLegacySave, migrateV2ToV3 } from '../lib/business-empire/storage'
 import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, type CareerBackground, type GamePreferences, type GameState } from '../lib/business-empire/types'
 
 const rng = () => 0.5
@@ -500,3 +501,113 @@ console.log('Business Empire demand + integrity tests passed')
 }
 
 console.log('Business Empire reputation, Hardcore Mode, and migration tests passed')
+
+// ============================================================================
+// Competitor strategy engine, reputation categories, and v2 -> v3 migration
+// ============================================================================
+
+// 26. A reputation transaction always moves every category its reason maps to, and only those — categories can never desync from the ledger-explained reason.
+{
+  assert.deepEqual(REPUTATION_CATEGORY_MAP.FAIR_TREATMENT, ['employee'], 'FAIR_TREATMENT is mapped to exactly one reputation category')
+  assert.deepEqual(REPUTATION_CATEGORY_MAP.CRISIS_MISHANDLED, ['investor', 'customer'], 'CRISIS_MISHANDLED is mapped to both categories it genuinely affects')
+
+  const state = freshState()
+  const before = state.reputationCategories
+  const afterFairTreatment = appendReputationTransaction(state, { delta: 5, reasonCategory: 'FAIR_TREATMENT', description: 'Test fair treatment' })
+  assert.equal(afterFairTreatment.reputationCategories.employee, before.employee + 5, 'FAIR_TREATMENT moves the employee category by exactly the delta')
+  assert.equal(afterFairTreatment.reputationCategories.customer, before.customer, 'FAIR_TREATMENT does not move an unrelated category')
+  assert.equal(afterFairTreatment.reputationCategories.supplier, before.supplier, 'FAIR_TREATMENT does not move an unrelated category')
+
+  const afterCrisis = appendReputationTransaction(state, { delta: -6, reasonCategory: 'CRISIS_MISHANDLED', description: 'Test crisis' })
+  assert.equal(afterCrisis.reputationCategories.investor, before.investor - 6, 'a multi-category reason (CRISIS_MISHANDLED) moves every category it maps to')
+  assert.equal(afterCrisis.reputationCategories.customer, before.customer - 6, 'a multi-category reason (CRISIS_MISHANDLED) moves every category it maps to')
+  assert.equal(afterCrisis.reputationCategories.employee, before.employee, 'a multi-category reason never moves a category outside its map')
+}
+
+// 27. Founding a company seeds all six reputation categories to the same starting value as the overall score.
+{
+  const state = freshState()
+  assert.deepEqual(
+    state.reputationCategories,
+    { customer: state.brandReputation, employee: state.brandReputation, investor: state.brandReputation, government: state.brandReputation, environmental: state.brandReputation, supplier: state.brandReputation },
+    'a freshly founded company starts every reputation category at the same value as the overall score',
+  )
+}
+
+// 28. Competitors take one explained action a year; every activity event carries a nonzero-length headline/detail and a real strategy archetype.
+{
+  const state = freshState()
+  assert.ok(state.competitors.length > 0, 'setup: beginner difficulty seeds at least one competitor')
+  for (const competitor of state.competitors) {
+    assert.ok(['price-cutter', 'luxury-leader', 'innovation-leader', 'marketing-giant', 'efficient-operator', 'aggressive-expander', 'ethical-brand', 'corporate-predator'].includes(competitor.strategyType), 'every competitor is assigned a real strategy archetype')
+    assert.ok(competitor.riskTolerance >= 0 && competitor.riskTolerance <= 1, 'riskTolerance is a valid 0-1 trait')
+  }
+  const player = { averagePrice: 40, averageQualityScore: 55, marketShare: 10 }
+  const result = runCompetitorActionsForYear(state.competitors, player, state.year, () => 0.01)
+  assert.equal(result.competitors.length <= state.competitors.length, true, 'competitor count never increases in a single year (acquisitions only remove, never create)')
+  for (const event of result.activity) {
+    assert.ok(event.headline.length > 0, 'every competitor activity event explains itself with a headline')
+    assert.ok(event.detail.length > 0, 'every competitor activity event explains its effect')
+    assert.ok(Number.isFinite(event.demandImpactPercent), 'demandImpactPercent is always a real number, never NaN or undefined')
+  }
+}
+
+// 29. A price-cutter competitor undercutting the player is estimated to hurt player demand (a negative demandImpactPercent), never help it.
+{
+  const priceCutter = {
+    id: 'test-competitor', name: 'Test Price Cutter', industry: 'Clothing' as const, price: 50, quality: 'budget' as const,
+    marketShare: 10, reputation: 50, strengths: [], weaknesses: [], advertisingIntensity: 0.3,
+    strategyType: 'price-cutter' as const, riskTolerance: 0.9, researchAbility: 0.3, marketingStrength: 0.3, productionEfficiency: 0.5,
+  }
+  // A constant mid-low rng clears the hold-steady check (which needs >= 0.135 for this risk tolerance), lands the weighted pick on price-change (price-cutter's dominant weight), and keeps priceBias's strongly-negative lean winning the cut/raise coin flip.
+  const result = runCompetitorActionsForYear([priceCutter], { averagePrice: 60, averageQualityScore: 50, marketShare: 10 }, 1, () => 0.3)
+  const priceEvent = result.activity.find((event) => event.actionType === 'price-change')
+  assert.ok(priceEvent, 'a price-cutter with high risk tolerance and a forced low roll takes a price-change action')
+  assert.ok(priceEvent!.demandImpactPercent <= 0, 'a price-cutter cutting price is never estimated to help the player\'s demand')
+}
+
+// 30. A save from the pre-competitor-strategy format (version 2) migrates into a valid version-3 state — existing saves keep working.
+{
+  const state = freshState()
+  const created = createProduct(state, {
+    name: 'V2 Product', targetGroupId: getIndustryProfile('Clothing').customerGroups[0].id, quality: 'standard',
+    features: [], rndBudget: 0, unitsToManufacture: 100, productionMethod: 'standard-factory', packagingQuality: 'standard', price: 40,
+  }).state
+  const { state: afterYear, report } = completeFinancialYear(created, rng)
+
+  // Simulate what a real version-2 save looked like: competitors/history without the new Phase 1 fields, saveVersion 2.
+  const v2Raw: Record<string, unknown> = JSON.parse(JSON.stringify(afterYear))
+  v2Raw.saveVersion = 2
+  delete v2Raw.reputationCategories
+  for (const competitor of v2Raw.competitors as Record<string, unknown>[]) {
+    delete competitor.strategyType
+    delete competitor.riskTolerance
+    delete competitor.researchAbility
+    delete competitor.marketingStrength
+    delete competitor.productionEfficiency
+  }
+  for (const entry of v2Raw.reputationHistory as Record<string, unknown>[]) {
+    delete entry.category
+  }
+  for (const savedReport of v2Raw.annualReports as Record<string, unknown>[]) {
+    delete savedReport.competitorActions
+  }
+
+  const migrated = migrateV2ToV3(v2Raw)
+  assert.ok(migrated, 'a version-2-shaped save migrates successfully rather than being discarded')
+  assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.brandReputation, afterYear.brandReputation, 'the reputation score itself is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
+  assert.ok(migrated!.competitors.every((c) => typeof c.strategyType === 'string'), 'every migrated competitor gets a backfilled strategy archetype')
+  assert.deepEqual(
+    migrated!.reputationCategories,
+    { customer: afterYear.brandReputation, employee: afterYear.brandReputation, investor: afterYear.brandReputation, government: afterYear.brandReputation, environmental: afterYear.brandReputation, supplier: afterYear.brandReputation },
+    'migrated reputation categories all start from the carried-over overall score',
+  )
+  assert.ok(migrated!.reputationHistory.every((entry) => Array.isArray(entry.category) && entry.category.length > 0), 'every migrated reputation transaction, old and new, is tagged with the category it moved')
+  assert.ok(migrated!.annualReports.every((r) => Array.isArray(r.competitorActions)), 'every migrated annual report gets a competitorActions array, never undefined')
+  assert.equal(report.competitorActions !== undefined, true, 'a freshly completed year always includes a (possibly empty) competitorActions array on its report')
+}
+
+console.log('Business Empire competitor strategy and reputation category tests passed')

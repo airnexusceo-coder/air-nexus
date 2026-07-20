@@ -6,8 +6,19 @@ import { HeartHandshake, Star } from 'lucide-react'
 import { InfoTip } from '@/components/business-empire/info-tip'
 import { formatCurrency } from '@/lib/business-empire/format'
 import { getReputationLevel } from '@/lib/business-empire/simulation'
-import type { GameState, ReputationReasonCategory } from '@/lib/business-empire/types'
+import type { GameState, ReputationCategory, ReputationReasonCategory } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
+
+const CATEGORY_LABELS: Record<ReputationCategory, string> = {
+  customer: 'Customer',
+  employee: 'Employee',
+  investor: 'Investor',
+  government: 'Government',
+  environmental: 'Environmental',
+  supplier: 'Supplier',
+}
+
+const CATEGORY_ORDER: ReputationCategory[] = ['customer', 'employee', 'investor', 'government', 'environmental', 'supplier']
 
 const REASON_LABELS: Record<ReputationReasonCategory, string> = {
   COMPANY_FOUNDED: 'Company founded',
@@ -107,6 +118,28 @@ export function ReputationPage({ state, onInvestInCommunity }: ReputationPagePro
       </section>
 
       <section className="glass rounded-2xl p-5">
+        <h2 className="text-sm font-semibold text-white">Reputation by front</h2>
+        <p className="mt-1 text-xs text-slate-500">The overall score above is one number — this is where it comes from. Actions can lift one front while damaging another.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {CATEGORY_ORDER.map((category) => {
+            const value = state.reputationCategories[category]
+            const categoryLevel = getReputationLevel(value)
+            return (
+              <div key={category}>
+                <div className="mb-1.5 flex items-center justify-between text-xs">
+                  <span className="text-slate-300">{CATEGORY_LABELS[category]}</span>
+                  <span className={cn('font-semibold', LEVEL_COLOR[categoryLevel])}>{value}/100</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
+                  <div className="h-full rounded-full bg-amber-300/80" style={{ width: `${value}%` }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      <section className="glass rounded-2xl p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><HeartHandshake className="size-4 text-amber-300" />Community &amp; environmental initiative</h2>
         <p className="mt-1 text-xs text-slate-500">A deliberate spend that earns reputation — supporting a community project and committing to more responsible practices, bundled into one action.</p>
         <div className="mt-3 flex flex-wrap items-end gap-3">
@@ -135,6 +168,13 @@ export function ReputationPage({ state, onInvestInCommunity }: ReputationPagePro
                   </span>
                 </div>
                 <p className="mt-1 text-xs leading-5 text-slate-400">{entry.description}</p>
+                {entry.category && entry.category.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {entry.category.map((category) => (
+                      <span key={category} className="rounded-full bg-white/6 px-2 py-0.5 text-[10px] text-slate-400">{CATEGORY_LABELS[category]}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

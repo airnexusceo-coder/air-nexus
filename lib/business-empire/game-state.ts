@@ -40,9 +40,9 @@ import {
   generateProductReview,
   generateYearlyEvents,
   getInitialCompetitors,
+  runCompetitorActionsForYear,
   sumAdvertisingReachForProduct,
   sumLedgerCategoryForYear,
-  updateCompetitorsForYear,
   verifyLedgerIntegrity,
 } from '@/lib/business-empire/simulation'
 import {
@@ -197,6 +197,7 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     customerSatisfaction: 70,
     brandReputation: 0,
     reputationHistory: [],
+    reputationCategories: { customer: 0, employee: 0, investor: 0, government: 0, environmental: 0, supplier: 0 },
     staffMorale: 70,
     loans: [],
     economicIndex: 1,
@@ -638,6 +639,22 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   let economicIndex = working.economicIndex
   for (const event of events) economicIndex = Math.max(0.7, Math.min(1.3, economicIndex + event.economicIndexDelta))
 
+  // Competitors act BEFORE this year's demand is computed, using the player's position at the
+  // start of the year — so a competitor's price cut or product launch actually affects this same
+  // year's sales, matching what the activity feed tells the player.
+  const playerAveragePrice = activeProducts.length > 0 ? activeProducts.reduce((sum, p) => sum + p.price, 0) / activeProducts.length : 0
+  const playerAverageQualityScore = activeProducts.length > 0 ? activeProducts.reduce((sum, p) => sum + computeQualityScore(industry, p), 0) / activeProducts.length : 50
+  const competitorResult = runCompetitorActionsForYear(
+    working.competitors,
+    { averagePrice: playerAveragePrice, averageQualityScore: playerAverageQualityScore, marketShare: working.marketShare },
+    year,
+    rng,
+  )
+  working = { ...working, competitors: competitorResult.competitors }
+  if (competitorResult.activity.length > 0) {
+    factorNotes.push(`Competitors took ${competitorResult.activity.length} action${competitorResult.activity.length === 1 ? '' : 's'} this year — see the competitor activity feed for what happened and why.`)
+  }
+
   const rent = computeRent(industry, activeProducts.length, difficulty)
   const totalUnitsPlanned = activeProducts.reduce((sum, p) => sum + p.unitsManufactured, 0)
   const wages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, working.staffMorale)
@@ -865,14 +882,12 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   }
 
   const marketShare = industry.marketSize > 0 ? Math.min(100, Math.round((unitsSoldTotal / industry.marketSize) * 1000) / 10) : 0
-  const updatedCompetitors = updateCompetitorsForYear(working.competitors, marketShare, difficulty, rng)
   const companyValue = computeCompanyValue(working.cash, working.products, marketShare, working.brandReputation)
   const newEconomicCyclePhase = economicIndex >= 1.08 ? 'growth' : economicIndex <= 0.92 ? 'recession' : 'stable'
   if (newEconomicCyclePhase !== 'stable') factorNotes.push(`Broader economic conditions this year: ${newEconomicCyclePhase}.`)
 
   working = {
     ...working,
-    competitors: updatedCompetitors,
     customerSatisfaction: newSatisfaction,
     staffMorale: newStaffMorale,
     marketShare,
@@ -929,6 +944,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     factorNotes,
     perProduct,
     events,
+    competitorActions: competitorResult.activity,
     learningSummary: { workedWell, causedProblems, whyProfitOrLoss, considerNextYear },
   }
 
