@@ -31,8 +31,9 @@ import {
   scoreInterviewAnswers,
   UNIVERSITY_ENTRANCE_QUIZ,
 } from '../lib/business-empire/hardcore-career'
-import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4 } from '../lib/business-empire/storage'
-import { buildFacility, previewFacilityCost, sellFacility, upgradeFacility } from '../lib/business-empire/game-state'
+import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5 } from '../lib/business-empire/storage'
+import { buildFacility, hireComplianceStaff, previewFacilityCost, sellFacility, upgradeFacility } from '../lib/business-empire/game-state'
+import { computeComplianceRatingTarget, driftComplianceRating, generateLawProposal, resolveLawDecisions } from '../lib/business-empire/government'
 import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, type CareerBackground, type GamePreferences, type GameState } from '../lib/business-empire/types'
 
 const rng = () => 0.5
@@ -691,10 +692,93 @@ console.log('Business Empire competitor strategy and reputation category tests p
   const migrated = migrateV3ToV4(v3Raw)
   assert.ok(migrated, 'a version-3-shaped save migrates successfully rather than being discarded')
   assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
-  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.equal(migrated!.saveVersion, 4, 'migrateV3ToV4 in isolation produces a v4-versioned save — chaining to the current version is loadGameState\'s job')
   assert.deepEqual(migrated!.facilities, [], 'a save from before this feature existed starts with no facilities, never a fabricated one')
   assert.deepEqual(migrated!.claimedRegions, [], 'a save from before this feature existed starts with no claimed regions')
   assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
 }
 
 console.log('Business Empire land and facilities tests passed')
+
+// ============================================================================
+// Government laws, compliance, and v4 -> v5 migration
+// ============================================================================
+
+// 37. A proposed law always carries at least a full year of advance warning, and only ever appears when the roll succeeds.
+{
+  const state = freshState()
+  const industry = getIndustryProfile('Clothing')
+  const difficulty = DIFFICULTY_PROFILES.beginner
+  const guaranteedProposal = generateLawProposal(state.laws, [], industry, difficulty, state.year, () => 0)
+  assert.ok(guaranteedProposal, 'a near-zero roll against a nonzero chance produces a proposal')
+  assert.ok(guaranteedProposal!.expectedStartYear > guaranteedProposal!.proposedYear, 'a proposed law is always decided in a later year, never the year it is proposed')
+  assert.ok(guaranteedProposal!.passageProbability > 0 && guaranteedProposal!.passageProbability <= 1, 'passage probability is always a real, bounded number shown to the player')
+
+  const neverProposal = generateLawProposal(state.laws, [], industry, difficulty, state.year, () => 0.999)
+  assert.equal(neverProposal, null, 'a near-certain roll against the same chance produces no proposal')
+}
+
+// 38. Resolving a law decision only happens once its expected year arrives, and the outcome is a real roll against the shown passage probability.
+{
+  const law = generateLawProposal([], [], getIndustryProfile('Clothing'), DIFFICULTY_PROFILES.beginner, 1, () => 0)!
+  const tooEarly = resolveLawDecisions([law], law.expectedStartYear - 1, () => 0)
+  assert.equal(tooEarly.decided.length, 0, 'a law is never decided before its stated decision year')
+  assert.equal(tooEarly.laws[0].status, 'proposed')
+
+  const passed = resolveLawDecisions([law], law.expectedStartYear, () => 0)
+  assert.equal(passed.decided[0].status, 'active', 'a roll below the passage probability passes the law')
+  const rejected = resolveLawDecisions([law], law.expectedStartYear, () => 0.999)
+  assert.equal(rejected.decided[0].status, 'rejected', 'a roll above the passage probability rejects the law')
+}
+
+// 39. Compliance ratings drift toward, but never jump straight to, the target set by current staffing — readiness is built over time, not switched on.
+{
+  const noStaffing = { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 }
+  const fullStaffing = { 'compliance-officer': 2, accountant: 2, lawyer: 2, 'safety-inspector': 2, 'environmental-specialist': 2 }
+  assert.equal(computeComplianceRatingTarget('employment', noStaffing), 30, 'with no relevant staff, the target is just the baseline')
+  assert.ok(computeComplianceRatingTarget('employment', fullStaffing) > 30, 'hiring relevant staff raises the target above baseline')
+
+  const drifted = driftComplianceRating(30, 90)
+  assert.ok(drifted > 30 && drifted < 90, 'one year of drift moves partway toward the target, never instantly')
+}
+
+// 40. Hiring compliance staff increases headcount immediately; their salary is a real, ledger-backed yearly cost once a year completes.
+{
+  const state = freshState()
+  const hired = hireComplianceStaff(state, 'accountant')
+  assert.equal(hired.state.complianceStaff.accountant, 1, 'hiring increases headcount by exactly one')
+  assert.equal(hired.state.cash, state.cash, 'hiring itself does not charge cash — the salary is a yearly cost')
+
+  const { state: afterYear, report } = completeFinancialYear(hired.state, rng)
+  const compliancePayments = afterYear.cashLedger.filter((entry) => entry.category === 'COMPLIANCE_STAFF_WAGES')
+  assert.ok(compliancePayments.length > 0, 'compliance staff wages are charged as a real, categorised ledger entry once a year completes')
+  assert.ok(verifyLedgerIntegrity(afterYear).ok)
+  assert.equal(report.competitorActions !== undefined && report.lawUpdates !== undefined, true, 'the annual report always includes lawUpdates alongside every other structured section')
+}
+
+// 41. A save from the pre-government-and-compliance format (version 4) migrates into a valid version-5 state with an honest starting baseline — existing saves keep working.
+{
+  const state = freshState()
+  const { state: afterYear } = completeFinancialYear(state, rng)
+  const v4Raw: Record<string, unknown> = JSON.parse(JSON.stringify(afterYear))
+  v4Raw.saveVersion = 4
+  delete v4Raw.laws
+  delete v4Raw.complianceRatings
+  delete v4Raw.complianceStaff
+  delete v4Raw.unresolvedViolations
+
+  const migrated = migrateV4ToV5(v4Raw)
+  assert.ok(migrated, 'a version-4-shaped save migrates successfully rather than being discarded')
+  assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.deepEqual(migrated!.laws, [], 'a save from before this feature existed starts with no fabricated law history')
+  assert.equal(migrated!.unresolvedViolations, 0)
+  assert.deepEqual(
+    migrated!.complianceStaff,
+    { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
+    'a migrated save starts with no compliance staff, matching a brand-new company rather than an invented headcount',
+  )
+  assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
+}
+
+console.log('Business Empire government and compliance tests passed')

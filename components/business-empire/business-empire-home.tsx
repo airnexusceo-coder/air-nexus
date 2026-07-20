@@ -18,6 +18,7 @@ import { AdvertisingPage } from '@/components/business-empire/advertising-page'
 import { CompetitorsPage } from '@/components/business-empire/competitors-page'
 import { ReputationPage } from '@/components/business-empire/reputation-page'
 import { LandFacilitiesPage } from '@/components/business-empire/land-facilities-page'
+import { GovernmentCompliancePage } from '@/components/business-empire/government-compliance-page'
 import { FundingPage } from '@/components/business-empire/funding-page'
 import { FinancesPage } from '@/components/business-empire/finances-page'
 import { AnnualReportsPage } from '@/components/business-empire/annual-reports-page'
@@ -34,11 +35,13 @@ import {
   createInitialState,
   createProduct,
   discontinueProduct,
+  hireComplianceStaff,
   investInCommunityProject,
   launchAdvertisingCampaign,
   launchStrategicInitiative,
   manufactureMoreUnits,
   purchaseResearch,
+  releaseComplianceStaff,
   sellFacility,
   updatePreferences,
   updateProductPrice,
@@ -49,7 +52,7 @@ import {
 } from '@/lib/business-empire/game-state'
 import { clearGameState, hasSavedGame, loadGameState, saveGameState } from '@/lib/business-empire/storage'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
-import type { AdvertisingChannel, AnnualReport, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, LoanPurpose, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, AnnualReport, ComplianceStaffRole, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, LoanPurpose, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
@@ -240,6 +243,22 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
     return {}
   }
 
+  const handleHireComplianceStaff = (role: ComplianceStaffRole) => {
+    const result = hireComplianceStaff(gameState, role)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Compliance staff hired.', 'success')
+    return {}
+  }
+
+  const handleReleaseComplianceStaff = (role: ComplianceStaffRole) => {
+    const result = releaseComplianceStaff(gameState, role)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Compliance staff let go.', 'info')
+    return {}
+  }
+
   const handleConfirmCompleteYear = () => {
     const { state: next, report } = completeFinancialYear(gameState)
     setGameState(next)
@@ -303,6 +322,7 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
             {view === 'competitors' && <CompetitorsPage state={gameState} />}
             {view === 'reputation' && <ReputationPage state={gameState} onInvestInCommunity={handleInvestInCommunity} />}
             {view === 'land-facilities' && <LandFacilitiesPage state={gameState} onBuild={handleBuildFacility} onUpgrade={handleUpgradeFacility} onSell={handleSellFacility} onVacate={handleVacateLease} />}
+            {view === 'government-compliance' && <GovernmentCompliancePage state={gameState} onHireStaff={handleHireComplianceStaff} onReleaseStaff={handleReleaseComplianceStaff} />}
             {view === 'funding' && <FundingPage state={gameState} onApplyForLoan={handleApplyForLoan} />}
             {view === 'finances' && <FinancesPage state={gameState} />}
             {view === 'annual-reports' && <AnnualReportsPage state={gameState} />}

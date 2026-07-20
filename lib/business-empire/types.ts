@@ -410,6 +410,9 @@ export type CashTransactionCategory =
   | 'FACILITY_UPKEEP'
   | 'FACILITY_PURCHASE'
   | 'FACILITY_SALE'
+  | 'COMPLIANCE_STAFF_WAGES'
+  | 'LAW_COMPLIANCE_COST'
+  | 'REGULATORY_FINE'
   | 'SALES_REVENUE'
   | 'TAX'
   | 'REFUND'
@@ -547,6 +550,8 @@ export type AnnualReport = {
   events: BusinessEvent[]
   /** Every deliberate competitor action taken this year, in the same order the activity feed shows them. */
   competitorActions: CompetitorActivityEvent[]
+  /** Every law that changed status this year — newly proposed (advance warning) or newly decided (passed/rejected) — so regulatory change is always explained in the report, never left implicit. */
+  lawUpdates: Law[]
   learningSummary: {
     workedWell: string[]
     causedProblems: string[]
@@ -647,6 +652,40 @@ export type Facility = {
   constructionYearsRemaining: number
 }
 
+// --- Phase 3: Government laws and compliance --------------------------------------
+
+export type LawCategory =
+  | 'minimum-wage' | 'employee-safety' | 'working-hours' | 'paid-leave'
+  | 'product-safety' | 'product-warranties' | 'advertising-claims' | 'customer-privacy'
+  | 'environmental-standards' | 'pollution' | 'recycling'
+  | 'corporate-tax' | 'import-tariffs' | 'export-restrictions' | 'financial-reporting'
+  | 'anti-monopoly' | 'building-permits' | 'property-taxes' | 'zoning'
+
+export type LawStatus = 'proposed' | 'active' | 'rejected' | 'repealed'
+
+/** A single proposed or active law, always shown to the player with an estimated cost, penalty, and probability well before it takes effect — never a surprise regulation. */
+export type Law = {
+  id: string
+  category: LawCategory
+  name: string
+  description: string
+  /** The region this law applies to, or 'national' if it applies everywhere. */
+  region: Region | 'national'
+  status: LawStatus
+  proposedYear: number
+  /** 0-1 — the estimated chance this proposal passes, shown before the outcome is known. */
+  passageProbability: number
+  /** The year the law is decided and, if passed, takes effect — always at least 1 full year after `proposedYear`, so there is always advance warning. */
+  expectedStartYear: number
+  estimatedComplianceCost: number
+  possiblePenalty: number
+  decidedYear: number | null
+}
+
+export type ComplianceCategory = 'employment' | 'product-safety' | 'finance-tax' | 'environmental' | 'privacy' | 'advertising' | 'construction-property'
+
+export type ComplianceStaffRole = 'compliance-officer' | 'accountant' | 'lawyer' | 'safety-inspector' | 'environmental-specialist'
+
 export type GameState = {
   companyName: string
   founderName: string
@@ -677,6 +716,14 @@ export type GameState = {
   facilities: Facility[]
   /** Regions a competitor has purchased land in, making them unavailable for the player to build new facilities in (existing player facilities there are unaffected). */
   claimedRegions: Region[]
+  /** Every law this company has ever seen proposed, in every status — proposed, active, rejected, or repealed. */
+  laws: Law[]
+  /** 0-100 per compliance front — how well-prepared the company is if inspected or if a law in that area takes effect. */
+  complianceRatings: Record<ComplianceCategory, number>
+  /** Headcount hired into each compliance-relevant role. */
+  complianceStaff: Record<ComplianceStaffRole, number>
+  /** A running count of compliance violations found and not yet resolved — never silently cleared. */
+  unresolvedViolations: number
   /** 1.0 = neutral; nudged up/down by yearly events to represent broader economic conditions. */
   economicIndex: number
   /** A slower-moving named cycle layered on top of `economicIndex` so downturns/booms feel like a real named condition, not silent per-event noise. */
@@ -690,4 +737,4 @@ export type GameState = {
   saveVersion: number
 }
 
-export const CURRENT_SAVE_VERSION = 4
+export const CURRENT_SAVE_VERSION = 5

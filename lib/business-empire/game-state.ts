@@ -14,6 +14,18 @@ import {
   computeRegionalWageMultiplier,
 } from '@/lib/business-empire/land'
 import {
+  COMPLIANCE_CATEGORY_INFO,
+  COMPLIANCE_CATEGORY_ORDER,
+  COMPLIANCE_STAFF_ROLE_ORDER,
+  LAW_CATEGORY_TO_COMPLIANCE,
+  computeComplianceRatingTarget,
+  computeComplianceStaffAnnualSalary,
+  computeInspectionProbability,
+  driftComplianceRating,
+  generateLawProposal,
+  resolveLawDecisions,
+} from '@/lib/business-empire/government'
+import {
   DEGREE_INDUSTRY_REPUTATION_BONUS,
   getDegreeProfile,
   getHardcoreJob,
@@ -64,10 +76,13 @@ import {
   type AnnualReport,
   type CashTransactionCategory,
   type ClaimsHonesty,
+  type ComplianceCategory,
+  type ComplianceStaffRole,
   type Facility,
   type FacilityOwnership,
   type FacilityType,
   type FacilityUpgradeId,
+  type Law,
   type GamePreferences,
   type GameState,
   type Loan,
@@ -219,6 +234,10 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     loans: [],
     facilities: [],
     claimedRegions: [],
+    laws: [],
+    complianceRatings: { employment: 30, 'product-safety': 30, 'finance-tax': 30, environmental: 30, privacy: 30, advertising: 30, 'construction-property': 30 },
+    complianceStaff: { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
+    unresolvedViolations: 0,
     economicIndex: 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -620,6 +639,24 @@ export function vacateLease(state: GameState, facilityId: string): { state: Game
   return { state: next }
 }
 
+// --- Compliance staffing -----------------------------------------------------------
+
+export function previewComplianceStaffSalary(state: GameState, role: ComplianceStaffRole): number {
+  const industry = getIndustryProfile(state.industry)
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  return computeComplianceStaffAnnualSalary(role, industry, difficulty)
+}
+
+/** Hiring is immediate and headcount-based — the salary is charged every year through COMPLIANCE_STAFF_WAGES, not up front. */
+export function hireComplianceStaff(state: GameState, role: ComplianceStaffRole): { state: GameState; error?: string } {
+  return { state: { ...state, complianceStaff: { ...state.complianceStaff, [role]: state.complianceStaff[role] + 1 } } }
+}
+
+export function releaseComplianceStaff(state: GameState, role: ComplianceStaffRole): { state: GameState; error?: string } {
+  if (state.complianceStaff[role] <= 0) return { state, error: 'No one in this role to let go.' }
+  return { state: { ...state, complianceStaff: { ...state.complianceStaff, [role]: state.complianceStaff[role] - 1 } } }
+}
+
 export { verifyLedgerIntegrity }
 
 export type YearOutcomeEstimate = {
@@ -832,6 +869,73 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
       const claimedRegion = unclaimedRegions[Math.floor(rng() * unclaimedRegions.length)]
       working = { ...working, claimedRegions: [...working.claimedRegions, claimedRegion] }
       factorNotes.push(`A competitor purchased land in ${REGION_PROFILES[claimedRegion].name} this year — that region is no longer available for new facilities.`)
+    }
+  }
+
+  // Government laws: at most one new proposal may appear (always with a 2-year advance warning), and any law whose decision year has arrived is resolved by a real probability roll against the odds already shown to the player.
+  const operatingRegions = Array.from(new Set(working.facilities.map((facility) => facility.region)))
+  const newLawProposal = generateLawProposal(working.laws, operatingRegions, industry, difficulty, year, rng)
+  const lawUpdates: Law[] = newLawProposal ? [newLawProposal] : []
+  if (newLawProposal) {
+    factorNotes.push(`New law proposed: "${newLawProposal.name}" (${newLawProposal.region === 'national' ? 'national' : REGION_PROFILES[newLawProposal.region].name}) — expected to be decided in ${newLawProposal.expectedStartYear}.`)
+  }
+  const { laws: lawsAfterDecisions, decided: decidedLaws } = resolveLawDecisions(newLawProposal ? [...working.laws, newLawProposal] : working.laws, year, rng)
+  lawUpdates.push(...decidedLaws)
+  for (const law of decidedLaws) {
+    factorNotes.push(`"${law.name}" was ${law.status === 'active' ? 'passed and is now active' : 'rejected'} this year.`)
+  }
+  working = { ...working, laws: lawsAfterDecisions }
+
+  // Newly active laws charge a one-time compliance transition cost — a well-prepared company (a strong rating in the relevant compliance category) pays much less.
+  for (const law of decidedLaws) {
+    if (law.status !== 'active') continue
+    const complianceCategory = LAW_CATEGORY_TO_COMPLIANCE[law.category]
+    const rating = working.complianceRatings[complianceCategory]
+    const preparednessDiscount = rating >= 70 ? 0.4 : rating >= 50 ? 0.7 : 1
+    const cost = Math.round(law.estimatedComplianceCost * preparednessDiscount)
+    if (cost > 0) {
+      working = appendTransaction(working, {
+        category: 'LAW_COMPLIANCE_COST',
+        amount: -cost,
+        description: `Compliance transition cost for "${law.name}"${preparednessDiscount < 1 ? ' — reduced because your ' + COMPLIANCE_CATEGORY_INFO[complianceCategory].label.toLowerCase() + ' compliance was already strong' : ''}`,
+        relatedId: law.id,
+      })
+    }
+  }
+
+  // Compliance staff wages, charged every year they remain hired.
+  const complianceStaffWagesTotal = COMPLIANCE_STAFF_ROLE_ORDER.reduce((sum, role) => sum + computeComplianceStaffAnnualSalary(role, industry, difficulty) * working.complianceStaff[role], 0)
+  if (complianceStaffWagesTotal > 0) {
+    working = appendTransaction(working, { category: 'COMPLIANCE_STAFF_WAGES', amount: -Math.round(complianceStaffWagesTotal), description: `Year ${year} compliance staff wages` })
+  }
+
+  // Compliance ratings drift toward whatever current staffing actually supports — hiring builds readiness over several years, understaffing lets it decay.
+  const updatedComplianceRatings = { ...working.complianceRatings }
+  for (const category of COMPLIANCE_CATEGORY_ORDER) {
+    updatedComplianceRatings[category] = driftComplianceRating(working.complianceRatings[category], computeComplianceRatingTarget(category, working.complianceStaff))
+  }
+  working = { ...working, complianceRatings: updatedComplianceRatings }
+
+  // Inspections: each compliance category with at least one active law has a chance of an inspection this year — low ratings risk a fine and a reputation hit, strong ratings pass cleanly.
+  const activeLawsByCategory = new Map<ComplianceCategory, Law[]>()
+  for (const law of working.laws) {
+    if (law.status !== 'active') continue
+    const category = LAW_CATEGORY_TO_COMPLIANCE[law.category]
+    activeLawsByCategory.set(category, [...(activeLawsByCategory.get(category) ?? []), law])
+  }
+  for (const [category, categoryLaws] of activeLawsByCategory) {
+    const rating = working.complianceRatings[category]
+    const inspectionChance = computeInspectionProbability(rating, categoryLaws.length, difficulty)
+    if (rng() >= inspectionChance) continue
+    if (rating < 50) {
+      const relevantLaw = categoryLaws[0]
+      const fine = Math.round(relevantLaw.possiblePenalty * (1 - rating / 100))
+      working = appendTransaction(working, { category: 'REGULATORY_FINE', amount: -fine, description: `A ${COMPLIANCE_CATEGORY_INFO[category].label.toLowerCase()} inspection found violations under "${relevantLaw.name}"`, relatedId: relevantLaw.id })
+      working = { ...working, unresolvedViolations: working.unresolvedViolations + 1 }
+      working = appendReputationTransaction(working, { delta: -5, reasonCategory: 'REGULATION_BREACH', description: `A ${COMPLIANCE_CATEGORY_INFO[category].label.toLowerCase()} inspection found violations this year, resulting in a fine of ${fine.toLocaleString()}.`, relatedId: relevantLaw.id })
+      factorNotes.push(`A ${COMPLIANCE_CATEGORY_INFO[category].label.toLowerCase()} inspection this year found violations — see the reputation history for details.`)
+    } else {
+      factorNotes.push(`A ${COMPLIANCE_CATEGORY_INFO[category].label.toLowerCase()} inspection this year found the company fully compliant.`)
     }
   }
 
@@ -1112,6 +1216,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     perProduct,
     events,
     competitorActions: competitorResult.activity,
+    lawUpdates,
     learningSummary: { workedWell, causedProblems, whyProfitOrLoss, considerNextYear },
   }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle2, Lightbulb, Newspaper, Swords, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, Gavel, Lightbulb, Newspaper, Swords, TriangleAlert } from 'lucide-react'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
 import type { AnnualReport } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
@@ -127,6 +127,23 @@ export function AnnualReportView({ report }: AnnualReportViewProps) {
                   )}
                 </div>
                 <p className="mt-1 text-xs leading-5 text-slate-400">{event.detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {report.lawUpdates.length > 0 && (
+        <section>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-white"><Gavel className="size-4 text-amber-300" />Government &amp; law updates this year</h3>
+          <div className="mt-2 space-y-2">
+            {report.lawUpdates.map((law) => (
+              <div key={`${law.id}-${law.status}`} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-white">{law.name}</p>
+                  <span className="shrink-0 rounded-full bg-white/8 px-2 py-1 text-[10px] font-semibold uppercase text-slate-300">{law.status === 'proposed' ? 'Newly proposed' : law.status}</span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{law.status === 'proposed' ? `Expected to be decided in ${law.expectedStartYear}.` : law.description}</p>
               </div>
             ))}
           </div>

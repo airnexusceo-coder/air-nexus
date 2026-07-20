@@ -64,7 +64,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     : []
 
   const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
-    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [] }) as unknown as AnnualReport)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [], lawUpdates: [] }) as unknown as AnnualReport)
     : []
 
   const migrationEntry: ReputationTransaction = {
@@ -110,6 +110,10 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     loans: [],
     facilities: [],
     claimedRegions: [],
+    laws: [],
+    complianceRatings: { employment: 30, 'product-safety': 30, 'finance-tax': 30, environmental: 30, privacy: 30, advertising: 30, 'construction-property': 30 },
+    complianceStaff: { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
+    unresolvedViolations: 0,
     economicIndex: typeof parsed.economicIndex === 'number' ? parsed.economicIndex : 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -205,6 +209,40 @@ export function migrateV3ToV4(parsed: Record<string, unknown>): GameState | null
     ...(parsed as unknown as GameState),
     facilities: Array.isArray(parsed.facilities) ? (parsed.facilities as GameState['facilities']) : [],
     claimedRegions: Array.isArray(parsed.claimedRegions) ? (parsed.claimedRegions as GameState['claimedRegions']) : [],
+    saveVersion: 4,
+    lastSavedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Upgrades a save from the pre-government-and-compliance format (version 4)
+ * into the current shape (version 5). A save from before this feature
+ * existed has seen no laws and hired no compliance staff yet, so every new
+ * field starts at the same honest baseline `createInitialState` uses for a
+ * brand-new company — never a fabricated history of laws or violations.
+ */
+export function migrateV4ToV5(parsed: Record<string, unknown>): GameState | null {
+  if (typeof parsed.cash !== 'number' || !Array.isArray(parsed.cashLedger) || !isRecord(parsed.preferences)) return null
+  if (typeof parsed.companyName !== 'string' || typeof parsed.industry !== 'string' || typeof parsed.year !== 'number') return null
+
+  const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => {
+        const record = r as { lawUpdates?: unknown }
+        return { ...r, lawUpdates: Array.isArray(record.lawUpdates) ? record.lawUpdates : [] } as unknown as AnnualReport
+      })
+    : []
+
+  return {
+    ...(parsed as unknown as GameState),
+    annualReports,
+    laws: Array.isArray(parsed.laws) ? (parsed.laws as GameState['laws']) : [],
+    complianceRatings: isRecord(parsed.complianceRatings)
+      ? (parsed.complianceRatings as GameState['complianceRatings'])
+      : { employment: 30, 'product-safety': 30, 'finance-tax': 30, environmental: 30, privacy: 30, advertising: 30, 'construction-property': 30 },
+    complianceStaff: isRecord(parsed.complianceStaff)
+      ? (parsed.complianceStaff as GameState['complianceStaff'])
+      : { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
+    unresolvedViolations: typeof parsed.unresolvedViolations === 'number' ? parsed.unresolvedViolations : 0,
     saveVersion: CURRENT_SAVE_VERSION,
     lastSavedAt: new Date().toISOString(),
   }
@@ -231,11 +269,15 @@ export function loadGameState(userId: string): LoadResult {
     let candidate: GameState | null = null
     if (parsed.saveVersion === CURRENT_SAVE_VERSION && typeof parsed.cash === 'number' && Array.isArray(parsed.cashLedger) && isRecord(parsed.preferences)) {
       candidate = parsed as GameState
+    } else if (parsed.saveVersion === 4) {
+      candidate = migrateV4ToV5(parsed as Record<string, unknown>)
     } else if (parsed.saveVersion === 3) {
-      candidate = migrateV3ToV4(parsed as Record<string, unknown>)
+      const v4 = migrateV3ToV4(parsed as Record<string, unknown>)
+      candidate = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 2) {
       const v3 = migrateV2ToV3(parsed as Record<string, unknown>)
-      candidate = v3 ? migrateV3ToV4(v3 as unknown as Record<string, unknown>) : null
+      const v4 = v3 ? migrateV3ToV4(v3 as unknown as Record<string, unknown>) : null
+      candidate = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 1 || parsed.saveVersion === undefined) {
       candidate = migrateLegacySave(parsed as Record<string, unknown>)
     }

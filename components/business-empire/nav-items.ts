@@ -4,6 +4,7 @@ import {
   Building2,
   Factory,
   FlaskConical,
+  Gavel,
   Globe2,
   GraduationCap,
   Landmark,
@@ -28,6 +29,7 @@ export type BusinessEmpireView =
   | 'competitors'
   | 'reputation'
   | 'land-facilities'
+  | 'government-compliance'
   | 'funding'
   | 'finances'
   | 'annual-reports'
@@ -47,6 +49,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'competitors', label: 'Competitors', icon: Swords },
   { id: 'reputation', label: 'Reputation', icon: Star },
   { id: 'land-facilities', label: 'Land & Facilities', icon: MapPinned },
+  { id: 'government-compliance', label: 'Government & Compliance', icon: Gavel },
   { id: 'funding', label: 'Funding', icon: Landmark },
   { id: 'finances', label: 'Finances', icon: BarChart3 },
   { id: 'annual-reports', label: 'Annual Reports', icon: Award },
