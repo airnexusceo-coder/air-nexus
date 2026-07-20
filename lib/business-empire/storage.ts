@@ -1,4 +1,4 @@
-import { CURRENT_SAVE_VERSION, type AdvertisingCampaign, type AnnualReport, type Competitor, type GameState, type Product, type ReputationCategory, type ReputationTransaction } from '@/lib/business-empire/types'
+import { CURRENT_SAVE_VERSION, type AdvertisingCampaign, type AnnualReport, type Competitor, type GameState, type LegalRiskProfile, type Product, type ReputationCategory, type ReputationTransaction } from '@/lib/business-empire/types'
 import { REPUTATION_CATEGORY_MAP, backfillCompetitorStrategy, computeProductRating, createId, verifyLedgerIntegrity } from '@/lib/business-empire/simulation'
 
 const STORAGE_PREFIX = 'airnexus-business-empire'
@@ -10,6 +10,8 @@ function storageKey(userId: string) {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
+const NEUTRAL_LEGAL_RISK: LegalRiskProfile = { suspicion: 0, availableEvidence: 0, civilLiability: 0, criminalExposure: 0, publicAwareness: 0, employeeKnowledge: 0, previousViolations: 0 }
 
 export function hasSavedGame(userId: string): boolean {
   if (typeof window === 'undefined') return false
@@ -64,7 +66,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     : []
 
   const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
-    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [], lawUpdates: [] }) as unknown as AnnualReport)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [], lawUpdates: [], offerUpdates: [], legalCaseUpdates: [] }) as unknown as AnnualReport)
     : []
 
   const migrationEntry: ReputationTransaction = {
@@ -114,6 +116,10 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     complianceRatings: { employment: 30, 'product-safety': 30, 'finance-tax': 30, environmental: 30, privacy: 30, advertising: 30, 'construction-property': 30 },
     complianceStaff: { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
     unresolvedViolations: 0,
+    legalRisk: NEUTRAL_LEGAL_RISK,
+    questionableOffers: [],
+    legalCases: [],
+    gameOverReason: null,
     economicIndex: typeof parsed.economicIndex === 'number' ? parsed.economicIndex : 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -243,6 +249,40 @@ export function migrateV4ToV5(parsed: Record<string, unknown>): GameState | null
       ? (parsed.complianceStaff as GameState['complianceStaff'])
       : { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
     unresolvedViolations: typeof parsed.unresolvedViolations === 'number' ? parsed.unresolvedViolations : 0,
+    saveVersion: 5,
+    lastSavedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Upgrades a save from the pre-legal-risk format (version 5) into the
+ * current shape (version 6). A save from before this feature existed has
+ * never seen a questionable offer or an investigation, so it starts from
+ * the same neutral, zero-suspicion baseline `createInitialState` uses for a
+ * brand-new company — never a fabricated history of misconduct.
+ */
+export function migrateV5ToV6(parsed: Record<string, unknown>): GameState | null {
+  if (typeof parsed.cash !== 'number' || !Array.isArray(parsed.cashLedger) || !isRecord(parsed.preferences)) return null
+  if (typeof parsed.companyName !== 'string' || typeof parsed.industry !== 'string' || typeof parsed.year !== 'number') return null
+
+  const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => {
+        const record = r as { offerUpdates?: unknown; legalCaseUpdates?: unknown }
+        return {
+          ...r,
+          offerUpdates: Array.isArray(record.offerUpdates) ? record.offerUpdates : [],
+          legalCaseUpdates: Array.isArray(record.legalCaseUpdates) ? record.legalCaseUpdates : [],
+        } as unknown as AnnualReport
+      })
+    : []
+
+  return {
+    ...(parsed as unknown as GameState),
+    annualReports,
+    legalRisk: isRecord(parsed.legalRisk) ? (parsed.legalRisk as unknown as LegalRiskProfile) : NEUTRAL_LEGAL_RISK,
+    questionableOffers: Array.isArray(parsed.questionableOffers) ? (parsed.questionableOffers as GameState['questionableOffers']) : [],
+    legalCases: Array.isArray(parsed.legalCases) ? (parsed.legalCases as GameState['legalCases']) : [],
+    gameOverReason: typeof parsed.gameOverReason === 'string' ? parsed.gameOverReason : null,
     saveVersion: CURRENT_SAVE_VERSION,
     lastSavedAt: new Date().toISOString(),
   }
@@ -269,15 +309,20 @@ export function loadGameState(userId: string): LoadResult {
     let candidate: GameState | null = null
     if (parsed.saveVersion === CURRENT_SAVE_VERSION && typeof parsed.cash === 'number' && Array.isArray(parsed.cashLedger) && isRecord(parsed.preferences)) {
       candidate = parsed as GameState
+    } else if (parsed.saveVersion === 5) {
+      candidate = migrateV5ToV6(parsed as Record<string, unknown>)
     } else if (parsed.saveVersion === 4) {
-      candidate = migrateV4ToV5(parsed as Record<string, unknown>)
+      const v5 = migrateV4ToV5(parsed as Record<string, unknown>)
+      candidate = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 3) {
       const v4 = migrateV3ToV4(parsed as Record<string, unknown>)
-      candidate = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
+      const v5 = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
+      candidate = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 2) {
       const v3 = migrateV2ToV3(parsed as Record<string, unknown>)
       const v4 = v3 ? migrateV3ToV4(v3 as unknown as Record<string, unknown>) : null
-      candidate = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
+      const v5 = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
+      candidate = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 1 || parsed.saveVersion === undefined) {
       candidate = migrateLegacySave(parsed as Record<string, unknown>)
     }

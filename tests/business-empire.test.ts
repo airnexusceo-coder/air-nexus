@@ -31,10 +31,19 @@ import {
   scoreInterviewAnswers,
   UNIVERSITY_ENTRANCE_QUIZ,
 } from '../lib/business-empire/hardcore-career'
-import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5 } from '../lib/business-empire/storage'
-import { buildFacility, hireComplianceStaff, previewFacilityCost, sellFacility, upgradeFacility } from '../lib/business-empire/game-state'
+import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6 } from '../lib/business-empire/storage'
+import { buildFacility, hireComplianceStaff, previewFacilityCost, respondToQuestionableOffer, sellFacility, takeLegalCaseAction, upgradeFacility } from '../lib/business-empire/game-state'
 import { computeComplianceRatingTarget, driftComplianceRating, generateLawProposal, resolveLawDecisions } from '../lib/business-empire/government'
-import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, type CareerBackground, type GamePreferences, type GameState } from '../lib/business-empire/types'
+import {
+  advanceCaseStage,
+  applyOfferResponseToLegalRisk,
+  classifyCaseSeverity,
+  computeInvestigationTriggerChance,
+  computeLegalCaseActionCost,
+  generateQuestionableOffer,
+  resolveCaseOutcome,
+} from '../lib/business-empire/legal'
+import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, INVESTIGATION_STAGE_ORDER, type CareerBackground, type GamePreferences, type GameState, type LegalCase, type LegalRiskProfile, type QuestionableOffer } from '../lib/business-empire/types'
 
 const rng = () => 0.5
 
@@ -770,7 +779,7 @@ console.log('Business Empire land and facilities tests passed')
   const migrated = migrateV4ToV5(v4Raw)
   assert.ok(migrated, 'a version-4-shaped save migrates successfully rather than being discarded')
   assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
-  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.equal(migrated!.saveVersion, 5, 'migrateV4ToV5 in isolation produces a v5-versioned save — chaining to the current version is loadGameState\'s job')
   assert.deepEqual(migrated!.laws, [], 'a save from before this feature existed starts with no fabricated law history')
   assert.equal(migrated!.unresolvedViolations, 0)
   assert.deepEqual(
@@ -782,3 +791,201 @@ console.log('Business Empire land and facilities tests passed')
 }
 
 console.log('Business Empire government and compliance tests passed')
+
+// ============================================================================
+// Questionable offers, legal risk, investigations, court cases, and v5 -> v6 migration
+// ============================================================================
+
+const NEUTRAL_RISK: LegalRiskProfile = { suspicion: 0, availableEvidence: 0, civilLiability: 0, criminalExposure: 0, publicAwareness: 0, employeeKnowledge: 0, previousViolations: 0 }
+
+function makeLegalCase(overrides: Partial<LegalCase> = {}): LegalCase {
+  return {
+    id: 'case-test', relatedOfferId: null, title: 'Test case', description: 'A test legal case.',
+    severity: 'minor', stage: 'complaint-or-rumour', startedYear: 1, stageEnteredYear: 1,
+    actionsTaken: [], outcome: null, resolvedYear: null,
+    ...overrides,
+  }
+}
+
+// 42. A questionable offer only ever appears when nothing is already pending, and only when the roll actually succeeds.
+{
+  const difficulty = DIFFICULTY_PROFILES.beginner
+  const blockedByPending = generateQuestionableOffer(true, difficulty, 1, () => 0)
+  assert.equal(blockedByPending, null, 'no second offer can appear while one is already pending')
+
+  const guaranteed = generateQuestionableOffer(false, difficulty, 1, () => 0)
+  assert.ok(guaranteed, 'a near-zero roll against a nonzero chance produces an offer')
+  assert.equal(guaranteed!.yearOffered, 1, 'a new offer records the year it appeared')
+  assert.equal(guaranteed!.response, null, 'a new offer starts unresolved')
+  assert.ok(guaranteed!.possibleDelayedConsequences.length > 0, 'every offer explains at least one possible delayed consequence')
+
+  const never = generateQuestionableOffer(false, difficulty, 1, () => 0.999)
+  assert.equal(never, null, 'a near-certain roll against the same chance produces no offer')
+}
+
+// 43. Accepting an offer always raises legal risk; every lawful response never raises it, and reporting lowers suspicion.
+{
+  const offer: QuestionableOffer = {
+    id: 'offer-1', offerId: 'unreported-payment', title: 'Test offer', description: 'test', immediateBenefit: 'test',
+    riskLevel: 'high', adviserRecommendation: 'test', legalCategoriesAffected: ['financial-reporting'],
+    possibleDelayedConsequences: ['test'], yearOffered: 1, resolvedYear: null, response: null,
+  }
+  const accepted = applyOfferResponseToLegalRisk(NEUTRAL_RISK, offer, 'accept')
+  assert.ok(accepted.suspicion > 0 && accepted.availableEvidence > 0 && accepted.criminalExposure > 0, 'accepting a risky offer raises suspicion, evidence, and criminal exposure')
+  assert.equal(accepted.previousViolations, 1, 'accepting counts as one more previous violation')
+
+  for (const lawfulResponse of ['reject', 'investigate', 'negotiate-lawful-alternative'] as const) {
+    const result = applyOfferResponseToLegalRisk(NEUTRAL_RISK, offer, lawfulResponse)
+    assert.deepEqual(result, NEUTRAL_RISK, `responding with "${lawfulResponse}" never raises legal risk above where it started`)
+  }
+
+  const withSomeSuspicion: LegalRiskProfile = { ...NEUTRAL_RISK, suspicion: 10 }
+  const reported = applyOfferResponseToLegalRisk(withSomeSuspicion, offer, 'report')
+  assert.ok(reported.suspicion < withSomeSuspicion.suspicion, 'reporting a questionable offer lowers suspicion rather than raising it')
+}
+
+// 44. Investigation trigger chance rises with real risk and falls with strong compliance — never a background roll disconnected from actual state.
+{
+  const difficulty = DIFFICULTY_PROFILES.beginner
+  const noRiskChance = computeInvestigationTriggerChance(NEUTRAL_RISK, 80, difficulty)
+  assert.equal(noRiskChance, 0, 'a company with zero accumulated risk has zero investigation chance')
+
+  const highRisk: LegalRiskProfile = { suspicion: 90, availableEvidence: 90, civilLiability: 80, criminalExposure: 90, publicAwareness: 70, employeeKnowledge: 80, previousViolations: 3 }
+  const lowComplianceChance = computeInvestigationTriggerChance(highRisk, 20, difficulty)
+  const highComplianceChance = computeInvestigationTriggerChance(highRisk, 90, difficulty)
+  assert.ok(lowComplianceChance > 0, 'high accumulated risk produces a real, nonzero investigation chance')
+  assert.ok(lowComplianceChance > highComplianceChance, 'strong compliance meaningfully reduces investigation chance versus weak compliance, for the same underlying risk')
+  assert.ok(lowComplianceChance <= 0.6, 'investigation chance is always bounded, never a near-certainty')
+}
+
+// 45. Case severity is classified directly from the risk profile that produced it — heavier exposure and repeat violations always classify at least as severe.
+{
+  assert.equal(classifyCaseSeverity(NEUTRAL_RISK), 'minor', 'a clean risk profile classifies as a minor case')
+  const severeRisk: LegalRiskProfile = { ...NEUTRAL_RISK, criminalExposure: 100, civilLiability: 100, previousViolations: 5 }
+  assert.equal(classifyCaseSeverity(severeRisk), 'severe', 'maxed-out criminal exposure and repeated violations classify as a severe case')
+}
+
+// 46. A legal case advances exactly one stage per year and never advances past the final stage.
+{
+  let legalCase = makeLegalCase()
+  for (let year = 2; year <= 10; year += 1) {
+    legalCase = advanceCaseStage(legalCase, year)
+  }
+  assert.equal(legalCase.stage, 'penalty-or-acquittal', 'after enough years, the case has reached the final stage')
+  assert.equal(legalCase.stageEnteredYear, INVESTIGATION_STAGE_ORDER.length, 'the case advanced exactly one stage per year, never skipping or repeating')
+  const stalled = advanceCaseStage(legalCase, 99)
+  assert.equal(stalled.stage, 'penalty-or-acquittal', 'a case already at the final stage never advances further')
+}
+
+// 47. Case outcomes are driven by the accumulated actions and risk, not chance alone: a clean, uncontested case is acquitted, while only a severe, contested, strong-evidence, repeat-violation case can ever reach founder-imprisonment.
+{
+  const mildCase = makeLegalCase({ severity: 'minor', actionsTaken: ['cooperate'] })
+  const mildOutcome = resolveCaseOutcome(mildCase, NEUTRAL_RISK, () => 0.5)
+  assert.equal(mildOutcome, 'acquitted', 'a clean risk profile with cooperation and no contest is acquitted')
+
+  const severeRisk: LegalRiskProfile = { ...NEUTRAL_RISK, criminalExposure: 90, civilLiability: 90, availableEvidence: 80, previousViolations: 3 }
+  const severeCase = makeLegalCase({ severity: 'severe', actionsTaken: ['contest-allegations'] })
+  const severeOutcome = resolveCaseOutcome(severeCase, severeRisk, () => 0.1)
+  assert.ok(
+    severeOutcome === 'founder-imprisonment' || severeOutcome === 'company-dissolution',
+    'only the combination of severe severity, contested allegations, strong evidence, and repeat violations can reach the two most serious outcomes',
+  )
+
+  const leniencyCase = makeLegalCase({ severity: 'severe', actionsTaken: ['cooperate', 'hire-legal-representation', 'compensate-customers', 'settle-civil-claims'] })
+  const leniencyOutcome = resolveCaseOutcome(leniencyCase, severeRisk, () => 0.1)
+  assert.notEqual(leniencyOutcome, 'founder-imprisonment', 'cooperating and settling instead of contesting never leads to the most severe outcome, even with the same underlying risk')
+}
+
+// 48. Every lawful legal-case action has a real, ledger-relevant cost except pure cooperation/contesting, which cost nothing to choose.
+{
+  const industry = getIndustryProfile('Clothing')
+  const difficulty = DIFFICULTY_PROFILES.beginner
+  assert.equal(computeLegalCaseActionCost('cooperate', industry, difficulty), 0, 'cooperating costs nothing')
+  assert.equal(computeLegalCaseActionCost('contest-allegations', industry, difficulty), 0, 'contesting costs nothing up front')
+  assert.ok(computeLegalCaseActionCost('hire-legal-representation', industry, difficulty) > 0, 'hiring legal representation has a real cost')
+  assert.ok(computeLegalCaseActionCost('settle-civil-claims', industry, difficulty) > computeLegalCaseActionCost('internal-investigation', industry, difficulty), 'settling civil claims costs meaningfully more than an internal investigation')
+}
+
+// 49. Responding to a questionable offer through game-state charges/credits the ledger correctly, updates legal risk, and can only happen once per offer.
+{
+  const state = freshState()
+  const withOffer: GameState = { ...state, questionableOffers: [{
+    id: 'offer-2', offerId: 'suspicious-supplier-discount', title: 'Discount test', description: 'test', immediateBenefit: 'test',
+    riskLevel: 'medium', adviserRecommendation: 'test', legalCategoriesAffected: ['corporate-tax'],
+    possibleDelayedConsequences: ['test'], yearOffered: state.year, resolvedYear: null, response: null,
+  }] }
+  const cashBefore = withOffer.cash
+
+  const accepted = respondToQuestionableOffer(withOffer, 'offer-2', 'accept')
+  assert.equal(accepted.error, undefined)
+  assert.ok(accepted.state.cash > cashBefore, 'accepting a questionable offer credits real cash')
+  assert.ok(accepted.state.cashLedger.some((entry) => entry.category === 'QUESTIONABLE_OFFER_BENEFIT'), 'the benefit is recorded as its own categorised ledger entry')
+  assert.ok(accepted.state.legalRisk.suspicion > 0, 'accepting raises legal risk')
+  assert.ok(verifyLedgerIntegrity(accepted.state).ok)
+
+  const secondAttempt = respondToQuestionableOffer(accepted.state, 'offer-2', 'reject')
+  assert.ok(secondAttempt.error, 'an already-resolved offer cannot be responded to again')
+}
+
+// 50. Taking a legal case action charges exactly its previewed cost, rejects insufficient cash, and rejects a duplicate or unknown action.
+{
+  const state = freshState()
+  const withCase: GameState = { ...state, legalCases: [makeLegalCase({ id: 'case-2', startedYear: state.year, stageEnteredYear: state.year })] }
+  const cashBefore = withCase.cash
+
+  const acted = takeLegalCaseAction(withCase, 'case-2', 'hire-legal-representation')
+  assert.equal(acted.error, undefined)
+  assert.ok(cashBefore - acted.state.cash > 0, 'taking a paid legal-case action charges real cash')
+  assert.ok(acted.state.cashLedger.some((entry) => entry.category === 'LEGAL_FEE'), 'hiring legal representation is recorded under LEGAL_FEE')
+  assert.ok(verifyLedgerIntegrity(acted.state).ok)
+
+  const duplicate = takeLegalCaseAction(acted.state, 'case-2', 'hire-legal-representation')
+  assert.ok(duplicate.error, 'the same action cannot be taken twice on the same case')
+
+  const brokeState: GameState = { ...withCase, cash: 0 }
+  const tooExpensive = takeLegalCaseAction(brokeState, 'case-2', 'settle-civil-claims')
+  assert.ok(tooExpensive.error, 'an action that costs more than available cash is rejected')
+
+  const settlement = takeLegalCaseAction(withCase, 'case-2', 'compensate-customers')
+  assert.ok(settlement.state.cashLedger.some((entry) => entry.category === 'SETTLEMENT_PAYMENT'), 'compensating customers is recorded under SETTLEMENT_PAYMENT, distinct from a general legal fee')
+}
+
+// 51. A save from the pre-legal-risk format (version 5) migrates into a valid version-6 state with a neutral, honest baseline — existing saves keep working.
+{
+  const state = freshState()
+  const { state: afterYear } = completeFinancialYear(state, rng)
+  const v5Raw: Record<string, unknown> = JSON.parse(JSON.stringify(afterYear))
+  v5Raw.saveVersion = 5
+  delete v5Raw.legalRisk
+  delete v5Raw.questionableOffers
+  delete v5Raw.legalCases
+  delete v5Raw.gameOverReason
+
+  const migrated = migrateV5ToV6(v5Raw)
+  assert.ok(migrated, 'a version-5-shaped save migrates successfully rather than being discarded')
+  assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.deepEqual(migrated!.legalRisk, NEUTRAL_RISK, 'a save from before this feature existed starts from a neutral, zero-suspicion legal risk baseline')
+  assert.deepEqual(migrated!.questionableOffers, [], 'a migrated save starts with no fabricated offer history')
+  assert.deepEqual(migrated!.legalCases, [], 'a migrated save starts with no fabricated legal case history')
+  assert.equal(migrated!.gameOverReason, null)
+  assert.ok(migrated!.annualReports.every((r) => Array.isArray(r.offerUpdates) && Array.isArray(r.legalCaseUpdates)), 'every migrated annual report gets offerUpdates and legalCaseUpdates arrays, never undefined')
+  assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
+}
+
+// 52. completeFinancialYear only ever generates a new offer when none is pending, and legalConsequencesMode 'disabled' suppresses the whole system for a year.
+{
+  const state = freshState()
+  const rngAlwaysZero = () => 0
+  const { state: afterFirstYear } = completeFinancialYear(state, rngAlwaysZero)
+  const pendingCount = afterFirstYear.questionableOffers.filter((offer) => offer.response === null).length
+  assert.ok(pendingCount <= 1, 'at most one questionable offer is ever pending at a time')
+
+  const disabledState: GameState = { ...state, preferences: { ...state.preferences, legalConsequencesMode: 'disabled' } }
+  const { state: afterDisabledYear } = completeFinancialYear(disabledState, rngAlwaysZero)
+  assert.deepEqual(afterDisabledYear.questionableOffers, [], 'with legal consequences disabled, no questionable offer is ever generated')
+  assert.deepEqual(afterDisabledYear.legalCases, [], 'with legal consequences disabled, no legal case is ever generated')
+  assert.ok(verifyLedgerIntegrity(afterDisabledYear).ok)
+}
+
+console.log('Business Empire questionable offers and legal risk tests passed')

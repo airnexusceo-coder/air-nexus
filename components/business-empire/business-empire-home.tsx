@@ -19,6 +19,7 @@ import { CompetitorsPage } from '@/components/business-empire/competitors-page'
 import { ReputationPage } from '@/components/business-empire/reputation-page'
 import { LandFacilitiesPage } from '@/components/business-empire/land-facilities-page'
 import { GovernmentCompliancePage } from '@/components/business-empire/government-compliance-page'
+import { LegalRiskPage } from '@/components/business-empire/legal-risk-page'
 import { FundingPage } from '@/components/business-empire/funding-page'
 import { FinancesPage } from '@/components/business-empire/finances-page'
 import { AnnualReportsPage } from '@/components/business-empire/annual-reports-page'
@@ -42,7 +43,9 @@ import {
   manufactureMoreUnits,
   purchaseResearch,
   releaseComplianceStaff,
+  respondToQuestionableOffer,
   sellFacility,
+  takeLegalCaseAction,
   updatePreferences,
   updateProductPrice,
   upgradeFacility,
@@ -52,7 +55,7 @@ import {
 } from '@/lib/business-empire/game-state'
 import { clearGameState, hasSavedGame, loadGameState, saveGameState } from '@/lib/business-empire/storage'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
-import type { AdvertisingChannel, AnnualReport, ComplianceStaffRole, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, LoanPurpose, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, AnnualReport, ComplianceStaffRole, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, LegalCaseAction, LoanPurpose, OfferResponse, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
@@ -259,6 +262,22 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
     return {}
   }
 
+  const handleRespondToOffer = (offerId: string, response: OfferResponse) => {
+    const result = respondToQuestionableOffer(gameState, offerId, response)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.(response === 'accept' ? 'Offer accepted.' : 'Offer resolved.', response === 'accept' ? 'warning' : 'info')
+    return {}
+  }
+
+  const handleTakeCaseAction = (caseId: string, action: LegalCaseAction) => {
+    const result = takeLegalCaseAction(gameState, caseId, action)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Legal case action recorded.', 'info')
+    return {}
+  }
+
   const handleConfirmCompleteYear = () => {
     const { state: next, report } = completeFinancialYear(gameState)
     setGameState(next)
@@ -323,6 +342,7 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
             {view === 'reputation' && <ReputationPage state={gameState} onInvestInCommunity={handleInvestInCommunity} />}
             {view === 'land-facilities' && <LandFacilitiesPage state={gameState} onBuild={handleBuildFacility} onUpgrade={handleUpgradeFacility} onSell={handleSellFacility} onVacate={handleVacateLease} />}
             {view === 'government-compliance' && <GovernmentCompliancePage state={gameState} onHireStaff={handleHireComplianceStaff} onReleaseStaff={handleReleaseComplianceStaff} />}
+            {view === 'legal-risk' && <LegalRiskPage state={gameState} onRespondToOffer={handleRespondToOffer} onTakeCaseAction={handleTakeCaseAction} />}
             {view === 'funding' && <FundingPage state={gameState} onApplyForLoan={handleApplyForLoan} />}
             {view === 'finances' && <FinancesPage state={gameState} />}
             {view === 'annual-reports' && <AnnualReportsPage state={gameState} />}

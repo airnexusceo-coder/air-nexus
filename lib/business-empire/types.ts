@@ -164,6 +164,8 @@ export type GamePreferences = {
   learningSupport: LearningSupport
   reducedMotion: boolean
   careerBackground?: CareerBackground
+  /** How a founder-imprisonment outcome plays out — defaults to 'legacy-mode' (the company continues under a new CEO) so a single bad legal outcome is never an unavoidable, un-signed-up-for permanent loss. */
+  legalConsequencesMode?: LegalConsequencesMode
 }
 
 export const DIFFICULTY_CASH_RANGE: Record<Difficulty, { min: number; max: number; default: number }> = {
@@ -413,6 +415,10 @@ export type CashTransactionCategory =
   | 'COMPLIANCE_STAFF_WAGES'
   | 'LAW_COMPLIANCE_COST'
   | 'REGULATORY_FINE'
+  | 'LEGAL_FEE'
+  | 'SETTLEMENT_PAYMENT'
+  | 'COURT_FINE'
+  | 'QUESTIONABLE_OFFER_BENEFIT'
   | 'SALES_REVENUE'
   | 'TAX'
   | 'REFUND'
@@ -552,6 +558,10 @@ export type AnnualReport = {
   competitorActions: CompetitorActivityEvent[]
   /** Every law that changed status this year — newly proposed (advance warning) or newly decided (passed/rejected) — so regulatory change is always explained in the report, never left implicit. */
   lawUpdates: Law[]
+  /** Any questionable offer that appeared or was resolved this year. */
+  offerUpdates: QuestionableOffer[]
+  /** Any legal case that advanced a stage or resolved this year. */
+  legalCaseUpdates: LegalCase[]
   learningSummary: {
     workedWell: string[]
     causedProblems: string[]
@@ -686,6 +696,86 @@ export type ComplianceCategory = 'employment' | 'product-safety' | 'finance-tax'
 
 export type ComplianceStaffRole = 'compliance-officer' | 'accountant' | 'lawyer' | 'safety-inspector' | 'environmental-specialist'
 
+// --- Phase 4: Questionable offers and legal risk -----------------------------------
+
+/** Every offer is fictional and abstract by design — no operational detail of how any of these would actually be carried out, only the decision and its consequences. */
+export type QuestionableOfferId =
+  | 'suspicious-supplier-discount'
+  | 'unreported-payment'
+  | 'insider-information'
+  | 'safety-shortcut'
+  | 'false-environmental-certification'
+  | 'price-fixing-invitation'
+  | 'improper-political-favour'
+  | 'misleading-advertising-proposal'
+  | 'hidden-product-defect'
+  | 'questionable-tax-scheme'
+
+export type OfferResponse = 'accept' | 'reject' | 'investigate' | 'consult-lawyers' | 'report' | 'negotiate-lawful-alternative'
+export type OfferRiskLevel = 'low' | 'medium' | 'high' | 'severe'
+
+export type QuestionableOffer = {
+  id: string
+  offerId: QuestionableOfferId
+  title: string
+  description: string
+  immediateBenefit: string
+  riskLevel: OfferRiskLevel
+  adviserRecommendation: string
+  legalCategoriesAffected: LawCategory[]
+  possibleDelayedConsequences: string[]
+  yearOffered: number
+  resolvedYear: number | null
+  response: OfferResponse | null
+}
+
+/** Never a pure dice roll — every field here is something a specific past decision moved, and together they decide whether, and how fast, an investigation actually starts. */
+export type LegalRiskProfile = {
+  suspicion: number
+  availableEvidence: number
+  civilLiability: number
+  criminalExposure: number
+  publicAwareness: number
+  employeeKnowledge: number
+  previousViolations: number
+}
+
+export type InvestigationStage =
+  | 'complaint-or-rumour'
+  | 'preliminary-investigation'
+  | 'evidence-collection'
+  | 'formal-claim-or-charges'
+  | 'court-proceedings'
+  | 'judgment'
+  | 'penalty-or-acquittal'
+
+export const INVESTIGATION_STAGE_ORDER: InvestigationStage[] = [
+  'complaint-or-rumour', 'preliminary-investigation', 'evidence-collection', 'formal-claim-or-charges', 'court-proceedings', 'judgment', 'penalty-or-acquittal',
+]
+
+export type LegalCaseAction = 'cooperate' | 'hire-legal-representation' | 'internal-investigation' | 'replace-executives' | 'compensate-customers' | 'contest-allegations' | 'settle-civil-claims' | 'improve-compliance'
+
+export type LegalCaseSeverity = 'minor' | 'moderate' | 'serious' | 'severe'
+
+export type LegalCaseOutcome = 'acquitted' | 'warning' | 'fine' | 'product-recall' | 'facility-closure' | 'contract-cancellation' | 'executive-removal' | 'trading-restriction' | 'company-dissolution' | 'founder-imprisonment'
+
+export type LegalCase = {
+  id: string
+  relatedOfferId: string | null
+  title: string
+  description: string
+  severity: LegalCaseSeverity
+  stage: InvestigationStage
+  startedYear: number
+  stageEnteredYear: number
+  actionsTaken: LegalCaseAction[]
+  outcome: LegalCaseOutcome | null
+  resolvedYear: number | null
+}
+
+/** How founder-imprisonment (and other severe outcomes) actually plays out — chosen once at setup so nobody is surprised by a permanent loss they didn't sign up for. */
+export type LegalConsequencesMode = 'permanent-game-over' | 'legacy-mode' | 'disabled'
+
 export type GameState = {
   companyName: string
   founderName: string
@@ -724,6 +814,11 @@ export type GameState = {
   complianceStaff: Record<ComplianceStaffRole, number>
   /** A running count of compliance violations found and not yet resolved — never silently cleared. */
   unresolvedViolations: number
+  legalRisk: LegalRiskProfile
+  questionableOffers: QuestionableOffer[]
+  legalCases: LegalCase[]
+  /** Set only when a legal case resolves in founder-imprisonment under 'permanent-game-over' mode — the game keeps its full history but stops being playable, explained rather than silently frozen. */
+  gameOverReason: string | null
   /** 1.0 = neutral; nudged up/down by yearly events to represent broader economic conditions. */
   economicIndex: number
   /** A slower-moving named cycle layered on top of `economicIndex` so downturns/booms feel like a real named condition, not silent per-event noise. */
@@ -737,4 +832,4 @@ export type GameState = {
   saveVersion: number
 }
 
-export const CURRENT_SAVE_VERSION = 5
+export const CURRENT_SAVE_VERSION = 6

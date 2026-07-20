@@ -11,6 +11,7 @@ import {
   Layers,
   MapPinned,
   Megaphone,
+  Scale,
   Settings as SettingsIcon,
   Star,
   Swords,
@@ -30,6 +31,7 @@ export type BusinessEmpireView =
   | 'reputation'
   | 'land-facilities'
   | 'government-compliance'
+  | 'legal-risk'
   | 'funding'
   | 'finances'
   | 'annual-reports'
@@ -50,6 +52,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'reputation', label: 'Reputation', icon: Star },
   { id: 'land-facilities', label: 'Land & Facilities', icon: MapPinned },
   { id: 'government-compliance', label: 'Government & Compliance', icon: Gavel },
+  { id: 'legal-risk', label: 'Legal & Compliance Risk', icon: Scale },
   { id: 'funding', label: 'Funding', icon: Landmark },
   { id: 'finances', label: 'Finances', icon: BarChart3 },
   { id: 'annual-reports', label: 'Annual Reports', icon: Award },

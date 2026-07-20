@@ -26,6 +26,18 @@ import {
   resolveLawDecisions,
 } from '@/lib/business-empire/government'
 import {
+  advanceCaseStage,
+  applyOfferResponseToLegalRisk,
+  classifyCaseSeverity,
+  computeCaseFinancialImpact,
+  computeCaseReputationImpact,
+  computeInvestigationTriggerChance,
+  computeLegalCaseActionCost,
+  computeOfferBenefit,
+  generateQuestionableOffer,
+  resolveCaseOutcome,
+} from '@/lib/business-empire/legal'
+import {
   DEGREE_INDUSTRY_REPUTATION_BONUS,
   getDegreeProfile,
   getHardcoreJob,
@@ -85,8 +97,11 @@ import {
   type Law,
   type GamePreferences,
   type GameState,
+  type LegalCase,
+  type LegalCaseAction,
   type Loan,
   type LoanPurpose,
+  type QuestionableOffer,
   type PackagingQuality,
   type Product,
   type ProductQuality,
@@ -238,6 +253,10 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     complianceRatings: { employment: 30, 'product-safety': 30, 'finance-tax': 30, environmental: 30, privacy: 30, advertising: 30, 'construction-property': 30 },
     complianceStaff: { 'compliance-officer': 0, accountant: 0, lawyer: 0, 'safety-inspector': 0, 'environmental-specialist': 0 },
     unresolvedViolations: 0,
+    legalRisk: { suspicion: 0, availableEvidence: 0, civilLiability: 0, criminalExposure: 0, publicAwareness: 0, employeeKnowledge: 0, previousViolations: 0 },
+    questionableOffers: [],
+    legalCases: [],
+    gameOverReason: null,
     economicIndex: 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -657,6 +676,69 @@ export function releaseComplianceStaff(state: GameState, role: ComplianceStaffRo
   return { state: { ...state, complianceStaff: { ...state.complianceStaff, [role]: state.complianceStaff[role] - 1 } } }
 }
 
+// --- Questionable offers and legal risk ---------------------------------------------
+
+export function previewQuestionableOfferBenefit(state: GameState, offerId: string): number {
+  const offer = state.questionableOffers.find((item) => item.id === offerId)
+  if (!offer) return 0
+  return computeOfferBenefit(offer, getIndustryProfile(state.industry), DIFFICULTY_PROFILES[state.preferences.difficulty])
+}
+
+/** Every lawful response (reject, investigate, consult lawyers, report, negotiate a lawful alternative) is always available and never disadvantages the player relative to accepting once risk is accounted for. */
+export function respondToQuestionableOffer(state: GameState, offerId: string, response: NonNullable<QuestionableOffer['response']>): { state: GameState; error?: string } {
+  const offer = state.questionableOffers.find((item) => item.id === offerId)
+  if (!offer) return { state, error: 'That offer is no longer available.' }
+  if (offer.response !== null) return { state, error: 'This offer has already been resolved.' }
+
+  const industry = getIndustryProfile(state.industry)
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  const resolvedOffer: QuestionableOffer = { ...offer, response, resolvedYear: state.year }
+  let next: GameState = {
+    ...state,
+    questionableOffers: state.questionableOffers.map((item) => (item.id === offerId ? resolvedOffer : item)),
+    legalRisk: applyOfferResponseToLegalRisk(state.legalRisk, offer, response),
+  }
+
+  if (response === 'accept') {
+    const benefit = computeOfferBenefit(offer, industry, difficulty)
+    if (benefit > 0) {
+      next = appendTransaction(next, { category: 'QUESTIONABLE_OFFER_BENEFIT', amount: benefit, description: `Accepted: ${offer.title}`, relatedId: offer.id })
+    }
+  } else if (response === 'report') {
+    next = appendReputationTransaction(next, { delta: 1, reasonCategory: 'FAIR_TREATMENT', description: `Reported a questionable approach ("${offer.title}") instead of acting on it.`, relatedId: offer.id })
+  }
+
+  return { state: next }
+}
+
+export function previewLegalCaseActionCost(state: GameState, action: LegalCaseAction): number {
+  return computeLegalCaseActionCost(action, getIndustryProfile(state.industry), DIFFICULTY_PROFILES[state.preferences.difficulty])
+}
+
+/** Actions accumulate on the case and are weighed together when it reaches judgment — no single action guarantees an outcome. */
+export function takeLegalCaseAction(state: GameState, caseId: string, action: LegalCaseAction): { state: GameState; error?: string } {
+  const legalCase = state.legalCases.find((item) => item.id === caseId)
+  if (!legalCase) return { state, error: 'That legal case is no longer active.' }
+  if (legalCase.outcome !== null) return { state, error: 'This case has already been resolved.' }
+  if (legalCase.actionsTaken.includes(action)) return { state, error: 'That action has already been taken on this case.' }
+
+  const cost = computeLegalCaseActionCost(action, getIndustryProfile(state.industry), DIFFICULTY_PROFILES[state.preferences.difficulty])
+  if (cost > state.cash) return { state, error: `This action needs ${Math.round(cost).toLocaleString()}, more than your available cash.` }
+
+  const updatedCase: LegalCase = { ...legalCase, actionsTaken: [...legalCase.actionsTaken, action] }
+  let next: GameState = { ...state, legalCases: state.legalCases.map((item) => (item.id === caseId ? updatedCase : item)) }
+  if (cost > 0) {
+    const category: CashTransactionCategory = action === 'compensate-customers' || action === 'settle-civil-claims' ? 'SETTLEMENT_PAYMENT' : 'LEGAL_FEE'
+    next = appendTransaction(next, { category, amount: -cost, description: `Legal case action (${action.replace(/-/g, ' ')}) for "${legalCase.title}"`, relatedId: legalCase.id })
+  }
+  if (action === 'improve-compliance') {
+    const boosted = { ...next.complianceRatings }
+    for (const category of COMPLIANCE_CATEGORY_ORDER) boosted[category] = clampScore(boosted[category] + 3)
+    next = { ...next, complianceRatings: boosted }
+  }
+  return { state: next }
+}
+
 export { verifyLedgerIntegrity }
 
 export type YearOutcomeEstimate = {
@@ -939,6 +1021,83 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     }
   }
 
+  // Questionable offers and legal risk: at most one pending offer at a time, and legal risk only ever
+  // moves because of how the player actually responded to something — never a background dice roll
+  // disconnected from real decisions. 'disabled' mode skips the whole system for a lighter game.
+  const legalConsequencesMode = working.preferences.legalConsequencesMode ?? 'legacy-mode'
+  if (legalConsequencesMode !== 'disabled') {
+    const hasPendingOffer = working.questionableOffers.some((offer) => offer.response === null)
+    const newOffer = generateQuestionableOffer(hasPendingOffer, difficulty, year, rng)
+    if (newOffer) {
+      working = { ...working, questionableOffers: [...working.questionableOffers, newOffer] }
+      factorNotes.push(`A questionable offer arose this year: "${newOffer.title}" — review it on the Legal & Compliance page.`)
+    }
+
+    // Low staff morale raises the chance that internal concerns about existing risk become outside suspicion — the whistleblower pathway, without a separate subsystem.
+    if (working.legalRisk.employeeKnowledge > 25 && working.staffMorale < 40) {
+      const whistleblowerBump = Math.round((40 - working.staffMorale) * 0.15)
+      working = { ...working, legalRisk: { ...working.legalRisk, suspicion: clampScore(working.legalRisk.suspicion + whistleblowerBump) } }
+      factorNotes.push('Low staff morale increased the chance that internal concerns became outside suspicion this year.')
+    }
+
+    // Only one investigation can be active at a time; the underlying risk profile keeps accumulating in the meantime regardless.
+    const hasActiveLegalCase = working.legalCases.some((legalCase) => legalCase.outcome === null)
+    if (!hasActiveLegalCase) {
+      const averageComplianceRating = COMPLIANCE_CATEGORY_ORDER.reduce((sum, category) => sum + working.complianceRatings[category], 0) / COMPLIANCE_CATEGORY_ORDER.length
+      const triggerChance = computeInvestigationTriggerChance(working.legalRisk, averageComplianceRating, difficulty)
+      if (triggerChance > 0 && rng() < triggerChance) {
+        const severity = classifyCaseSeverity(working.legalRisk)
+        const relatedOffer = [...working.questionableOffers].reverse().find((offer) => offer.response === 'accept')
+        const newCase: LegalCase = {
+          id: createId('legal-case'),
+          relatedOfferId: relatedOffer?.id ?? null,
+          title: relatedOffer ? `Investigation: ${relatedOffer.title}` : 'Investigation into company conduct',
+          description: relatedOffer
+            ? `A complaint or rumour has surfaced, connected to how the company handled "${relatedOffer.title}".`
+            : 'A complaint or rumour about the company\'s conduct has surfaced.',
+          severity,
+          stage: 'complaint-or-rumour',
+          startedYear: year,
+          stageEnteredYear: year,
+          actionsTaken: [],
+          outcome: null,
+          resolvedYear: null,
+        }
+        working = { ...working, legalCases: [...working.legalCases, newCase] }
+        factorNotes.push(`A legal case began this year: "${newCase.title}" — review it on the Legal & Compliance page.`)
+      }
+    }
+
+    // Every active case advances exactly one stage per year; reaching the final stage resolves and applies the outcome in the same step.
+    const updatedCases: LegalCase[] = []
+    for (const existingCase of working.legalCases) {
+      if (existingCase.outcome !== null) { updatedCases.push(existingCase); continue }
+      let advancedCase = advanceCaseStage(existingCase, year)
+      if (advancedCase.stage === 'penalty-or-acquittal') {
+        const outcome = resolveCaseOutcome(advancedCase, working.legalRisk, rng)
+        const financialImpact = computeCaseFinancialImpact(outcome, industry, difficulty)
+        const reputationImpact = computeCaseReputationImpact(outcome)
+        advancedCase = { ...advancedCase, outcome, resolvedYear: year }
+        if (financialImpact > 0) {
+          working = appendTransaction(working, { category: 'COURT_FINE', amount: -financialImpact, description: `Court outcome for "${advancedCase.title}": ${outcome.replace(/-/g, ' ')}`, relatedId: advancedCase.id })
+        }
+        if (reputationImpact !== 0) {
+          working = appendReputationTransaction(working, { delta: reputationImpact, reasonCategory: outcome === 'acquitted' ? 'CRISIS_HANDLED_WELL' : 'SCANDAL', description: `Court outcome for "${advancedCase.title}": ${outcome.replace(/-/g, ' ')}.`, relatedId: advancedCase.id })
+        }
+        factorNotes.push(`Legal case resolved: "${advancedCase.title}" ended in ${outcome.replace(/-/g, ' ')}.`)
+        if (outcome === 'founder-imprisonment') {
+          if (legalConsequencesMode === 'permanent-game-over') {
+            working = { ...working, gameOverReason: `${working.founderName} was found guilty in "${advancedCase.title}" and imprisoned. Under permanent-consequences settings, ${working.companyName}'s story ends here.` }
+          } else {
+            factorNotes.push(`${working.founderName} was found guilty and stepped down as a result — a successor now leads ${working.companyName}.`)
+          }
+        }
+      }
+      updatedCases.push(advancedCase)
+    }
+    working = { ...working, legalCases: updatedCases }
+  }
+
   // Loans amortize on a straight-line principal schedule with interest charged on the remaining balance — the schedule is visible on the Funding page, never a surprise deduction.
   let loanRepaymentsTotal = 0
   const remainingLoans: Loan[] = []
@@ -1217,6 +1376,8 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     events,
     competitorActions: competitorResult.activity,
     lawUpdates,
+    offerUpdates: working.questionableOffers.filter((offer) => offer.yearOffered === year || offer.resolvedYear === year),
+    legalCaseUpdates: working.legalCases.filter((legalCase) => legalCase.startedYear === year || legalCase.stageEnteredYear === year || legalCase.resolvedYear === year),
     learningSummary: { workedWell, causedProblems, whyProfitOrLoss, considerNextYear },
   }
 
