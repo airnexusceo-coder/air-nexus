@@ -200,20 +200,23 @@ export function TaskAssignmentModal({ open, onClose, task, notify }: TaskAssignm
   useEffect(() => {
     if (!open || !taskId) return
     let cancelled = false
-    setHydrating(true)
-    setAiError('')
-    fetch(apiUrl(`/api/tasks/${taskId}/assignment`), { credentials: 'include', cache: 'no-store' })
-      .then((response) => response.json() as Promise<{ assignment: TaskAssignmentDTO | null }>)
-      .then((data) => {
-        if (cancelled) return
-        setAssignment(data.assignment)
-        setBriefForm(data.assignment
-          ? { brief: data.assignment.brief, sourceNotes: data.assignment.sourceNotes, targetWordCount: String(data.assignment.targetWordCount) }
-          : { brief: '', sourceNotes: '', targetWordCount: '1000' })
-      })
-      .catch(() => { if (!cancelled) notify('Could not load the assignment workspace.', 'warning') })
-      .finally(() => { if (!cancelled) setHydrating(false) })
-    return () => { cancelled = true }
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return
+      setHydrating(true)
+      setAiError('')
+      fetch(apiUrl(`/api/tasks/${taskId}/assignment`), { credentials: 'include', cache: 'no-store' })
+        .then((response) => response.json() as Promise<{ assignment: TaskAssignmentDTO | null }>)
+        .then((data) => {
+          if (cancelled) return
+          setAssignment(data.assignment)
+          setBriefForm(data.assignment
+            ? { brief: data.assignment.brief, sourceNotes: data.assignment.sourceNotes, targetWordCount: String(data.assignment.targetWordCount) }
+            : { brief: '', sourceNotes: '', targetWordCount: '1000' })
+        })
+        .catch(() => { if (!cancelled) notify('Could not load the assignment workspace.', 'warning') })
+        .finally(() => { if (!cancelled) setHydrating(false) })
+    }, 0)
+    return () => { cancelled = true; window.clearTimeout(timeoutId) }
   }, [open, taskId, notify])
 
   const savePatch = async (patch: Record<string, unknown>) => {
@@ -243,7 +246,9 @@ export function TaskAssignmentModal({ open, onClose, task, notify }: TaskAssignm
     saveTimeoutRef.current = window.setTimeout(flushSave, delay)
   }
 
-  useEffect(() => () => flushSave(), [])
+  const flushSaveRef = useRef(flushSave)
+  useEffect(() => { flushSaveRef.current = flushSave })
+  useEffect(() => () => flushSaveRef.current(), [])
 
   const updateAssignment = (updater: (current: TaskAssignmentDTO) => TaskAssignmentDTO, debounceMs = 0) => {
     setAssignment((current) => {
