@@ -132,6 +132,8 @@ export const REPUTATION_CATEGORY_MAP: Record<ReputationReasonCategory, Reputatio
   REPEATED_STOCKOUT: ['customer'],
   MULTI_YEAR_STABILITY: ['investor'],
   MEDIA_COVERAGE: ['customer', 'investor'],
+  ECONOMIC_CONDITIONS: ['investor'],
+  SHARE_SALE: ['investor'],
   SAVE_MIGRATION: ['customer', 'employee', 'investor', 'government', 'environmental', 'supplier'],
 }
 

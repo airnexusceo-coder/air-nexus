@@ -31,8 +31,21 @@ import {
   scoreInterviewAnswers,
   UNIVERSITY_ENTRANCE_QUIZ,
 } from '../lib/business-empire/hardcore-career'
-import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6 } from '../lib/business-empire/storage'
-import { buildFacility, hireComplianceStaff, previewFacilityCost, respondToQuestionableOffer, sellFacility, takeLegalCaseAction, upgradeFacility } from '../lib/business-empire/game-state'
+import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4, migrateV4ToV5, migrateV5ToV6, migrateV6ToV7 } from '../lib/business-empire/storage'
+import {
+  buildFacility,
+  cancelInsurance,
+  hireComplianceStaff,
+  previewFacilityCost,
+  previewLoanApplication,
+  previewShareSale,
+  purchaseInsurance,
+  respondToQuestionableOffer,
+  sellFacility,
+  sellShares,
+  takeLegalCaseAction,
+  upgradeFacility,
+} from '../lib/business-empire/game-state'
 import { computeComplianceRatingTarget, driftComplianceRating, generateLawProposal, resolveLawDecisions } from '../lib/business-empire/government'
 import {
   advanceCaseStage,
@@ -43,7 +56,16 @@ import {
   generateQuestionableOffer,
   resolveCaseOutcome,
 } from '../lib/business-empire/legal'
-import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, INVESTIGATION_STAGE_ORDER, type CareerBackground, type GamePreferences, type GameState, type LegalCase, type LegalRiskProfile, type QuestionableOffer } from '../lib/business-empire/types'
+import {
+  ECONOMIC_PHASE_INFO,
+  LOAN_TYPE_INFO,
+  advanceEconomicPhase,
+  computeCreditRating,
+  getCreditRatingBand,
+} from '../lib/business-empire/economy'
+import { computeInsuranceCoverage } from '../lib/business-empire/insurance'
+import { computeEarnedBoardSeats, computeImpliedSharePrice, computeOutsideOwnershipPercent, MIN_FOUNDER_OWNERSHIP_PERCENT } from '../lib/business-empire/investors'
+import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, INVESTIGATION_STAGE_ORDER, type CareerBackground, type GamePreferences, type GameState, type InsurancePolicy, type LegalCase, type LegalRiskProfile, type QuestionableOffer } from '../lib/business-empire/types'
 
 const rng = () => 0.5
 
@@ -964,7 +986,7 @@ function makeLegalCase(overrides: Partial<LegalCase> = {}): LegalCase {
   const migrated = migrateV5ToV6(v5Raw)
   assert.ok(migrated, 'a version-5-shaped save migrates successfully rather than being discarded')
   assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
-  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.equal(migrated!.saveVersion, 6, 'migrateV5ToV6 in isolation produces a v6-versioned save — chaining to the current version is loadGameState\'s job')
   assert.deepEqual(migrated!.legalRisk, NEUTRAL_RISK, 'a save from before this feature existed starts from a neutral, zero-suspicion legal risk baseline')
   assert.deepEqual(migrated!.questionableOffers, [], 'a migrated save starts with no fabricated offer history')
   assert.deepEqual(migrated!.legalCases, [], 'a migrated save starts with no fabricated legal case history')
@@ -989,3 +1011,159 @@ function makeLegalCase(overrides: Partial<LegalCase> = {}): LegalCase {
 }
 
 console.log('Business Empire questionable offers and legal risk tests passed')
+
+// ============================================================================
+// Economic cycles, banking, insurance, board/investors, and v6 -> v7 migration
+// ============================================================================
+
+// 53. Economic phase transitions are always weighted and adjacency-aware — every roll from a given phase lands on one of that phase's own declared neighbours, never an arbitrary or undefined phase.
+{
+  for (const startPhase of Object.keys(ECONOMIC_PHASE_INFO) as (keyof typeof ECONOMIC_PHASE_INFO)[]) {
+    for (const probe of [0, 0.25, 0.5, 0.75, 0.999]) {
+      const next = advanceEconomicPhase(startPhase, () => probe)
+      assert.ok(next in ECONOMIC_PHASE_INFO, `advancing from "${startPhase}" at roll ${probe} always lands on a real, declared phase`)
+    }
+  }
+}
+
+// 54. Credit rating is built entirely from real, visible factors: heavy debt, missed payments, weak reputation, and high legal risk all pull it down; a clean, profitable, low-debt company scores meaningfully higher — and the score always stays inside the familiar 300-850 range.
+{
+  const terrible = computeCreditRating({ recentNetProfit: -50_000, totalLoanBalance: 500_000, companyValue: 50_000, totalMissedPayments: 10, brandReputation: 5, legalRisk: { suspicion: 0, availableEvidence: 0, civilLiability: 100, criminalExposure: 100, publicAwareness: 0, employeeKnowledge: 0, previousViolations: 5 }, phase: 'recession' })
+  const excellent = computeCreditRating({ recentNetProfit: 100_000, totalLoanBalance: 0, companyValue: 500_000, totalMissedPayments: 0, brandReputation: 95, legalRisk: { suspicion: 0, availableEvidence: 0, civilLiability: 0, criminalExposure: 0, publicAwareness: 0, employeeKnowledge: 0, previousViolations: 0 }, phase: 'boom' })
+  assert.ok(terrible >= 300 && terrible <= 850, 'credit rating always stays inside the 300-850 range, even for a terrible company')
+  assert.ok(excellent >= 300 && excellent <= 850, 'credit rating always stays inside the 300-850 range, even for an excellent company')
+  assert.ok(excellent > terrible, 'a clean, profitable, low-debt company scores meaningfully higher than a heavily indebted one with missed payments and legal exposure')
+  assert.equal(getCreditRatingBand(terrible), 'very-poor', 'the terrible-company scenario lands in the worst credit band')
+}
+
+// 55. A property mortgage requires an owned facility as real collateral — it is rejected outright without one, and becomes available once one exists.
+{
+  const state = freshState()
+  const withoutFacility = previewLoanApplication(state, 20_000, 'property-mortgage')
+  assert.ok(withoutFacility.error, 'a property mortgage is rejected when the company owns no facility')
+
+  const built = buildFacility(state, 'warehouse', 'eastvale', 'owned').state
+  const withFacility = previewLoanApplication(built, 20_000, 'property-mortgage')
+  assert.equal(withFacility.error, undefined, 'a property mortgage becomes available once an owned facility exists as collateral')
+}
+
+// 56. Loan type is a real, visible trade-off: a high-risk loan is easier to get approved than a standard expansion loan, but always costs more in interest — never a free upgrade.
+{
+  assert.equal(LOAN_TYPE_INFO['property-mortgage'].requiresOwnedFacility, true)
+  assert.equal(LOAN_TYPE_INFO.expansion.requiresOwnedFacility, false)
+  const state = freshState()
+  const highRisk = previewLoanApplication(state, 10_000, 'high-risk-loan')
+  const expansion = previewLoanApplication(state, 10_000, 'expansion')
+  assert.ok(highRisk.odds >= expansion.odds, 'a high-risk loan is at least as easy to get approved as a standard expansion loan')
+  assert.ok(highRisk.interestRate > expansion.interestRate, 'a high-risk loan always costs strictly more in interest than a standard expansion loan')
+}
+
+// 57. Insurance coverage is a real, capped claim — never more than the coverage limit, never more than impact minus the deductible, and always zero with no matching active policy.
+{
+  const policy: InsurancePolicy = { id: 'policy-1', type: 'product-liability', active: true, premiumPerYear: 500, deductible: 200, coverageLimit: 1_000, purchasedYear: 1 }
+  assert.deepEqual(computeInsuranceCoverage([], 'product-liability', 5_000), { coveredAmount: 0, policyId: null }, 'no active policy means no coverage')
+  assert.deepEqual(computeInsuranceCoverage([policy], 'employee', 5_000), { coveredAmount: 0, policyId: null }, 'a policy of a different type never covers a mismatched claim')
+  assert.equal(computeInsuranceCoverage([policy], 'product-liability', 100).coveredAmount, 0, 'an impact smaller than the deductible is not covered at all')
+  const midClaim = computeInsuranceCoverage([policy], 'product-liability', 600)
+  assert.equal(midClaim.coveredAmount, 400, 'coverage is exactly impact minus deductible when that is under the coverage limit')
+  const bigClaim = computeInsuranceCoverage([policy], 'product-liability', 50_000)
+  assert.equal(bigClaim.coveredAmount, policy.coverageLimit, 'coverage never exceeds the policy coverage limit, however large the claim')
+}
+
+// 58. Buying insurance is immediate and free up front; the premium is a real, ledger-backed yearly cost once a year completes, and cancelling removes the policy entirely.
+{
+  const state = freshState()
+  const cashBefore = state.cash
+  const bought = purchaseInsurance(state, 'cybersecurity')
+  assert.equal(bought.error, undefined)
+  assert.equal(bought.state.cash, cashBefore, 'buying a policy charges nothing up front')
+  assert.equal(bought.state.insurancePolicies.length, 1)
+
+  const duplicate = purchaseInsurance(bought.state, 'cybersecurity')
+  assert.ok(duplicate.error, 'a second active policy of the same type cannot be bought while one is already active')
+
+  const { state: afterYear } = completeFinancialYear(bought.state, rng)
+  assert.ok(afterYear.cashLedger.some((entry) => entry.category === 'INSURANCE_PREMIUM'), 'the premium is charged as a real, categorised ledger entry once a year completes')
+  assert.ok(verifyLedgerIntegrity(afterYear).ok)
+
+  const cancelled = cancelInsurance(bought.state, bought.state.insurancePolicies[0].id)
+  assert.equal(cancelled.state.insurancePolicies.length, 0, 'cancelling removes the policy entirely')
+}
+
+// 59. Legal expenses insurance covers part of a court fine for an ordinary case, but never a case tied to the player's own accepted questionable offer — insurance reduces financial damage, not responsibility for intentional misconduct.
+{
+  const severeRisk: LegalRiskProfile = { suspicion: 0, availableEvidence: 80, civilLiability: 90, criminalExposure: 90, publicAwareness: 0, employeeKnowledge: 0, previousViolations: 3 }
+  const buildRiggedCase = (relatedOfferId: string | null): GameState => {
+    const base = freshState()
+    const insured = purchaseInsurance(base, 'legal-expenses').state
+    const legalCase: LegalCase = {
+      id: 'case-insurance-test', relatedOfferId, title: 'Test case', description: 'test',
+      severity: 'severe', stage: 'judgment', startedYear: insured.year - 5, stageEnteredYear: insured.year - 1,
+      actionsTaken: [], outcome: null, resolvedYear: null,
+    }
+    return { ...insured, legalRisk: severeRisk, legalCases: [legalCase] }
+  }
+
+  const ordinaryCaseState = buildRiggedCase(null)
+  const { state: afterOrdinary } = completeFinancialYear(ordinaryCaseState, rng)
+  assert.ok(afterOrdinary.cashLedger.some((entry) => entry.category === 'COURT_FINE'), 'setup: the rigged case actually resolves with a real court fine this year')
+  assert.ok(afterOrdinary.cashLedger.some((entry) => entry.category === 'INSURANCE_PAYOUT'), 'legal expenses insurance covers part of an ordinary court fine')
+
+  const misconductCaseState = buildRiggedCase('accepted-offer-id')
+  const { state: afterMisconduct } = completeFinancialYear(misconductCaseState, rng)
+  assert.ok(afterMisconduct.cashLedger.some((entry) => entry.category === 'COURT_FINE'), 'setup: the misconduct-linked case also resolves with a real court fine')
+  assert.ok(!afterMisconduct.cashLedger.some((entry) => entry.category === 'INSURANCE_PAYOUT'), 'legal expenses insurance never covers a case tied to the player\'s own accepted questionable offer')
+  assert.ok(verifyLedgerIntegrity(afterOrdinary).ok && verifyLedgerIntegrity(afterMisconduct).ok)
+}
+
+// 60. Selling equity dilutes founder ownership by exactly the percent sold, credits cash at the current valuation, is gated at the minimum-founder-ownership floor, and adds a board seat once outside ownership crosses 20%.
+{
+  const state = freshState()
+  const cashBefore = state.cash
+  const sold = sellShares(state, 25)
+  assert.equal(sold.error, undefined)
+  assert.equal(sold.state.founderOwnershipPercent, 75, 'founder ownership drops by exactly the percent sold')
+  assert.ok(sold.state.cash > cashBefore, 'selling equity credits real cash')
+  assert.ok(sold.state.cashLedger.some((entry) => entry.category === 'INVESTMENT'), 'the raised capital is recorded under INVESTMENT, the previously-unused category built for exactly this')
+  assert.equal(sold.state.boardMembers.length, 1, 'crossing 20% outside ownership adds exactly one board seat')
+  assert.ok(verifyLedgerIntegrity(sold.state).ok)
+
+  const oversell = previewShareSale(state, 100 - MIN_FOUNDER_OWNERSHIP_PERCENT + 1)
+  assert.ok(oversell.error, 'founder ownership can never be sold below the minimum floor in a single sale')
+}
+
+// 61. Implied share price, outside ownership, and earned board seats are simple, honest derivations of company value and founder ownership — no hidden state of their own.
+{
+  assert.equal(computeImpliedSharePrice(100_000), 10, 'implied share price is company value divided by the fixed nominal share count')
+  assert.equal(computeOutsideOwnershipPercent(75), 25, 'outside ownership is always exactly 100 minus founder ownership')
+  assert.equal(computeEarnedBoardSeats(15), 0, 'below the first 20% threshold, no board seat is earned yet')
+  assert.equal(computeEarnedBoardSeats(45), 2, 'crossing two thresholds earns exactly two board seats')
+  assert.equal(computeEarnedBoardSeats(100), 4, 'earned board seats are capped at the number of declared thresholds')
+}
+
+// 62. A save from the pre-economy-and-investors format (version 6) migrates into a valid version-7 state — existing loans start with a clean payment history, and the founder still holds exactly 100% of a company that has never sold equity.
+{
+  const state = freshState()
+  const withLoan = { ...state, loans: [{ id: 'loan-legacy', principal: 5_000, remainingBalance: 4_000, interestRate: 0.08, termYears: 5, yearsRemaining: 3, purpose: 'expansion' as const, takenYear: 1, missedPayments: 0 }] }
+  const { state: afterYear } = completeFinancialYear(withLoan, rng)
+  const v6Raw: Record<string, unknown> = JSON.parse(JSON.stringify(afterYear))
+  v6Raw.saveVersion = 6
+  v6Raw.loans = (v6Raw.loans as Record<string, unknown>[]).map((loan) => { delete loan.missedPayments; return loan })
+  delete v6Raw.insurancePolicies
+  delete v6Raw.founderOwnershipPercent
+  delete v6Raw.boardMembers
+  delete v6Raw.shareSales
+
+  const migrated = migrateV6ToV7(v6Raw)
+  assert.ok(migrated, 'a version-6-shaped save migrates successfully rather than being discarded')
+  assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.equal(migrated!.founderOwnershipPercent, 100, 'a migrated save starts with full founder ownership, matching a company that has never sold equity')
+  assert.deepEqual(migrated!.insurancePolicies, [], 'a migrated save starts with no fabricated insurance history')
+  assert.deepEqual(migrated!.boardMembers, [])
+  assert.deepEqual(migrated!.shareSales, [])
+  assert.ok(migrated!.loans.every((loan) => loan.missedPayments === 0), 'existing loans from before this feature start with a clean, zero missed-payment history')
+  assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
+}
+
+console.log('Business Empire economy, insurance, and investor tests passed')

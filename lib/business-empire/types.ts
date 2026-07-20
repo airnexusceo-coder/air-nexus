@@ -425,9 +425,12 @@ export type CashTransactionCategory =
   | 'LOAN'
   | 'LOAN_REPAYMENT'
   | 'INVESTMENT'
+  | 'INSURANCE_PREMIUM'
+  | 'INSURANCE_PAYOUT'
   | 'OTHER_EXPENSE'
 
-export type LoanPurpose = 'expansion' | 'working-capital' | 'equipment' | 'recovery'
+/** Six real loan types, each with its own term/rate/approval trade-off (see `LOAN_TYPE_INFO` in economy.ts) — 'expansion'/'working-capital'/'equipment'/'recovery' are the original four, 'property-mortgage' and 'high-risk-loan' extend the catalog. */
+export type LoanPurpose = 'expansion' | 'working-capital' | 'equipment' | 'recovery' | 'property-mortgage' | 'high-risk-loan'
 
 /** A real amortizing loan — `remainingBalance` (principal + accrued interest still owed) is charged down automatically each year via LOAN_REPAYMENT. */
 export type Loan = {
@@ -440,7 +443,11 @@ export type Loan = {
   yearsRemaining: number
   purpose: LoanPurpose
   takenYear: number
+  /** How many times a repayment could not be fully covered by available cash — hurts future credit rating and interest rate, never silently forgiven. */
+  missedPayments: number
 }
+
+export type CreditRatingBand = 'excellent' | 'good' | 'fair' | 'poor' | 'very-poor'
 
 export type ReputationLevel = 'Disastrous' | 'Poor' | 'Average' | 'Strong' | 'Excellent'
 
@@ -475,6 +482,8 @@ export type ReputationReasonCategory =
   | 'REPEATED_STOCKOUT'
   | 'MULTI_YEAR_STABILITY'
   | 'MEDIA_COVERAGE'
+  | 'ECONOMIC_CONDITIONS'
+  | 'SHARE_SALE'
   | 'SAVE_MIGRATION'
 
 /** Mirrors `CashTransaction` exactly — the reputation history is an auditable ledger in the same shape as the cash ledger, so every point of movement is explained the same way every dollar is. */
@@ -562,6 +571,10 @@ export type AnnualReport = {
   offerUpdates: QuestionableOffer[]
   /** Any legal case that advanced a stage or resolved this year. */
   legalCaseUpdates: LegalCase[]
+  /** The named economic condition in effect this year — always shown alongside its concrete effects, never left as an unexplained multiplier. */
+  economicPhase: EconomicCyclePhase
+  /** A familiar 300-850 score recomputed every year from real, visible factors (see `computeCreditRating` in economy.ts). */
+  creditRating: number
   learningSummary: {
     workedWell: string[]
     causedProblems: string[]
@@ -589,7 +602,43 @@ export type Lesson = {
   quiz: LessonQuizQuestion[]
 }
 
-export type EconomicCyclePhase = 'growth' | 'stable' | 'recession'
+/** Nine named economic conditions, each with real, transparent effects on demand, wages, land prices, supplier costs, loan approval/interest, and investor confidence (see `ECONOMIC_PHASE_INFO` in economy.ts) — a downturn or boom is always a shown, explained condition, never silent per-event noise. */
+export type EconomicCyclePhase = 'boom' | 'growth' | 'stable' | 'inflation' | 'recession' | 'supply-crisis' | 'labour-shortage' | 'high-interest-rates' | 'low-consumer-confidence'
+
+// --- Phase 5: economy, banking, insurance, board and investors ------------------------
+
+export type InsurancePolicyType = 'property' | 'product-liability' | 'business-interruption' | 'cybersecurity' | 'employee' | 'legal-expenses'
+
+/** Reduces the financial damage of a covered event (a product recall, a legal-case fine not tied to the player's own accepted misconduct) down to the deductible — never a reason misconduct itself goes unpunished. */
+export type InsurancePolicy = {
+  id: string
+  type: InsurancePolicyType
+  active: boolean
+  premiumPerYear: number
+  deductible: number
+  coverageLimit: number
+  purchasedYear: number
+}
+
+export type BoardRiskTolerance = 'cautious' | 'balanced' | 'aggressive'
+
+/** Board members appear once enough equity has been sold to outside investors — a visible consequence of raising capital, not a random event. */
+export type BoardMember = {
+  id: string
+  name: string
+  role: string
+  riskTolerance: BoardRiskTolerance
+  joinedYear: number
+}
+
+/** One record per fundraising round — selling equity always dilutes founder ownership by exactly the percent sold, in exchange for cash credited at the company's valuation at the time of sale. */
+export type ShareSale = {
+  id: string
+  year: number
+  percentSold: number
+  amountRaised: number
+  valuationAtSale: number
+}
 
 export type StrategicInitiativeId =
   | 'supply-chain-resilience'
@@ -825,6 +874,11 @@ export type GameState = {
   economicCyclePhase: EconomicCyclePhase
   /** Active boardroom decisions with multi-year operating effects. Optional so older saves hydrate safely. */
   strategicInitiatives?: StrategicInitiative[]
+  insurancePolicies: InsurancePolicy[]
+  /** 100 at founding; only ever reduced by `sellShares`, and only by exactly the percent sold each time. */
+  founderOwnershipPercent: number
+  boardMembers: BoardMember[]
+  shareSales: ShareSale[]
   completedLessonIds: string[]
   unlockedFeatures: string[]
   startedAt: string
@@ -832,4 +886,4 @@ export type GameState = {
   saveVersion: number
 }
 
-export const CURRENT_SAVE_VERSION = 6
+export const CURRENT_SAVE_VERSION = 7

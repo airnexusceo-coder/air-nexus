@@ -1,6 +1,7 @@
 'use client'
 
 import { AlertTriangle, CheckCircle2, Gavel, Lightbulb, Newspaper, Scale, Swords, TriangleAlert } from 'lucide-react'
+import { ECONOMIC_PHASE_INFO, getCreditRatingBand } from '@/lib/business-empire/economy'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
 import type { AnnualReport } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
@@ -56,6 +57,8 @@ export function AnnualReportView({ report }: AnnualReportViewProps) {
         <Cell label="Market share" value={`${report.marketShare.toFixed(1)}%`} />
         <Cell label="Customer satisfaction" value={`${report.customerSatisfaction}/100`} />
         <Cell label="Brand reputation" value={`${report.brandReputation}/100`} />
+        <Cell label="Economic conditions" value={ECONOMIC_PHASE_INFO[report.economicPhase].label} />
+        <Cell label="Credit rating" value={`${report.creditRating} (${getCreditRatingBand(report.creditRating).replace('-', ' ')})`} />
       </section>
 
       {report.perProduct.length > 0 && (

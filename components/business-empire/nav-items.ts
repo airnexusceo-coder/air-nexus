@@ -13,8 +13,10 @@ import {
   Megaphone,
   Scale,
   Settings as SettingsIcon,
+  ShieldCheck,
   Star,
   Swords,
+  Users,
   Wallet,
   type LucideIcon,
 } from 'lucide-react'
@@ -33,6 +35,8 @@ export type BusinessEmpireView =
   | 'government-compliance'
   | 'legal-risk'
   | 'funding'
+  | 'insurance'
+  | 'board-investors'
   | 'finances'
   | 'annual-reports'
   | 'learn'
@@ -54,6 +58,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'government-compliance', label: 'Government & Compliance', icon: Gavel },
   { id: 'legal-risk', label: 'Legal & Compliance Risk', icon: Scale },
   { id: 'funding', label: 'Funding', icon: Landmark },
+  { id: 'insurance', label: 'Insurance', icon: ShieldCheck },
+  { id: 'board-investors', label: 'Board & Investors', icon: Users },
   { id: 'finances', label: 'Finances', icon: BarChart3 },
   { id: 'annual-reports', label: 'Annual Reports', icon: Award },
   { id: 'learn', label: 'Learning Centre', icon: GraduationCap },

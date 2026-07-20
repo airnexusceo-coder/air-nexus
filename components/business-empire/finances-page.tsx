@@ -34,6 +34,8 @@ const CATEGORY_LABEL: Record<CashTransactionCategory, string> = {
   LOAN: 'Loan',
   LOAN_REPAYMENT: 'Loan repayment',
   INVESTMENT: 'Investment',
+  INSURANCE_PREMIUM: 'Insurance premium',
+  INSURANCE_PAYOUT: 'Insurance payout',
   OTHER_EXPENSE: 'Other expense',
 }
 

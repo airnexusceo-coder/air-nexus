@@ -66,7 +66,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     : []
 
   const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
-    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [], lawUpdates: [], offerUpdates: [], legalCaseUpdates: [] }) as unknown as AnnualReport)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [], lawUpdates: [], offerUpdates: [], legalCaseUpdates: [], economicPhase: 'stable', creditRating: 580 }) as unknown as AnnualReport)
     : []
 
   const migrationEntry: ReputationTransaction = {
@@ -120,6 +120,10 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     questionableOffers: [],
     legalCases: [],
     gameOverReason: null,
+    insurancePolicies: [],
+    founderOwnershipPercent: 100,
+    boardMembers: [],
+    shareSales: [],
     economicIndex: typeof parsed.economicIndex === 'number' ? parsed.economicIndex : 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -283,6 +287,46 @@ export function migrateV5ToV6(parsed: Record<string, unknown>): GameState | null
     questionableOffers: Array.isArray(parsed.questionableOffers) ? (parsed.questionableOffers as GameState['questionableOffers']) : [],
     legalCases: Array.isArray(parsed.legalCases) ? (parsed.legalCases as GameState['legalCases']) : [],
     gameOverReason: typeof parsed.gameOverReason === 'string' ? parsed.gameOverReason : null,
+    saveVersion: 6,
+    lastSavedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Upgrades a save from the pre-economy-and-investors format (version 6)
+ * into the current shape (version 7). Existing loans never owed a missed
+ * payment before this feature existed, so they start with a clean
+ * `missedPayments` record; a save from before insurance or fundraising
+ * existed has bought no policies and sold no equity, so the founder still
+ * holds exactly 100% of the company.
+ */
+export function migrateV6ToV7(parsed: Record<string, unknown>): GameState | null {
+  if (typeof parsed.cash !== 'number' || !Array.isArray(parsed.cashLedger) || !isRecord(parsed.preferences)) return null
+  if (typeof parsed.companyName !== 'string' || typeof parsed.industry !== 'string' || typeof parsed.year !== 'number') return null
+
+  const loans = Array.isArray(parsed.loans)
+    ? (parsed.loans as Record<string, unknown>[]).map((loan) => ({ ...loan, missedPayments: typeof loan.missedPayments === 'number' ? loan.missedPayments : 0 }) as unknown as GameState['loans'][number])
+    : []
+
+  const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => {
+        const record = r as { economicPhase?: unknown; creditRating?: unknown }
+        return {
+          ...r,
+          economicPhase: typeof record.economicPhase === 'string' ? record.economicPhase : 'stable',
+          creditRating: typeof record.creditRating === 'number' ? record.creditRating : 580,
+        } as unknown as AnnualReport
+      })
+    : []
+
+  return {
+    ...(parsed as unknown as GameState),
+    loans,
+    annualReports,
+    insurancePolicies: Array.isArray(parsed.insurancePolicies) ? (parsed.insurancePolicies as GameState['insurancePolicies']) : [],
+    founderOwnershipPercent: typeof parsed.founderOwnershipPercent === 'number' ? parsed.founderOwnershipPercent : 100,
+    boardMembers: Array.isArray(parsed.boardMembers) ? (parsed.boardMembers as GameState['boardMembers']) : [],
+    shareSales: Array.isArray(parsed.shareSales) ? (parsed.shareSales as GameState['shareSales']) : [],
     saveVersion: CURRENT_SAVE_VERSION,
     lastSavedAt: new Date().toISOString(),
   }
@@ -309,20 +353,26 @@ export function loadGameState(userId: string): LoadResult {
     let candidate: GameState | null = null
     if (parsed.saveVersion === CURRENT_SAVE_VERSION && typeof parsed.cash === 'number' && Array.isArray(parsed.cashLedger) && isRecord(parsed.preferences)) {
       candidate = parsed as GameState
+    } else if (parsed.saveVersion === 6) {
+      candidate = migrateV6ToV7(parsed as Record<string, unknown>)
     } else if (parsed.saveVersion === 5) {
-      candidate = migrateV5ToV6(parsed as Record<string, unknown>)
+      const v6 = migrateV5ToV6(parsed as Record<string, unknown>)
+      candidate = v6 ? migrateV6ToV7(v6 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 4) {
       const v5 = migrateV4ToV5(parsed as Record<string, unknown>)
-      candidate = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
+      const v6 = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
+      candidate = v6 ? migrateV6ToV7(v6 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 3) {
       const v4 = migrateV3ToV4(parsed as Record<string, unknown>)
       const v5 = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
-      candidate = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
+      const v6 = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
+      candidate = v6 ? migrateV6ToV7(v6 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 2) {
       const v3 = migrateV2ToV3(parsed as Record<string, unknown>)
       const v4 = v3 ? migrateV3ToV4(v3 as unknown as Record<string, unknown>) : null
       const v5 = v4 ? migrateV4ToV5(v4 as unknown as Record<string, unknown>) : null
-      candidate = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
+      const v6 = v5 ? migrateV5ToV6(v5 as unknown as Record<string, unknown>) : null
+      candidate = v6 ? migrateV6ToV7(v6 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 1 || parsed.saveVersion === undefined) {
       candidate = migrateLegacySave(parsed as Record<string, unknown>)
     }

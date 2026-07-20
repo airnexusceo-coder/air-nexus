@@ -44,6 +44,26 @@ import {
   isDegreeRelevantToIndustry,
 } from '@/lib/business-empire/hardcore-career'
 import {
+  CREDIT_RATING_APPROVAL_MULTIPLIER,
+  ECONOMIC_PHASE_INFO,
+  LOAN_TYPE_INFO,
+  advanceEconomicPhase,
+  computeCreditRating,
+  getCreditRatingBand,
+} from '@/lib/business-empire/economy'
+import {
+  INSURANCE_POLICY_INFO,
+  computeInsuranceCoverage,
+  computeInsuranceTerms,
+} from '@/lib/business-empire/insurance'
+import {
+  MIN_FOUNDER_OWNERSHIP_PERCENT,
+  computeEarnedBoardSeats,
+  computeImpliedSharePrice,
+  computeOutsideOwnershipPercent,
+  generateBoardMember,
+} from '@/lib/business-empire/investors'
+import {
   appendReputationTransaction,
   appendTransaction,
   checkForProductRecall,
@@ -95,8 +115,11 @@ import {
   type FacilityType,
   type FacilityUpgradeId,
   type Law,
+  type BoardMember,
   type GamePreferences,
   type GameState,
+  type InsurancePolicy,
+  type InsurancePolicyType,
   type LegalCase,
   type LegalCaseAction,
   type Loan,
@@ -109,6 +132,7 @@ import {
   type Region,
   type ReputationReasonCategory,
   type ResearchLevel,
+  type ShareSale,
   type StrategicInitiative,
   type StrategicInitiativeId,
   type UnsoldInventoryAction,
@@ -257,6 +281,10 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     questionableOffers: [],
     legalCases: [],
     gameOverReason: null,
+    insurancePolicies: [],
+    founderOwnershipPercent: 100,
+    boardMembers: [],
+    shareSales: [],
     economicIndex: 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -303,7 +331,8 @@ export type ProductCreationInput = {
 export function estimateCostPerUnit(state: GameState, draft: Pick<ProductCreationInput, 'quality' | 'productionMethod' | 'packagingQuality' | 'features' | 'rndBudget'>, units: number): number {
   const industry = getIndustryProfile(state.industry)
   const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
-  return computeCostPerUnit(industry, draft, units, difficulty) * getStrategicInitiativeEffects(state).productionCostMultiplier * computeFacilityProductionDiscount(state.facilities)
+  const supplierCostMultiplier = ECONOMIC_PHASE_INFO[state.economicCyclePhase].effects.supplierCostMultiplier
+  return computeCostPerUnit(industry, draft, units, difficulty) * getStrategicInitiativeEffects(state).productionCostMultiplier * computeFacilityProductionDiscount(state.facilities) * supplierCostMultiplier
 }
 
 /**
@@ -499,36 +528,64 @@ export function updatePreferences(state: GameState, partial: Partial<Pick<GamePr
   return { ...state, preferences: { ...state.preferences, ...partial } }
 }
 
-// --- Funding: loans + community/environmental investment ------------------------
+// --- Funding: credit rating, loans, community/environmental investment ----------
 
-export type LoanApplicationPreview = { odds: number; factors: string[]; interestRate: number }
+/** Recomputed fresh every time from real, visible state — never cached or drifted independently of the numbers that produced it. */
+export function computeStateCreditRating(state: GameState): number {
+  const recentNetProfit = state.annualReports.length > 0 ? state.annualReports[state.annualReports.length - 1].netProfit : 0
+  const totalLoanBalance = state.loans.reduce((sum, l) => sum + l.remainingBalance, 0)
+  const totalMissedPayments = state.loans.reduce((sum, l) => sum + l.missedPayments, 0)
+  return computeCreditRating({
+    recentNetProfit,
+    totalLoanBalance,
+    companyValue: state.companyValue,
+    totalMissedPayments,
+    brandReputation: state.brandReputation,
+    legalRisk: state.legalRisk,
+    phase: state.economicCyclePhase,
+  })
+}
 
-/** A read-only preview of a loan application's odds and rate, before the player commits to applying. */
-export function previewLoanApplication(state: GameState, amount: number): LoanApplicationPreview {
+export type LoanApplicationPreview = { odds: number; factors: string[]; interestRate: number; creditRating: number; error?: string }
+
+/** A read-only preview of a loan application's odds and rate, before the player commits to applying — folds in credit rating, the loan type's own trade-off, and current economic conditions, all shown as named factors. */
+export function previewLoanApplication(state: GameState, amount: number, purpose: LoanPurpose): LoanApplicationPreview {
   const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
   const existingLoanBalance = state.loans.reduce((sum, l) => sum + l.remainingBalance, 0)
-  const { odds, factors } = computeLoanApprovalOdds(state.brandReputation, existingLoanBalance, state.companyValue, amount, difficulty)
-  const interestRate = computeLoanInterestRate(state.brandReputation, difficulty)
-  return { odds, factors, interestRate }
+  const creditRating = computeStateCreditRating(state)
+  const creditBand = getCreditRatingBand(creditRating)
+  const loanTypeInfo = LOAN_TYPE_INFO[purpose]
+  const phaseEffects = ECONOMIC_PHASE_INFO[state.economicCyclePhase].effects
+
+  const { odds: baseOdds, factors } = computeLoanApprovalOdds(state.brandReputation, existingLoanBalance, state.companyValue, amount, difficulty)
+  const odds = Math.max(0.02, Math.min(0.98, baseOdds * CREDIT_RATING_APPROVAL_MULTIPLIER[creditBand] * loanTypeInfo.approvalOddsMultiplier * phaseEffects.loanApprovalMultiplier))
+  factors.push(`Credit rating ${creditRating} (${creditBand}) ${CREDIT_RATING_APPROVAL_MULTIPLIER[creditBand] >= 1 ? 'improves' : 'reduces'} approval odds.`)
+  factors.push(`${loanTypeInfo.label} terms ${loanTypeInfo.approvalOddsMultiplier >= 1 ? 'ease' : 'tighten'} approval.`)
+  if (phaseEffects.loanApprovalMultiplier !== 1) factors.push(`Current economic conditions (${ECONOMIC_PHASE_INFO[state.economicCyclePhase].label}) ${phaseEffects.loanApprovalMultiplier >= 1 ? 'ease' : 'tighten'} lender approval.`)
+
+  const interestRate = Math.max(0.01, computeLoanInterestRate(state.brandReputation, difficulty) + loanTypeInfo.interestRateModifier + phaseEffects.interestRateDelta)
+
+  if (loanTypeInfo.requiresOwnedFacility && !state.facilities.some((f) => f.ownership === 'owned')) {
+    return { odds, factors, interestRate, creditRating, error: 'A property mortgage requires an owned facility as collateral.' }
+  }
+  return { odds, factors, interestRate, creditRating }
 }
 
 /** Applying for a loan is a real probability roll, not a guarantee — approval odds and the reasons behind them are shown to the player before they commit. A rejected application costs nothing. */
 export function applyForLoan(state: GameState, amount: number, purpose: LoanPurpose, rng: () => number = Math.random): { state: GameState; error?: string; approved: boolean } {
   if (amount <= 0) return { state, error: 'Enter a loan amount greater than zero.', approved: false }
-  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
-  const existingLoanBalance = state.loans.reduce((sum, l) => sum + l.remainingBalance, 0)
-  const { odds } = computeLoanApprovalOdds(state.brandReputation, existingLoanBalance, state.companyValue, amount, difficulty)
+  const preview = previewLoanApplication(state, amount, purpose)
+  if (preview.error) return { state, error: preview.error, approved: false }
 
-  if (rng() >= odds) {
-    return { state, error: 'The loan application was declined. Improving reputation or reducing existing debt improves future odds.', approved: false }
+  if (rng() >= preview.odds) {
+    return { state, error: 'The loan application was declined. Improving reputation, credit rating, or reducing existing debt improves future odds.', approved: false }
   }
 
-  const interestRate = computeLoanInterestRate(state.brandReputation, difficulty)
-  const termYears = 5
-  const loan: Loan = { id: createId('loan'), principal: amount, remainingBalance: amount, interestRate, termYears, yearsRemaining: termYears, purpose, takenYear: state.year }
+  const termYears = LOAN_TYPE_INFO[purpose].termYears
+  const loan: Loan = { id: createId('loan'), principal: amount, remainingBalance: amount, interestRate: preview.interestRate, termYears, yearsRemaining: termYears, purpose, takenYear: state.year, missedPayments: 0 }
   const next: GameState = { ...state, loans: [...state.loans, loan] }
   return {
-    state: appendTransaction(next, { category: 'LOAN', amount, description: `Business loan approved (${Math.round(interestRate * 1000) / 10}% annual interest, ${termYears}-year term)`, relatedId: loan.id }),
+    state: appendTransaction(next, { category: 'LOAN', amount, description: `${LOAN_TYPE_INFO[purpose].label} approved (${Math.round(preview.interestRate * 1000) / 10}% annual interest, ${termYears}-year term)`, relatedId: loan.id }),
     approved: true,
   }
 }
@@ -583,9 +640,10 @@ export type FacilityCostPreview = { purchasePrice: number; annualRent: number }
 export function previewFacilityCost(state: GameState, type: FacilityType, region: Region): FacilityCostPreview {
   const industry = getIndustryProfile(state.industry)
   const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  const landPriceMultiplier = ECONOMIC_PHASE_INFO[state.economicCyclePhase].effects.landPriceMultiplier
   return {
-    purchasePrice: computeFacilityPurchasePrice(type, region, industry, difficulty),
-    annualRent: computeFacilityAnnualRent(type, region, industry, difficulty),
+    purchasePrice: Math.round(computeFacilityPurchasePrice(type, region, industry, difficulty) * landPriceMultiplier / 100) * 100,
+    annualRent: Math.round(computeFacilityAnnualRent(type, region, industry, difficulty) * landPriceMultiplier / 50) * 50,
   }
 }
 
@@ -739,6 +797,68 @@ export function takeLegalCaseAction(state: GameState, caseId: string, action: Le
   return { state: next }
 }
 
+// --- Insurance ------------------------------------------------------------------
+
+export function previewInsuranceTerms(state: GameState, type: InsurancePolicyType) {
+  return computeInsuranceTerms(type, getIndustryProfile(state.industry), DIFFICULTY_PROFILES[state.preferences.difficulty])
+}
+
+/** Buying a policy is immediate and free up front — the premium is charged every year it stays active, exactly like compliance staff wages. */
+export function purchaseInsurance(state: GameState, type: InsurancePolicyType): { state: GameState; error?: string } {
+  if (state.insurancePolicies.some((policy) => policy.type === type && policy.active)) return { state, error: `You already have an active ${INSURANCE_POLICY_INFO[type].label.toLowerCase()} policy.` }
+  const terms = previewInsuranceTerms(state, type)
+  const policy: InsurancePolicy = { id: createId('insurance'), type, active: true, purchasedYear: state.year, ...terms }
+  return { state: { ...state, insurancePolicies: [...state.insurancePolicies, policy] } }
+}
+
+export function cancelInsurance(state: GameState, policyId: string): { state: GameState; error?: string } {
+  const policy = state.insurancePolicies.find((item) => item.id === policyId)
+  if (!policy) return { state, error: 'Unknown policy.' }
+  return { state: { ...state, insurancePolicies: state.insurancePolicies.filter((item) => item.id !== policyId) } }
+}
+
+// --- Board and investors ----------------------------------------------------------
+
+export function previewShareSale(state: GameState, percentToSell: number): { amountRaised: number; error?: string } {
+  if (percentToSell <= 0) return { amountRaised: 0, error: 'Enter a percentage greater than zero.' }
+  if (percentToSell > state.founderOwnershipPercent - MIN_FOUNDER_OWNERSHIP_PERCENT) {
+    return { amountRaised: 0, error: `You can sell at most ${Math.max(0, state.founderOwnershipPercent - MIN_FOUNDER_OWNERSHIP_PERCENT)}% — founder ownership can never fall below ${MIN_FOUNDER_OWNERSHIP_PERCENT}% through a share sale.` }
+  }
+  return { amountRaised: Math.round(state.companyValue * (percentToSell / 100)) }
+}
+
+/**
+ * The only path outside cash ever becomes company capital in exchange for
+ * equity. Dilutes founder ownership by exactly the percent sold, credits
+ * cash at the company's current valuation, and adds a board seat once
+ * outside ownership crosses each 20% threshold — a visible, explained
+ * consequence of raising capital, never a hidden mechanic.
+ */
+export function sellShares(state: GameState, percentToSell: number): { state: GameState; error?: string } {
+  const preview = previewShareSale(state, percentToSell)
+  if (preview.error) return { state, error: preview.error }
+
+  const newFounderOwnership = Math.round((state.founderOwnershipPercent - percentToSell) * 100) / 100
+  const sale: ShareSale = { id: createId('share-sale'), year: state.year, percentSold: percentToSell, amountRaised: preview.amountRaised, valuationAtSale: state.companyValue }
+  let next: GameState = { ...state, founderOwnershipPercent: newFounderOwnership, shareSales: [...state.shareSales, sale] }
+  next = appendTransaction(next, { category: 'INVESTMENT', amount: preview.amountRaised, description: `Sold ${percentToSell}% equity at a ${Math.round(state.companyValue).toLocaleString()} valuation`, relatedId: sale.id })
+  next = appendReputationTransaction(next, { delta: 2, reasonCategory: 'SHARE_SALE', description: `Raised ${Math.round(preview.amountRaised).toLocaleString()} by selling ${percentToSell}% equity — fresh capital signals investor confidence.`, relatedId: sale.id })
+
+  const outsideOwnership = computeOutsideOwnershipPercent(newFounderOwnership)
+  const earnedSeats = computeEarnedBoardSeats(outsideOwnership)
+  if (earnedSeats > next.boardMembers.length) {
+    const newMembers: BoardMember[] = []
+    for (let seatIndex = next.boardMembers.length; seatIndex < earnedSeats; seatIndex += 1) {
+      newMembers.push(generateBoardMember(createId('board-member'), state.year, seatIndex))
+    }
+    next = { ...next, boardMembers: [...next.boardMembers, ...newMembers] }
+  }
+
+  return { state: next }
+}
+
+export { computeImpliedSharePrice, computeOutsideOwnershipPercent }
+
 export { verifyLedgerIntegrity }
 
 export type YearOutcomeEstimate = {
@@ -870,7 +990,17 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   const costMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.costMultiplier, 1)
   const companyWideDemandMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.demandMultiplier, 1) * initiativeEffects.demandMultiplier
   let economicIndex = working.economicIndex
-  for (const event of events) economicIndex = Math.max(0.7, Math.min(1.3, economicIndex + event.economicIndexDelta))
+  for (const event of events) economicIndex = Math.max(0.55, Math.min(1.35, economicIndex + event.economicIndexDelta))
+
+  // The named economic phase advances first, using believable weighted transitions (persistence is
+  // always most likely) — then economicIndex drifts gradually toward whatever that phase's target
+  // implies, the same partial-movement pattern used for compliance ratings, never an instant jump.
+  const newEconomicPhase = advanceEconomicPhase(working.economicCyclePhase, rng)
+  const phaseEffects = ECONOMIC_PHASE_INFO[newEconomicPhase].effects
+  economicIndex = Math.max(0.55, Math.min(1.35, economicIndex + (phaseEffects.demandTarget - economicIndex) * 0.3))
+  if (newEconomicPhase !== working.economicCyclePhase) {
+    factorNotes.push(`Economic conditions shifted to ${ECONOMIC_PHASE_INFO[newEconomicPhase].label}: ${ECONOMIC_PHASE_INFO[newEconomicPhase].description}`)
+  }
 
   // Competitors act BEFORE this year's demand is computed, using the player's position at the
   // start of the year — so a competitor's price cut or product launch actually affects this same
@@ -894,7 +1024,10 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   const regionalWageMultiplier = working.facilities.length > 0
     ? working.facilities.reduce((sum, facility) => sum + computeRegionalWageMultiplier(facility.region, working.reputationCategories.employee), 0) / working.facilities.length
     : 1
-  const wages = Math.round(baseWages * regionalWageMultiplier)
+  const wages = Math.round(baseWages * regionalWageMultiplier * phaseEffects.wageMultiplier)
+  if (phaseEffects.wageMultiplier !== 1) {
+    factorNotes.push(`${ECONOMIC_PHASE_INFO[newEconomicPhase].label} conditions adjusted wage costs by ${phaseEffects.wageMultiplier >= 1 ? '+' : ''}${Math.round((phaseEffects.wageMultiplier - 1) * 100)}%.`)
+  }
   if (working.facilities.length > 0 && Math.abs(regionalWageMultiplier - 1) >= 0.02) {
     factorNotes.push(`Regional wage levels across your facilities adjusted staff wages by ${regionalWageMultiplier >= 1 ? '+' : ''}${Math.round((regionalWageMultiplier - 1) * 100)}%.`)
   }
@@ -991,6 +1124,12 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     working = appendTransaction(working, { category: 'COMPLIANCE_STAFF_WAGES', amount: -Math.round(complianceStaffWagesTotal), description: `Year ${year} compliance staff wages` })
   }
 
+  // Insurance premiums, charged every year a policy stays active — the same yearly-cost pattern as compliance staff wages.
+  const insurancePremiumTotal = working.insurancePolicies.filter((policy) => policy.active).reduce((sum, policy) => sum + policy.premiumPerYear, 0)
+  if (insurancePremiumTotal > 0) {
+    working = appendTransaction(working, { category: 'INSURANCE_PREMIUM', amount: -Math.round(insurancePremiumTotal), description: `Year ${year} insurance premiums (${working.insurancePolicies.filter((p) => p.active).length} active polic${working.insurancePolicies.filter((p) => p.active).length === 1 ? 'y' : 'ies'})` })
+  }
+
   // Compliance ratings drift toward whatever current staffing actually supports — hiring builds readiness over several years, understaffing lets it decay.
   const updatedComplianceRatings = { ...working.complianceRatings }
   for (const category of COMPLIANCE_CATEGORY_ORDER) {
@@ -1080,6 +1219,13 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
         advancedCase = { ...advancedCase, outcome, resolvedYear: year }
         if (financialImpact > 0) {
           working = appendTransaction(working, { category: 'COURT_FINE', amount: -financialImpact, description: `Court outcome for "${advancedCase.title}": ${outcome.replace(/-/g, ' ')}`, relatedId: advancedCase.id })
+          // Legal expenses insurance never covers a case tied to the player's own accepted questionable offer — insurance reduces financial damage, never responsibility for intentional misconduct.
+          if (advancedCase.relatedOfferId === null) {
+            const { coveredAmount, policyId } = computeInsuranceCoverage(working.insurancePolicies, 'legal-expenses', financialImpact)
+            if (coveredAmount > 0) {
+              working = appendTransaction(working, { category: 'INSURANCE_PAYOUT', amount: coveredAmount, description: `Legal expenses insurance covered part of the court outcome for "${advancedCase.title}"`, relatedId: policyId ?? undefined })
+            }
+          }
         }
         if (reputationImpact !== 0) {
           working = appendReputationTransaction(working, { delta: reputationImpact, reasonCategory: outcome === 'acquitted' ? 'CRISIS_HANDLED_WELL' : 'SCANDAL', description: `Court outcome for "${advancedCase.title}": ${outcome.replace(/-/g, ' ')}.`, relatedId: advancedCase.id })
@@ -1098,8 +1244,10 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     working = { ...working, legalCases: updatedCases }
   }
 
-  // Loans amortize on a straight-line principal schedule with interest charged on the remaining balance — the schedule is visible on the Funding page, never a surprise deduction.
+  // Loans amortize on a straight-line principal schedule with interest charged on the remaining balance — the schedule is visible on the Funding page, never a surprise deduction. A payment that exceeds what's left of this year's opening cash is tracked as missed — it still goes through (the company still owes it), but it counts against future credit rating, exactly like a real missed payment would.
   let loanRepaymentsTotal = 0
+  let availableForLoans = working.cash
+  let missedAnyPayment = false
   const remainingLoans: Loan[] = []
   for (const loan of working.loans) {
     if (loan.yearsRemaining <= 0 || loan.remainingBalance <= 0) continue
@@ -1107,16 +1255,20 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     const interestPortion = loan.remainingBalance * loan.interestRate
     const payment = principalPortion + interestPortion
     loanRepaymentsTotal += payment
+    const missedThisPayment = availableForLoans < payment
+    if (missedThisPayment) missedAnyPayment = true
+    availableForLoans = Math.max(0, availableForLoans - payment)
     const newRemainingBalance = Math.max(0, Math.round((loan.remainingBalance - principalPortion) * 100) / 100)
     const newYearsRemaining = loan.yearsRemaining - 1
     if (newRemainingBalance > 0.5 && newYearsRemaining > 0) {
-      remainingLoans.push({ ...loan, remainingBalance: newRemainingBalance, yearsRemaining: newYearsRemaining })
+      remainingLoans.push({ ...loan, remainingBalance: newRemainingBalance, yearsRemaining: newYearsRemaining, missedPayments: missedThisPayment ? loan.missedPayments + 1 : loan.missedPayments })
     }
   }
   loanRepaymentsTotal = Math.round(loanRepaymentsTotal)
   if (loanRepaymentsTotal > 0) {
     working = appendTransaction(working, { category: 'LOAN_REPAYMENT', amount: -loanRepaymentsTotal, description: `Year ${year} loan repayments (principal + interest)` })
   }
+  if (missedAnyPayment) factorNotes.push('A loan repayment this year exceeded available cash — recorded as a missed payment, which will lower future credit rating.')
   working = { ...working, loans: remainingLoans }
 
   const seasonal = computeSeasonalMultiplier(industry, year)
@@ -1148,6 +1300,10 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
       const recallRefund = Math.round(product.lifetimeUnitsSold * product.price * 0.05)
       if (recallRefund > 0) {
         working = appendTransaction(working, { category: 'REFUND', amount: -recallRefund, description: `Product recall refunds for ${product.name}`, relatedId: product.id })
+        const { coveredAmount, policyId } = computeInsuranceCoverage(working.insurancePolicies, 'product-liability', recallRefund)
+        if (coveredAmount > 0) {
+          working = appendTransaction(working, { category: 'INSURANCE_PAYOUT', amount: coveredAmount, description: `Product liability insurance covered part of the recall refunds for ${product.name}`, relatedId: policyId ?? undefined })
+        }
       }
       reputationAdjustments.push({
         delta: -10,
@@ -1312,8 +1468,6 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
 
   const marketShare = industry.marketSize > 0 ? Math.min(100, Math.round((unitsSoldTotal / industry.marketSize) * 1000) / 10) : 0
   const companyValue = computeCompanyValue(working.cash, working.products, marketShare, working.brandReputation)
-  const newEconomicCyclePhase = economicIndex >= 1.08 ? 'growth' : economicIndex <= 0.92 ? 'recession' : 'stable'
-  if (newEconomicCyclePhase !== 'stable') factorNotes.push(`Broader economic conditions this year: ${newEconomicCyclePhase}.`)
 
   working = {
     ...working,
@@ -1322,10 +1476,30 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     marketShare,
     companyValue,
     economicIndex,
-    economicCyclePhase: newEconomicCyclePhase,
+    economicCyclePhase: newEconomicPhase,
     strategicInitiatives: activeInitiatives.map((initiative) => ({ ...initiative, yearsRemaining: initiative.yearsRemaining - 1 })).filter((initiative) => initiative.yearsRemaining > 0),
     year: year + 1,
   }
+
+  // Economic conditions nudge investor confidence every year, always via the same explained ledger gate as every other reputation change.
+  if (phaseEffects.investorConfidenceDelta !== 0) {
+    working = appendReputationTransaction(working, {
+      delta: phaseEffects.investorConfidenceDelta,
+      reasonCategory: 'ECONOMIC_CONDITIONS',
+      description: `${ECONOMIC_PHASE_INFO[newEconomicPhase].label} conditions this year ${phaseEffects.investorConfidenceDelta > 0 ? 'lifted' : 'weighed on'} investor confidence.`,
+    })
+  }
+
+  // Uses this year's own just-closed net profit, not last year's stored report — the credit rating shown in this year's report always reflects this year's actual result.
+  const creditRating = computeCreditRating({
+    recentNetProfit: netProfit,
+    totalLoanBalance: working.loans.reduce((sum, l) => sum + l.remainingBalance, 0),
+    companyValue: working.companyValue,
+    totalMissedPayments: working.loans.reduce((sum, l) => sum + l.missedPayments, 0),
+    brandReputation: working.brandReputation,
+    legalRisk: working.legalRisk,
+    phase: working.economicCyclePhase,
+  })
 
   const workedWell: string[] = []
   const causedProblems: string[] = []
@@ -1378,6 +1552,8 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     lawUpdates,
     offerUpdates: working.questionableOffers.filter((offer) => offer.yearOffered === year || offer.resolvedYear === year),
     legalCaseUpdates: working.legalCases.filter((legalCase) => legalCase.startedYear === year || legalCase.stageEnteredYear === year || legalCase.resolvedYear === year),
+    economicPhase: newEconomicPhase,
+    creditRating,
     learningSummary: { workedWell, causedProblems, whyProfitOrLoss, considerNextYear },
   }
 

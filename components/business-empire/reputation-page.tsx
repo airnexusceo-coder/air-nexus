@@ -47,6 +47,8 @@ const REASON_LABELS: Record<ReputationReasonCategory, string> = {
   REPEATED_STOCKOUT: 'Repeated stockout',
   MULTI_YEAR_STABILITY: 'Long-term stability',
   MEDIA_COVERAGE: 'Media coverage',
+  ECONOMIC_CONDITIONS: 'Economic conditions',
+  SHARE_SALE: 'Share sale',
   SAVE_MIGRATION: 'Save upgraded',
 }
 

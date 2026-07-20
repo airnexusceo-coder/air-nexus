@@ -21,6 +21,8 @@ import { LandFacilitiesPage } from '@/components/business-empire/land-facilities
 import { GovernmentCompliancePage } from '@/components/business-empire/government-compliance-page'
 import { LegalRiskPage } from '@/components/business-empire/legal-risk-page'
 import { FundingPage } from '@/components/business-empire/funding-page'
+import { InsurancePage } from '@/components/business-empire/insurance-page'
+import { BoardInvestorsPage } from '@/components/business-empire/board-investors-page'
 import { FinancesPage } from '@/components/business-empire/finances-page'
 import { AnnualReportsPage } from '@/components/business-empire/annual-reports-page'
 import { AnnualReportView } from '@/components/business-empire/annual-report-view'
@@ -36,15 +38,20 @@ import {
   createInitialState,
   createProduct,
   discontinueProduct,
+  cancelInsurance,
   hireComplianceStaff,
   investInCommunityProject,
   launchAdvertisingCampaign,
   launchStrategicInitiative,
   manufactureMoreUnits,
+  previewInsuranceTerms,
+  previewShareSale,
+  purchaseInsurance,
   purchaseResearch,
   releaseComplianceStaff,
   respondToQuestionableOffer,
   sellFacility,
+  sellShares,
   takeLegalCaseAction,
   updatePreferences,
   updateProductPrice,
@@ -55,7 +62,7 @@ import {
 } from '@/lib/business-empire/game-state'
 import { clearGameState, hasSavedGame, loadGameState, saveGameState } from '@/lib/business-empire/storage'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
-import type { AdvertisingChannel, AnnualReport, ComplianceStaffRole, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, LegalCaseAction, LoanPurpose, OfferResponse, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, AnnualReport, ComplianceStaffRole, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, InsurancePolicyType, LegalCaseAction, LoanPurpose, OfferResponse, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
@@ -278,6 +285,30 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
     return {}
   }
 
+  const handlePurchaseInsurance = (type: InsurancePolicyType) => {
+    const result = purchaseInsurance(gameState, type)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Insurance policy purchased.', 'success')
+    return {}
+  }
+
+  const handleCancelInsurance = (policyId: string) => {
+    const result = cancelInsurance(gameState, policyId)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Insurance policy cancelled.', 'info')
+    return {}
+  }
+
+  const handleSellShares = (percentToSell: number) => {
+    const result = sellShares(gameState, percentToSell)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Equity sold — funds added to cash.', 'success')
+    return {}
+  }
+
   const handleConfirmCompleteYear = () => {
     const { state: next, report } = completeFinancialYear(gameState)
     setGameState(next)
@@ -344,6 +375,8 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
             {view === 'government-compliance' && <GovernmentCompliancePage state={gameState} onHireStaff={handleHireComplianceStaff} onReleaseStaff={handleReleaseComplianceStaff} />}
             {view === 'legal-risk' && <LegalRiskPage state={gameState} onRespondToOffer={handleRespondToOffer} onTakeCaseAction={handleTakeCaseAction} />}
             {view === 'funding' && <FundingPage state={gameState} onApplyForLoan={handleApplyForLoan} />}
+            {view === 'insurance' && <InsurancePage state={gameState} onPreviewTerms={(type) => previewInsuranceTerms(gameState, type)} onPurchase={handlePurchaseInsurance} onCancel={handleCancelInsurance} />}
+            {view === 'board-investors' && <BoardInvestorsPage state={gameState} onPreviewSale={(percent) => previewShareSale(gameState, percent)} onSellShares={handleSellShares} />}
             {view === 'finances' && <FinancesPage state={gameState} />}
             {view === 'annual-reports' && <AnnualReportsPage state={gameState} />}
             {view === 'learn' && <LearningCentre completedLessonIds={gameState.completedLessonIds} onCompleteLesson={handleCompleteLesson} />}
