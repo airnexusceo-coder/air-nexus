@@ -1106,6 +1106,411 @@ const BIOLOGY_UNITS: UnitOverride[] = [
   },
 ]
 
+const BUSINESS_MANAGEMENT_UNITS: UnitOverride[] = [
+  {
+    unit: 1,
+    title: 'Unit 1: Planning a Business',
+    focus: 'Business ideas, entrepreneurship, and the internal and external environments that shape how a business is planned.',
+    chapters: [
+      {
+        title: 'Area of Study 1: The Business Idea',
+        outcome: 'Describe a process for creating and developing a business idea, and explain how innovative and entrepreneurial practices can contribute to the economy.',
+        studyDesignFocus: 'Entrepreneurship, innovation and the business planning process',
+        lessons: [
+          {
+            title: 'Where business ideas come from',
+            focus: 'Learn how a raw idea becomes a testable business opportunity.',
+            points: [
+              'business ideas typically start from a problem, a gap in the market or a spotted trend',
+              'the difference between an idea and a genuine business opportunity',
+              'using a quick scan of strengths, weaknesses, opportunities and threats to test a raw idea before investing further',
+            ],
+          },
+          {
+            title: 'Entrepreneurs and innovation',
+            focus: 'Connect entrepreneurial behaviour to innovation and economic contribution.',
+            points: [
+              'entrepreneurial characteristics such as risk-taking, initiative and vision',
+              'types of innovation, including product, process, reactive and proactive innovation',
+              'how innovative businesses contribute to economic growth and employment',
+            ],
+          },
+          {
+            title: 'From idea to plan',
+            focus: 'Turn a tested idea into the start of a formal business plan.',
+            points: [
+              'the general steps in developing a business idea into a written plan',
+              'the role of market research and a feasibility check before committing resources',
+              'why an untested idea is a high-risk basis for a business plan',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 2: Internal Business Environment and Planning',
+        outcome: 'Explain the internal business environment and analyse how internal factors influence business planning.',
+        studyDesignFocus: 'Legal structures, business models, resourcing and corporate social responsibility',
+        lessons: [
+          {
+            title: 'Choosing a legal structure',
+            focus: 'Compare structures and their effect on liability and planning.',
+            points: [
+              'sole trader, partnership and company structures and how they differ',
+              'owner liability differences between these structures',
+              'why the chosen structure shapes later financing and planning decisions',
+            ],
+          },
+          {
+            title: 'Business models and resources',
+            focus: 'Identify the resourcing decisions a business plan must lock in.',
+            points: [
+              'traditional, online and omni-channel business models',
+              'human, physical and financial resources a plan needs to secure',
+              'factors influencing a business location decision',
+            ],
+          },
+          {
+            title: 'Financing and social responsibility',
+            focus: 'Weigh funding options against responsible business practice.',
+            points: [
+              'sources of finance available to a new business, including equity, debt and personal funds',
+              'what corporate social responsibility means at the planning stage',
+              'balancing the profit motive with responsible practice toward stakeholders',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 3: External Business Environment and Planning',
+        outcome: 'Explain how macro and operating factors in the external environment influence business planning.',
+        studyDesignFocus: 'Macro and operating environment factors and their effect on planning',
+        lessons: [
+          {
+            title: 'Macro environment factors',
+            focus: 'Recognise the big-picture forces no single business controls.',
+            points: [
+              'economic conditions, legal and political change as macro factors',
+              'social and technological trends as macro factors',
+              'why a business cannot control macro factors, only respond to them',
+            ],
+          },
+          {
+            title: 'Operating environment factors',
+            focus: 'Separate closer, more direct external pressures from macro forces.',
+            points: [
+              'competitors, suppliers and customers as operating-environment forces',
+              'how operating factors differ from macro factors in how directly they affect the business',
+              'why operating-environment analysis is more specific to a given industry',
+            ],
+          },
+          {
+            title: 'Planning around external change',
+            focus: 'Build change-readiness into an early-stage business plan.',
+            points: [
+              'contingency and scenario thinking for likely external shifts',
+              'how external-environment analysis feeds back into the written business plan',
+              'an example of a plan being adjusted after an external shift, such as a cost or regulation change',
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    unit: 2,
+    title: 'Unit 2: Establishing a Business',
+    focus: 'The legal, financial, marketing and staffing steps required to establish and launch a business.',
+    chapters: [
+      {
+        title: 'Area of Study 1: Legal Requirements and Financial Considerations',
+        outcome: "Explain why establishing effective policies and procedures ensures compliance with a business's legal requirements and sound financial management.",
+        studyDesignFocus: 'Business registration, tax obligations and financial record-keeping',
+        lessons: [
+          {
+            title: 'Registering and licensing a business',
+            focus: 'Understand the compliance steps before trading legally.',
+            points: [
+              'business name/ABN registration and industry licences or permits',
+              'why registration protects both the business and its customers',
+              'the consequences of trading without required registration or licences',
+            ],
+          },
+          {
+            title: 'Tax and employment obligations',
+            focus: 'Identify the financial and legal duties that begin at launch.',
+            points: [
+              'basic tax obligations a new business takes on, such as GST and income tax',
+              'obligations that begin once the first employee is hired',
+              'record-keeping requirements tied to tax and employment compliance',
+            ],
+          },
+          {
+            title: 'Setting up financial systems',
+            focus: 'Build the financial foundations a new business needs from day one.',
+            points: [
+              'opening a dedicated business bank account and why it matters',
+              'basic bookkeeping and record-keeping systems',
+              'why accurate financial records support both compliance and decision-making',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 2: Marketing a Business',
+        outcome: 'Analyse and apply marketing and public relations strategies used to establish a customer base for a business.',
+        studyDesignFocus: 'Market research, the marketing mix and promotional strategy',
+        lessons: [
+          {
+            title: 'Market research and segmentation',
+            focus: 'Use research to define and understand a target market.',
+            points: [
+              'primary versus secondary market research',
+              'segmenting a market by demographic, geographic or behavioural factors',
+              'how research findings shape a marketing plan',
+            ],
+          },
+          {
+            title: 'The marketing mix',
+            focus: 'Apply the four Ps to a new business.',
+            points: [
+              'product, price, place and promotion decisions in the marketing mix',
+              'stages of the product life cycle',
+              'how marketing-mix decisions shift as a product matures',
+            ],
+          },
+          {
+            title: 'Branding and public relations',
+            focus: 'Build reputation alongside sales.',
+            points: [
+              'building a brand identity that fits the target market',
+              'promotional tools, including advertising, public relations and social media',
+              'using public relations to manage and protect business reputation',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 3: Staffing a Business',
+        outcome: 'Evaluate staffing and human resource strategies used to establish the workforce of a business.',
+        studyDesignFocus: 'Recruitment, selection and employment obligations',
+        lessons: [
+          {
+            title: 'Planning the workforce',
+            focus: 'Work out who a new business actually needs to hire.',
+            points: [
+              'job analysis and writing a job description',
+              'forecasting staffing needs against expected workload',
+              'permanent, casual and contract employment options',
+            ],
+          },
+          {
+            title: 'Recruiting and selecting staff',
+            focus: 'Choose the right people through a fair process.',
+            points: [
+              'internal versus external recruitment',
+              'selection methods, including interviews, testing and reference checks',
+              'legal obligations a business must meet during hiring',
+            ],
+          },
+          {
+            title: 'Managing the new workforce',
+            focus: 'Set new staff up to succeed from their first day.',
+            points: [
+              'induction and initial training for new employees',
+              'workplace relations basics for a small, newly staffed business',
+              'building a positive culture while the business is still forming',
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    unit: 3,
+    title: 'Unit 3: Managing a Business',
+    focus: "Business foundations, human resource management and operations management in an established, large-scale business.",
+    chapters: [
+      {
+        title: 'Area of Study 1: Business Foundations',
+        outcome: 'Analyse the key characteristics of businesses, their stakeholders, management styles and skills, and corporate culture.',
+        studyDesignFocus: 'Business types, stakeholders, management styles/skills and corporate culture',
+        lessons: [
+          {
+            title: 'Types of businesses and objectives',
+            focus: 'Classify businesses and the goals they pursue.',
+            points: [
+              'classifying businesses by size, sector and legal structure',
+              'common business objectives, including profit, growth, market share and social objectives',
+              'why different businesses can pursue different combinations of objectives',
+            ],
+          },
+          {
+            title: 'Stakeholders and their interests',
+            focus: 'Map the people a business decision affects.',
+            points: [
+              'internal stakeholders such as owners, managers and employees',
+              'external stakeholders such as customers, suppliers, government and the community',
+              'how management balances competing or conflicting stakeholder interests',
+            ],
+          },
+          {
+            title: 'Management styles, skills and culture',
+            focus: 'Connect how managers lead to how a business behaves.',
+            points: [
+              'management styles across a spectrum, including autocratic, persuasive, consultative, democratic and laissez-faire',
+              'key management skills, such as communication, decision-making and delegation',
+              'how corporate culture shapes everyday behaviour inside a business',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 2: Human Resource Management',
+        outcome: 'Explain the human resource management process and evaluate strategies used to manage employees.',
+        studyDesignFocus: 'Motivation theory, performance management and employee relations',
+        lessons: [
+          {
+            title: 'Motivation theories',
+            focus: 'Apply established motivation theory to real workplace decisions.',
+            points: [
+              "Maslow's hierarchy of needs applied to employee motivation",
+              'goal-setting theory as an alternative motivation approach',
+              'matching a motivation strategy to a specific workplace scenario',
+            ],
+          },
+          {
+            title: 'Managing performance',
+            focus: 'Use training and appraisal to lift employee performance.',
+            points: [
+              'training and development approaches for existing staff',
+              'performance appraisal methods and their purpose',
+              'using appraisal feedback to guide future performance',
+            ],
+          },
+          {
+            title: 'Employee relations',
+            focus: 'Understand how disputes and participation affect productivity.',
+            points: [
+              'approaches to resolving workplace disputes',
+              'employee participation and its effect on engagement',
+              'why positive employee relations are linked to productivity',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 3: Operations Management',
+        outcome: 'Propose and evaluate strategies to improve the efficiency and effectiveness of business operations.',
+        studyDesignFocus: 'Production and service delivery, quality, technology and corporate responsibility in operations',
+        lessons: [
+          {
+            title: 'Operations and objectives',
+            focus: 'Link day-to-day operations back to overall business goals.',
+            points: [
+              'how an operations system connects to overall business objectives',
+              'standardised versus customised production approaches',
+              'the difference between efficiency and effectiveness in operations',
+            ],
+          },
+          {
+            title: 'Technology and materials management',
+            focus: 'See how technology and materials choices shape operations.',
+            points: [
+              'the role of technology in modern operations systems',
+              'materials and inventory management approaches',
+              'waste minimisation as an operations objective',
+            ],
+          },
+          {
+            title: 'Quality and corporate responsibility',
+            focus: 'Evaluate operations strategies against quality and responsibility goals.',
+            points: [
+              'quality control versus quality assurance approaches',
+              'corporate responsibility considerations in operations, such as environmental and safety impact',
+              'evaluating a proposed operations-improvement strategy',
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    unit: 4,
+    title: 'Unit 4: Transforming a Business',
+    focus: 'Reviewing business performance, recognising the need for change, and implementing and evaluating change strategies.',
+    chapters: [
+      {
+        title: 'Area of Study 1: Reviewing Performance – the Need for Change',
+        outcome: 'Explain how business performance is reviewed and evaluate strategies to position a business for the future.',
+        studyDesignFocus: 'Key performance indicators, proactive and reactive change, and strategic positioning',
+        lessons: [
+          {
+            title: 'Measuring performance',
+            focus: 'Use key performance indicators to judge how a business is doing.',
+            points: [
+              'key performance indicators such as profit, market share, staff turnover and customer satisfaction',
+              'using KPI trends, not single numbers, to judge performance',
+              'why performance review is the starting point for identifying change',
+            ],
+          },
+          {
+            title: 'Recognising the need for change',
+            focus: 'Distinguish proactive change from change forced by events.',
+            points: [
+              'internal and external pressures that create a need for change',
+              'proactive versus reactive approaches to change',
+              'using a force-field-style analysis of driving and restraining factors',
+            ],
+          },
+          {
+            title: 'Positioning for the future',
+            focus: "Choose a strategic direction based on the performance review.",
+            points: [
+              "generic strategic approaches such as cost leadership, differentiation and focus",
+              'linking a chosen strategy to the findings of the performance review',
+              'trade-offs involved in committing to a strategic direction',
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Area of Study 2: Implementing Change',
+        outcome: "Discuss models of change and evaluate strategies used to implement change and manage its effect on a business's stakeholders.",
+        studyDesignFocus: 'Change models, leadership of change and managing stakeholder impact',
+        lessons: [
+          {
+            title: 'Models of change',
+            focus: 'Compare structured approaches to leading change.',
+            points: [
+              "a three-step change model covering unfreezing, changing and refreezing",
+              'the learning-organisation concept as an alternative approach to change',
+              'choosing a change model to fit the size and urgency of the situation',
+            ],
+          },
+          {
+            title: 'Leading change',
+            focus: 'Understand how leadership style affects how change lands.',
+            points: [
+              'leadership approaches during a change program',
+              'low-key versus high-profile change strategies',
+              'communicating change clearly to affected stakeholders',
+            ],
+          },
+          {
+            title: 'Managing resistance and impact',
+            focus: 'Anticipate resistance and evaluate the overall impact of change.',
+            points: [
+              'common reasons stakeholders resist change',
+              'strategies to reduce resistance during implementation',
+              "evaluating the overall effect of a change program on a business's stakeholders",
+            ],
+          },
+        ],
+      },
+    ],
+  },
+]
+
 function levelsFromOverride(courseName: string, category: VceCourseCategory, units: UnitOverride[]): VceCourseLevel[] {
   return units.map((unit) => ({
     unit: unit.unit,
@@ -1136,7 +1541,9 @@ function course(id: string, name: string, category: VceCourseCategory, descripti
   const skillPhrase = categorySkillPhrase(category)
   const keyKnowledge = keyKnowledgeFor(id, name, category, description)
   const commandTerms = commandTermsFor(category)
-  const verifiedLevels = id === 'biology' ? levelsFromOverride(name, category, BIOLOGY_UNITS) : null
+  const verifiedLevels = id === 'biology' ? levelsFromOverride(name, category, BIOLOGY_UNITS)
+    : id === 'business-management' ? levelsFromOverride(name, category, BUSINESS_MANAGEMENT_UNITS)
+    : null
 
   return {
     id,
