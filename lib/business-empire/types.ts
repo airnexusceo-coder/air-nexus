@@ -49,6 +49,17 @@ export type IndustryChallengeProfile = {
   regulationIntensity: number
 }
 
+export type IndustryRealityProfile = {
+  salesCycle: 'impulse' | 'short' | 'considered' | 'enterprise' | 'contract'
+  capitalIntensity: 'low' | 'medium' | 'high' | 'extreme'
+  marginStructure: string
+  supplyChain: string
+  regulatoryPressure: string
+  realWorldDrivers: string[]
+  strategicLevers: { label: string; tradeoff: string }[]
+  kpis: { label: string; value: string }[]
+}
+
 export type IndustryProfile = {
   industry: Industry
   tagline: string
@@ -105,15 +116,41 @@ export type EntranceQuizQuestion = {
   correctIndex: number
 }
 
-/** Recorded on `GamePreferences` only for companies founded from Hardcore Mode's career phase — a factual record of how the founder earned their starting capital, not a mechanic that continues once the company exists. The player never picks a job directly — it's assigned from `jobId` based on `universityQuality` (the one-time entrance quiz score) and the chosen degree. */
+export type CareerFinanceBreakdown = {
+  grossIncome: number
+  incomeTax: number
+  housingAndBills: number
+  foodAndTransport: number
+  studentDebtPayments: number
+  emergencyExpenses: number
+  totalExpenses: number
+  totalDeductions: number
+  netSavings: number
+  finalSalary: number
+}
+
+export type JobInterviewQuestion = {
+  id: string
+  prompt: string
+  options: {
+    label: string
+    score: number
+    note: string
+  }[]
+}
+
+/** Recorded on GamePreferences only for companies founded from Hardcore Mode's career phase - a factual record of how the founder earned their starting capital, not a mechanic that continues once the company exists. */
 export type CareerBackground = {
-  /** 0-100 — the founder's score on the one-time high-school entrance quiz, which determined their university placement. */
+  /** 0-100 - the founder's score on the one-time high-school entrance quiz, which determined their university placement. */
   universityQuality: number
   degree: Degree
-  /** Assigned automatically from degree + universityQuality — never chosen freely by the player. */
+  /** The job offer earned through the interview phase. In Hardcore Mode this is not guaranteed. */
   jobId: string
+  interviewScore?: number
+  interviewPassed?: boolean
   yearsWorked: number
   totalSavings: number
+  careerFinance?: CareerFinanceBreakdown
   /** The founder's age when the company is founded (starting age + university years if applicable + years worked). */
   foundingAge: number
 }
@@ -460,6 +497,22 @@ export type Lesson = {
 
 export type EconomicCyclePhase = 'growth' | 'stable' | 'recession'
 
+export type StrategicInitiativeId =
+  | 'supply-chain-resilience'
+  | 'quality-systems'
+  | 'staff-training'
+  | 'automation-upgrade'
+  | 'market-expansion'
+  | 'sustainability-compliance'
+
+export type StrategicInitiative = {
+  id: string
+  initiativeId: StrategicInitiativeId
+  startedYear: number
+  yearsRemaining: number
+  investment: number
+}
+
 export type GameState = {
   companyName: string
   founderName: string
@@ -488,6 +541,8 @@ export type GameState = {
   economicIndex: number
   /** A slower-moving named cycle layered on top of `economicIndex` so downturns/booms feel like a real named condition, not silent per-event noise. */
   economicCyclePhase: EconomicCyclePhase
+  /** Active boardroom decisions with multi-year operating effects. Optional so older saves hydrate safely. */
+  strategicInitiatives?: StrategicInitiative[]
   completedLessonIds: string[]
   unlockedFeatures: string[]
   startedAt: string

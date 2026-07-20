@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Award, TrendingUp } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
+import { BusinessEmpireLogo } from '@/components/business-empire/business-empire-logo'
 import { SidebarNav } from '@/components/business-empire/sidebar-nav'
 import { BottomNav } from '@/components/business-empire/bottom-nav'
 import { SetupScreen } from '@/components/business-empire/setup-screen'
@@ -33,6 +34,7 @@ import {
   discontinueProduct,
   investInCommunityProject,
   launchAdvertisingCampaign,
+  launchStrategicInitiative,
   manufactureMoreUnits,
   purchaseResearch,
   updatePreferences,
@@ -42,7 +44,7 @@ import {
 } from '@/lib/business-empire/game-state'
 import { clearGameState, hasSavedGame, loadGameState, saveGameState } from '@/lib/business-empire/storage'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
-import type { AdvertisingChannel, AnnualReport, GamePreferences, GameState, LoanPurpose, ResearchLevel, UnsoldInventoryAction } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, AnnualReport, GamePreferences, GameState, LoanPurpose, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
@@ -179,6 +181,17 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
     return {}
   }
 
+  const handleLaunchInitiative = (initiativeId: StrategicInitiativeId) => {
+    const result = launchStrategicInitiative(gameState, initiativeId)
+    if (result.error) {
+      notify?.(result.error, 'warning')
+      return { error: result.error }
+    }
+    setGameState(result.state)
+    notify?.('Boardroom decision launched. Its effects now feed into the simulation.', 'success')
+    return {}
+  }
+
   const handleApplyForLoan = (amount: number, purpose: LoanPurpose) => {
     const result = applyForLoan(gameState, amount, purpose)
     if (result.approved) {
@@ -227,21 +240,23 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
         <SidebarNav companyName={gameState.companyName} year={gameState.year} active={view} onNavigate={setView} />
 
         <div className="min-w-0 flex-1 space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5">
-              <TrendingUp className="size-3.5 text-amber-300" aria-hidden="true" />
-              <span className="text-xs text-slate-400">Cash</span>
-              <span className="text-sm font-semibold text-white">{formatCurrency(gameState.cash)}</span>
-            </div>
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5">
-              <Award className="size-3.5 text-amber-300" aria-hidden="true" />
-              <span className="text-xs text-slate-400">Company value</span>
-              <span className="text-sm font-semibold text-white">{formatCurrency(gameState.companyValue)}</span>
+          <div className="glass-strong flex flex-wrap items-center justify-between gap-3 rounded-3xl p-4">
+            <BusinessEmpireLogo />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5">
+                <TrendingUp className="size-3.5 text-amber-300" aria-hidden="true" />
+                <span className="text-xs text-slate-400">Cash</span>
+                <span className="text-sm font-semibold text-white">{formatCurrency(gameState.cash)}</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5">
+                <Award className="size-3.5 text-amber-300" aria-hidden="true" />
+                <span className="text-xs text-slate-400">Company value</span>
+                <span className="text-sm font-semibold text-white">{formatCurrency(gameState.companyValue)}</span>
+              </div>
             </div>
           </div>
-
           <div>
-            {view === 'dashboard' && <DashboardPage state={gameState} onNavigate={setView} onOpenCompleteYear={() => setCompleteYearOpen(true)} />}
+            {view === 'dashboard' && <DashboardPage state={gameState} onNavigate={setView} onOpenCompleteYear={() => setCompleteYearOpen(true)} onLaunchInitiative={handleLaunchInitiative} />}
             {view === 'industry-market' && <IndustryMarketPage state={gameState} />}
             {view === 'research' && <ResearchPage state={gameState} onPurchase={handlePurchaseResearch} />}
             {view === 'products' && <ProductsPage state={gameState} onCreate={handleCreateProduct} onDiscontinue={handleDiscontinue} onInventoryAction={handleInventoryAction} />}

@@ -100,6 +100,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     loans: [],
     economicIndex: typeof parsed.economicIndex === 'number' ? parsed.economicIndex : 1,
     economicCyclePhase: 'stable',
+    strategicInitiatives: [],
     completedLessonIds: Array.isArray(parsed.completedLessonIds) ? (parsed.completedLessonIds as string[]) : [],
     unlockedFeatures: Array.isArray(parsed.unlockedFeatures) ? (parsed.unlockedFeatures as string[]) : [],
     startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
@@ -136,6 +137,7 @@ export function loadGameState(userId: string): LoadResult {
     if (!candidate) {
       return { state: null, resetNotice: 'Your previous Business Empire save was not in a format this version understands, so it was not loaded. No cash was created or lost.' }
     }
+    if (!Array.isArray(candidate.strategicInitiatives)) candidate = { ...candidate, strategicInitiatives: [] }
 
     const integrity = verifyLedgerIntegrity(candidate)
     if (!integrity.ok) {

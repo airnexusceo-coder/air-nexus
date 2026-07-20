@@ -6,6 +6,9 @@ import {
   createProduct,
   discontinueProduct,
   launchAdvertisingCampaign,
+  launchStrategicInitiative,
+  computeStrategicInitiativeCost,
+  getActiveStrategicInitiatives,
   manufactureMoreUnits,
   purchaseResearch,
   updateProductPrice,
@@ -16,11 +19,15 @@ import { appendReputationTransaction, checkForProductRecall, computeDemand, comp
 import { getIndustryProfile } from '../lib/business-empire/industries'
 import {
   assignJobByDegreeQuality,
+  computeCareerFinance,
   computeCareerSavings,
   computeFoundingAge,
+  evaluateJobInterview,
   getHardcoreJob,
   isDegreeRelevantToIndustry,
+  JOB_INTERVIEW_QUESTIONS,
   scoreEntranceQuiz,
+  scoreInterviewAnswers,
   UNIVERSITY_ENTRANCE_QUIZ,
 } from '../lib/business-empire/hardcore-career'
 import { migrateLegacySave } from '../lib/business-empire/storage'
@@ -138,6 +145,27 @@ function freshState(): GameState {
   const launched = launchAdvertisingCampaign(created.state, created.product!.id, 'social-media', 500)
   assert.equal(launched.error, undefined)
   assert.equal(cashBefore - launched.state.cash, 500, 'advertising charges exactly the chosen budget')
+}
+
+
+// 7b. Boardroom decisions cost cash through the ledger, stay active for multiple years, and cannot be duplicated while active.
+{
+  const state = freshState()
+  const expectedCost = computeStrategicInitiativeCost(state, 'quality-systems')
+  const launched = launchStrategicInitiative(state, 'quality-systems')
+  assert.equal(launched.error, undefined)
+  assert.equal(Math.round((state.cash - launched.state.cash) * 100) / 100, expectedCost, 'launching a boardroom decision charges exactly its computed cost')
+  assert.equal(getActiveStrategicInitiatives(launched.state).length, 1)
+  assert.equal(getActiveStrategicInitiatives(launched.state)[0].initiativeId, 'quality-systems')
+  assert.equal(launched.state.cashLedger[launched.state.cashLedger.length - 1].category, 'OTHER_EXPENSE')
+  assert.ok(verifyLedgerIntegrity(launched.state).ok)
+
+  const duplicate = launchStrategicInitiative(launched.state, 'quality-systems')
+  assert.ok(duplicate.error, 'the same boardroom decision cannot be launched twice while active')
+
+  const { state: afterYear, report } = completeFinancialYear(launched.state, rng)
+  assert.equal(getActiveStrategicInitiatives(afterYear)[0].yearsRemaining, 2, 'a three-year initiative decays by exactly one year after close-out')
+  assert.ok(report.factorNotes.some((note) => note.includes('Active boardroom decisions')), 'the annual report explains that boardroom decisions affected the simulation')
 }
 
 // 7. Discontinuing a product never changes cash.
@@ -349,14 +377,19 @@ console.log('Business Empire demand + integrity tests passed')
   assert.ok(entry.description.includes('recalled'), 'the recall reputation entry explains itself in plain language')
 }
 
-// 22. Hardcore Mode career savings are a deterministic function of job and years worked (no dice roll decides how much a player saves).
+// 22. Hardcore Mode career savings are deterministic, but salary is reduced by real-life taxes and expenses before it becomes company capital.
 {
   const job = getHardcoreJob('retail-assistant')!
   const savingsA = computeCareerSavings(job, 3)
   const savingsB = computeCareerSavings(job, 3)
+  const finance = computeCareerFinance(job, 3)
   assert.equal(savingsA, savingsB, 'career savings are deterministic for the same job and years worked')
+  assert.equal(finance.netSavings, savingsA, 'computeCareerSavings is the net savings from the detailed finance breakdown')
   assert.equal(computeCareerSavings(job, 0), 0, 'working zero years saves nothing')
   assert.ok(computeCareerSavings(job, 5) > computeCareerSavings(job, 2), 'working more years always saves at least as much (raises compound upward)')
+  assert.ok(finance.incomeTax > 0, 'career income includes simulated income tax')
+  assert.ok(finance.totalExpenses > 0, 'career income includes housing, transport, debt, or emergency expenses')
+  assert.ok(finance.netSavings < finance.grossIncome, 'hardcore starting capital is not gross salary')
 }
 
 // 22b. The player never picks a job — it is assigned deterministically from the quiz-driven university quality. A higher score never lands a worse-paying job than a lower score in the same degree.
@@ -369,16 +402,34 @@ console.log('Business Empire demand + integrity tests passed')
   assert.equal(scoreEntranceQuiz(UNIVERSITY_ENTRANCE_QUIZ.map(() => -1)), 0, 'answering every quiz question wrong scores exactly 0')
 }
 
+// 22c. Hardcore jobs are not guaranteed: the interview can fail, and a strong interview can earn an offer.
+{
+  const strongAnswers = JOB_INTERVIEW_QUESTIONS.map(() => 0)
+  const weakAnswers = JOB_INTERVIEW_QUESTIONS.map((question) => question.options.length - 1)
+  assert.equal(scoreInterviewAnswers(strongAnswers), 100, 'choosing the strongest answer to each interview question scores exactly 100')
+  assert.ok(scoreInterviewAnswers(weakAnswers) < 40, 'weak interview answers score poorly')
+
+  const offer = evaluateJobInterview({ answers: strongAnswers, degree: 'engineering', universityQuality: 80, industry: 'Technology' })
+  assert.equal(offer.passed, true, 'a strong interview with relevant education earns an offer')
+  assert.ok(offer.job, 'a passed interview returns the job offer')
+
+  const rejection = evaluateJobInterview({ answers: weakAnswers, degree: 'none', universityQuality: 0, industry: 'Clothing' })
+  assert.equal(rejection.passed, false, 'a weak interview does not guarantee a job')
+  assert.equal(rejection.job, null, 'a failed interview returns no job offer')
+}
+
 // 23. Founding a company in Hardcore Mode uses the career-savings amount as starting cash (ignoring any stale preferences.startingCash value), keeps the ledger exact, and ages the founder correctly.
 {
   const universityQuality = 80
   const degree: CareerBackground['degree'] = 'engineering'
   const yearsWorked = 3
   const job = assignJobByDegreeQuality(degree, universityQuality)
-  const careerBackground: CareerBackground = { universityQuality, degree, jobId: job.id, yearsWorked, totalSavings: computeCareerSavings(job, yearsWorked), foundingAge: computeFoundingAge(degree, yearsWorked) }
+  const careerFinance = computeCareerFinance(job, yearsWorked, degree, universityQuality)
+  const careerBackground: CareerBackground = { universityQuality, degree, jobId: job.id, interviewScore: 88, interviewPassed: true, yearsWorked, totalSavings: careerFinance.netSavings, careerFinance, foundingAge: computeFoundingAge(degree, yearsWorked) }
   const hardcorePrefs: GamePreferences = { ...preferences, difficulty: 'hardcore', startingCash: 999_999, careerBackground }
   const hardcoreState = createInitialState(hardcorePrefs, rng)
-  assert.equal(hardcoreState.cash, careerBackground.totalSavings, 'starting cash is recomputed from the career background, not trusted from preferences.startingCash')
+  assert.equal(hardcoreState.cash, careerBackground.totalSavings, 'starting cash uses the recorded post-tax career savings, not stale preferences.startingCash')
+  assert.ok(hardcoreState.cashLedger[0].description.includes('income tax'), 'the starting capital ledger explains that taxes and personal expenses were deducted')
   assert.equal(careerBackground.foundingAge, 16 + 3 + 3, 'founding age is starting age (16) + university years (3, since a degree was studied) + years worked')
   assert.ok(verifyLedgerIntegrity(hardcoreState).ok)
   assert.ok(verifyReputationIntegrity(hardcoreState).ok)
@@ -422,6 +473,7 @@ console.log('Business Empire demand + integrity tests passed')
   delete legacyRaw.staffMorale
   delete legacyRaw.loans
   delete legacyRaw.economicCyclePhase
+  delete legacyRaw.strategicInitiatives
   for (const product of legacyRaw.products as Record<string, unknown>[]) {
     delete product.rating
     delete product.reviews
@@ -442,6 +494,7 @@ console.log('Business Empire demand + integrity tests passed')
   assert.ok(verifyReputationIntegrity(migrated!).ok, 'migration never creates unexplained reputation')
   assert.equal(migrated!.reputationHistory.length, 1, 'migration seeds exactly one transparent "save upgraded" reputation entry')
   assert.equal(migrated!.reputationHistory[0].reasonCategory, 'SAVE_MIGRATION')
+  assert.equal(migrated!.strategicInitiatives?.length, 0, 'migrated saves start with no fabricated boardroom decisions')
   assert.equal(migrated!.products[0].reviews.length, 0, 'migrated products start with an empty review list, not fabricated history')
   assert.ok(migrated!.products[0].reliability >= 0 && migrated!.products[0].reliability <= 100, 'migrated products get a sensible backfilled reliability, not a zero pretending to be real')
 }

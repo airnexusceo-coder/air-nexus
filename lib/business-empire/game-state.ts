@@ -2,7 +2,6 @@ import { getIndustryProfile } from '@/lib/business-empire/industries'
 import { getAdvertisingChannel } from '@/lib/business-empire/advertising'
 import { computeResearchCost, generateResearchReport } from '@/lib/business-empire/research'
 import {
-  computeCareerSavings,
   DEGREE_INDUSTRY_REPUTATION_BONUS,
   getDegreeProfile,
   getHardcoreJob,
@@ -63,11 +62,106 @@ import {
   type ProductionMethod,
   type ReputationReasonCategory,
   type ResearchLevel,
+  type StrategicInitiative,
+  type StrategicInitiativeId,
   type UnsoldInventoryAction,
 } from '@/lib/business-empire/types'
 
 const PERISHABLE_EXPIRY_RATE = 0.6
 const TAX_RATE = 0.2
+
+type StrategicInitiativeEffect = {
+  productionCostMultiplier?: number
+  demandMultiplier?: number
+  delayMultiplier?: number
+  recallRiskMultiplier?: number
+  reliabilityBonus?: number
+  moraleBonus?: number
+  satisfactionBonus?: number
+}
+
+export type StrategicInitiativeOption = {
+  id: StrategicInitiativeId
+  label: string
+  shortLabel: string
+  description: string
+  realWorldReason: string
+  durationYears: number
+  baseCost: number
+  companyValueRate: number
+  startReputationDelta: number
+  effects: StrategicInitiativeEffect
+  effectsSummary: string[]
+}
+
+export const STRATEGIC_INITIATIVES: StrategicInitiativeOption[] = [
+  { id: 'supply-chain-resilience', label: 'Diversify suppliers', shortLabel: 'Supplier resilience', description: 'Build backup suppliers, better purchasing terms, and more realistic delivery buffers.', realWorldReason: 'Real companies reduce supplier dependency so one delayed component or ingredient does not stop the whole business.', durationYears: 2, baseCost: 1600, companyValueRate: 0.035, startReputationDelta: 1, effects: { delayMultiplier: 0.55, demandMultiplier: 1.02, productionCostMultiplier: 1.01 }, effectsSummary: ['Fewer production delays', 'Slightly better availability', 'Small coordination cost'] },
+  { id: 'quality-systems', label: 'Install quality control', shortLabel: 'Quality systems', description: 'Add testing, inspection gates, and customer issue tracking before defects become public.', realWorldReason: 'In food, cars, cosmetics, technology, and hardware, quality systems are cheaper than recalls after trust is lost.', durationYears: 3, baseCost: 2200, companyValueRate: 0.045, startReputationDelta: 2, effects: { reliabilityBonus: 8, recallRiskMultiplier: 0.55, satisfactionBonus: 2, productionCostMultiplier: 1.015 }, effectsSummary: ['Higher reliability', 'Lower recall risk', 'Small inspection cost'] },
+  { id: 'staff-training', label: 'Train the workforce', shortLabel: 'Staff training', description: 'Improve operations, service, and frontline decision-making across the company.', realWorldReason: 'Better-trained staff reduce service mistakes, improve customer experience, and make scaling less chaotic.', durationYears: 2, baseCost: 1400, companyValueRate: 0.03, startReputationDelta: 1, effects: { moraleBonus: 8, satisfactionBonus: 3, demandMultiplier: 1.025, productionCostMultiplier: 1.01 }, effectsSummary: ['Higher morale', 'Better satisfaction', 'Training time costs cash'] },
+  { id: 'automation-upgrade', label: 'Automate operations', shortLabel: 'Automation', description: 'Upgrade tools, workflow software, fulfilment, or factory equipment to lower future unit costs.', realWorldReason: 'Automation usually requires capital first, then improves repeatability and cost structure if demand exists.', durationYears: 4, baseCost: 3500, companyValueRate: 0.07, startReputationDelta: 0, effects: { productionCostMultiplier: 0.92, reliabilityBonus: 3, moraleBonus: -2 }, effectsSummary: ['Lower future production costs', 'More consistent output', 'Morale risk during change'] },
+  { id: 'market-expansion', label: 'Open a new channel', shortLabel: 'New channel', description: 'Add wholesale, direct-to-consumer, partnerships, delivery, or sales reps depending on the industry.', realWorldReason: 'Growing companies often reach more customers by adding channels, but every channel adds overhead and complexity.', durationYears: 2, baseCost: 2400, companyValueRate: 0.055, startReputationDelta: 1, effects: { demandMultiplier: 1.1, delayMultiplier: 1.08, satisfactionBonus: -1, productionCostMultiplier: 1.02 }, effectsSummary: ['Bigger addressable demand', 'More operational complexity', 'Slight service strain'] },
+  { id: 'sustainability-compliance', label: 'Fund sustainability compliance', shortLabel: 'Sustainability', description: 'Audit suppliers, reduce waste, improve compliance, and make environmental claims safer.', realWorldReason: 'Sustainability can improve trust, but only when backed by real operations instead of marketing claims.', durationYears: 3, baseCost: 1800, companyValueRate: 0.04, startReputationDelta: 3, effects: { demandMultiplier: 1.035, recallRiskMultiplier: 0.9, productionCostMultiplier: 1.02 }, effectsSummary: ['Better trust', 'Cleaner compliance', 'Higher responsible sourcing cost'] },
+]
+
+type StrategicInitiativeEffects = Required<StrategicInitiativeEffect>
+
+const NEUTRAL_STRATEGIC_EFFECTS: StrategicInitiativeEffects = { productionCostMultiplier: 1, demandMultiplier: 1, delayMultiplier: 1, recallRiskMultiplier: 1, reliabilityBonus: 0, moraleBonus: 0, satisfactionBonus: 0 }
+
+function clampScore(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function getStrategicInitiativeOption(initiativeId: StrategicInitiativeId): StrategicInitiativeOption | undefined {
+  return STRATEGIC_INITIATIVES.find((option) => option.id === initiativeId)
+}
+
+export function getActiveStrategicInitiatives(state: GameState): StrategicInitiative[] {
+  return (state.strategicInitiatives ?? []).filter((initiative) => initiative.yearsRemaining > 0)
+}
+
+export function computeStrategicInitiativeCost(state: GameState, initiativeId: StrategicInitiativeId): number {
+  const option = getStrategicInitiativeOption(initiativeId)
+  if (!option) return 0
+  const industry = getIndustryProfile(state.industry)
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  const scale = Math.max(25000, state.companyValue, state.cash)
+  const industryLoad = 1 + industry.challengeProfile.regulationIntensity * 0.22 + Math.max(0, industry.productionCostFactor - 1) * 0.08
+  return Math.max(500, Math.round(((option.baseCost + scale * option.companyValueRate) * difficulty.costMultiplier * industryLoad) / 100) * 100)
+}
+
+export function getStrategicInitiativeEffects(state: GameState): StrategicInitiativeEffects {
+  return getActiveStrategicInitiatives(state).reduce<StrategicInitiativeEffects>((effects, initiative) => {
+    const option = getStrategicInitiativeOption(initiative.initiativeId)
+    if (!option) return effects
+    return {
+      productionCostMultiplier: effects.productionCostMultiplier * (option.effects.productionCostMultiplier ?? 1),
+      demandMultiplier: effects.demandMultiplier * (option.effects.demandMultiplier ?? 1),
+      delayMultiplier: effects.delayMultiplier * (option.effects.delayMultiplier ?? 1),
+      recallRiskMultiplier: effects.recallRiskMultiplier * (option.effects.recallRiskMultiplier ?? 1),
+      reliabilityBonus: effects.reliabilityBonus + (option.effects.reliabilityBonus ?? 0),
+      moraleBonus: effects.moraleBonus + (option.effects.moraleBonus ?? 0),
+      satisfactionBonus: effects.satisfactionBonus + (option.effects.satisfactionBonus ?? 0),
+    }
+  }, { ...NEUTRAL_STRATEGIC_EFFECTS })
+}
+
+export function launchStrategicInitiative(state: GameState, initiativeId: StrategicInitiativeId): { state: GameState; error?: string } {
+  const option = getStrategicInitiativeOption(initiativeId)
+  if (!option) return { state, error: 'Unknown boardroom decision.' }
+  const active = getActiveStrategicInitiatives(state)
+  if (active.some((initiative) => initiative.initiativeId === initiativeId)) return { state, error: option.label + ' is already active.' }
+  if (active.length >= 3) return { state, error: 'You can run up to three major boardroom decisions at once. Let one finish before adding another.' }
+  const investment = computeStrategicInitiativeCost(state, initiativeId)
+  if (investment > state.cash) return { state, error: option.label + ' needs ' + Math.round(investment).toLocaleString() + ', more than your available cash.' }
+  const initiative: StrategicInitiative = { id: createId('initiative'), initiativeId, startedYear: state.year, yearsRemaining: option.durationYears, investment }
+  let next: GameState = { ...state, strategicInitiatives: [...(state.strategicInitiatives ?? []), initiative] }
+  next = appendTransaction(next, { category: 'OTHER_EXPENSE', amount: -investment, description: 'Boardroom decision: ' + option.label, relatedId: initiative.id })
+  if (option.startReputationDelta !== 0) {
+    next = appendReputationTransaction(next, { delta: option.startReputationDelta, reasonCategory: option.id === 'sustainability-compliance' ? 'ENVIRONMENTAL_RESPONSIBILITY' : 'FAIR_TREATMENT', description: option.label + ' signalled stronger management discipline: ' + option.realWorldReason, relatedId: initiative.id })
+  }
+  if (option.effects.moraleBonus) next = { ...next, staffMorale: clampScore(next.staffMorale + option.effects.moraleBonus * 0.5) }
+  return { state: next }
+}
 
 export function createInitialState(preferences: GamePreferences, rng: () => number = Math.random): GameState {
   const startedAt = new Date().toISOString()
@@ -79,11 +173,11 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
   const difficultyNudge = preferences.difficulty === 'beginner' ? 2 : preferences.difficulty === 'advanced' || preferences.difficulty === 'hardcore' ? -2 : 0
   const startingReputation = Math.max(30, Math.min(50, Math.round(35 + rng() * 10) + difficultyNudge))
 
-  // Hardcore Mode never trusts a UI-picked starting cash — it always recomputes it from the career
-  // background actually recorded, so "starting capital was earned, not chosen" can't be bypassed.
+  // Hardcore Mode never trusts a UI-picked starting cash. The setup screen records the exact
+  // post-tax, post-expense savings from the life phase, and that becomes company capital.
   const career = preferences.difficulty === 'hardcore' ? preferences.careerBackground : undefined
   const careerJob = career ? getHardcoreJob(career.jobId) : undefined
-  const startingCash = career && careerJob ? computeCareerSavings(careerJob, career.yearsWorked) : preferences.startingCash
+  const startingCash = career && careerJob ? Math.max(0, Math.round(career.totalSavings)) : preferences.startingCash
 
   const base: GameState = {
     companyName: preferences.companyName,
@@ -107,6 +201,7 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     loans: [],
     economicIndex: 1,
     economicCyclePhase: 'stable',
+    strategicInitiatives: [],
     completedLessonIds: [],
     unlockedFeatures: [],
     startedAt,
@@ -114,8 +209,8 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     saveVersion: CURRENT_SAVE_VERSION,
   }
   const capitalDescription = career
-    ? `${preferences.companyName} founded — starting capital earned from ${career.yearsWorked} year(s) working as a ${careerJob?.title ?? 'employee'}`
-    : `${preferences.companyName} founded — starting capital`
+    ? preferences.companyName + ' founded - starting capital saved after ' + career.yearsWorked + ' year(s) as a ' + (careerJob?.title ?? 'worker') + ', after income tax and personal expenses'
+    : preferences.companyName + ' founded - starting capital'
   const withCapital = appendTransaction(base, { category: 'STARTING_CAPITAL', amount: startingCash, description: capitalDescription })
   let founded = appendReputationTransaction(withCapital, {
     delta: startingReputation,
@@ -150,7 +245,7 @@ export type ProductCreationInput = {
 export function estimateCostPerUnit(state: GameState, draft: Pick<ProductCreationInput, 'quality' | 'productionMethod' | 'packagingQuality' | 'features' | 'rndBudget'>, units: number): number {
   const industry = getIndustryProfile(state.industry)
   const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
-  return computeCostPerUnit(industry, draft, units, difficulty)
+  return computeCostPerUnit(industry, draft, units, difficulty) * getStrategicInitiativeEffects(state).productionCostMultiplier
 }
 
 /**
@@ -531,9 +626,15 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
 
   let working = state
   const activeProducts = working.products.filter((p) => !p.discontinued)
+  const activeInitiatives = getActiveStrategicInitiatives(working)
+  const initiativeEffects = getStrategicInitiativeEffects(working)
+  if (activeInitiatives.length > 0) {
+    const initiativeLabels = activeInitiatives.map((initiative) => getStrategicInitiativeOption(initiative.initiativeId)?.shortLabel ?? initiative.initiativeId).join(', ')
+    factorNotes.push('Active boardroom decisions this year: ' + initiativeLabels + '.')
+  }
   const events = generateYearlyEvents(industry, difficulty, activeProducts.map((p) => p.id), year, working.brandReputation, rng)
   const costMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.costMultiplier, 1)
-  const companyWideDemandMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.demandMultiplier, 1)
+  const companyWideDemandMultiplier = events.filter((e) => e.targetProductId == null).reduce((mult, e) => mult * e.demandMultiplier, 1) * initiativeEffects.demandMultiplier
   let economicIndex = working.economicIndex
   for (const event of events) economicIndex = Math.max(0.7, Math.min(1.3, economicIndex + event.economicIndexDelta))
 
@@ -594,8 +695,9 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     }
 
     const qualityScore = computeQualityScore(industry, product)
-    const reliability = computeProductReliability(qualityScore, rng)
-    const recalled = checkForProductRecall(reliability, industry, rng)
+    const reliability = Math.min(100, computeProductReliability(qualityScore, rng) + initiativeEffects.reliabilityBonus)
+    const recallIndustry = initiativeEffects.recallRiskMultiplier === 1 ? industry : { ...industry, challengeProfile: { ...industry.challengeProfile, recallRisk: industry.challengeProfile.recallRisk * initiativeEffects.recallRiskMultiplier } }
+    const recalled = checkForProductRecall(reliability, recallIndustry, rng)
 
     if (recalled) {
       const recallRefund = Math.round(product.lifetimeUnitsSold * product.price * 0.05)
@@ -624,7 +726,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     }
 
     // Production delays: reputation and difficulty both affect how reliably suppliers deliver on time. Delayed units simply become next year's carried inventory rather than vanishing.
-    const delayChance = computeProductionDelayChance(working.brandReputation, difficulty)
+    const delayChance = computeProductionDelayChance(working.brandReputation, difficulty) * initiativeEffects.delayMultiplier
     const isDelayed = rng() < delayChance
     const delayedUnits = isDelayed ? Math.round(product.unitsManufactured * (0.15 + rng() * 0.15)) : 0
     if (isDelayed && delayedUnits > 0) factorNotes.push(`${delayedUnits.toLocaleString()} units of ${product.name} were delayed by a supplier and will arrive next year.`)
@@ -663,7 +765,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     const effectiveCostPerUnit = product.costPerUnit * costMultiplier
     const revenue = unitsSold * product.price
     const costOfGoodsSold = unitsSold * effectiveCostPerUnit
-    const satisfaction = computeProductSatisfaction(qualityScore, product.price, industry, availableStock, unitsSold)
+    const satisfaction = Math.min(100, computeProductSatisfaction(qualityScore, product.price, industry, availableStock, unitsSold) + initiativeEffects.satisfactionBonus)
     const returnRate = computeProductReturnRate(reliability, satisfaction)
     const complaintRate = computeProductComplaintRate(reliability, satisfaction)
     const rating = computeProductRating(satisfaction, reliability)
@@ -732,7 +834,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   const totalExpenses = productionCosts + researchCosts + advertisingCosts + wages + rent + operating.total + loanRepaymentsTotal + taxes + refunds
 
   const newSatisfaction = computeCompanySatisfaction(working.products, working.customerSatisfaction)
-  const newStaffMorale = computeStaffMorale(working.staffMorale, wages, activeProducts.length, working.brandReputation)
+  const newStaffMorale = clampScore(computeStaffMorale(working.staffMorale, wages, activeProducts.length, working.brandReputation) + initiativeEffects.moraleBonus)
 
   // Every reputation change this year — recalls/misleading-advertising/reliability shifts discovered
   // above, the yearly events, the ambient satisfaction pull, and a multi-year-stability bonus — is
@@ -777,6 +879,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     companyValue,
     economicIndex,
     economicCyclePhase: newEconomicCyclePhase,
+    strategicInitiatives: activeInitiatives.map((initiative) => ({ ...initiative, yearsRemaining: initiative.yearsRemaining - 1 })).filter((initiative) => initiative.yearsRemaining > 0),
     year: year + 1,
   }
 
@@ -796,6 +899,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   if (marketShare < 5) considerNextYear.push('Consider more research or advertising to better understand and reach your customers.')
   if (newSatisfaction < 55) considerNextYear.push('Customer satisfaction is low — check whether your price matches your product quality.')
   if (working.brandReputation < 40) considerNextYear.push('Reputation is weak — review the reputation history to see exactly what has been damaging it.')
+  if (activeInitiatives.length === 0) considerNextYear.push('Consider a boardroom decision if cash allows: management choices now can change delays, reliability, morale, or demand next year.')
   if (considerNextYear.length === 0) considerNextYear.push('Keep an eye on competitors — they adjust their prices, quality, and advertising every year too.')
 
   const report: AnnualReport = {

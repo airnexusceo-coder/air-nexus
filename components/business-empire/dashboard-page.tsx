@@ -2,23 +2,24 @@
 
 import { useMemo } from 'react'
 import { Line, LineChart, ResponsiveContainer } from 'recharts'
-import { AlertTriangle, ArrowRight, Award, Boxes, CalendarCheck2, GraduationCap, Heart, PiggyBank, ShieldCheck, Star, TrendingUp } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Award, Boxes, BrainCircuit, CalendarCheck2, CheckCircle2, Clock3, GraduationCap, Heart, PiggyBank, ShieldCheck, Star, TrendingUp } from 'lucide-react'
 import { InfoTip } from '@/components/business-empire/info-tip'
 import type { BusinessEmpireView } from '@/components/business-empire/nav-items'
-import { estimateCurrentYearOutcome } from '@/lib/business-empire/game-state'
+import { STRATEGIC_INITIATIVES, computeStrategicInitiativeCost, estimateCurrentYearOutcome, getActiveStrategicInitiatives } from '@/lib/business-empire/game-state'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
 import { LESSONS } from '@/lib/business-empire/lessons'
 import { getReputationLevel } from '@/lib/business-empire/simulation'
-import type { GameState } from '@/lib/business-empire/types'
+import type { GameState, StrategicInitiativeId } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type DashboardPageProps = {
   state: GameState
   onNavigate: (view: BusinessEmpireView) => void
   onOpenCompleteYear: () => void
+  onLaunchInitiative: (initiativeId: StrategicInitiativeId) => { error?: string }
 }
 
-export function DashboardPage({ state, onNavigate, onOpenCompleteYear }: DashboardPageProps) {
+export function DashboardPage({ state, onNavigate, onOpenCompleteYear, onLaunchInitiative }: DashboardPageProps) {
   const estimate = useMemo(() => estimateCurrentYearOutcome(state), [state])
   const activeProducts = state.products.filter((p) => !p.discontinued)
   const unsoldInventoryUnits = state.products.reduce((sum, p) => sum + p.inventory, 0)
@@ -41,6 +42,12 @@ export function DashboardPage({ state, onNavigate, onOpenCompleteYear }: Dashboa
   const nextLesson = LESSONS.find((lesson) => !state.completedLessonIds.includes(lesson.id)) ?? null
   const reputationChartData = state.reputationHistory.map((entry, index) => ({ index, value: entry.valueAfter }))
   const reputationLevel = getReputationLevel(state.brandReputation)
+  const activeInitiatives = getActiveStrategicInitiatives(state)
+  const initiativeCards = STRATEGIC_INITIATIVES.map((option) => {
+    const cost = computeStrategicInitiativeCost(state, option.id)
+    const active = activeInitiatives.some((initiative) => initiative.initiativeId === option.id)
+    return { option, cost, active, insufficientCash: cost > state.cash }
+  })
 
   return (
     <div className="space-y-5">
@@ -65,6 +72,59 @@ export function DashboardPage({ state, onNavigate, onOpenCompleteYear }: Dashboa
           ))}
         </div>
       )}
+
+
+      <section className="glass-glow rounded-2xl p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><BrainCircuit className="size-4 text-amber-300" />Boardroom Decisions</h2>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-300">Choose management actions that behave like real business tradeoffs. They cost cash now, stay active for multiple financial years, and feed into demand, reliability, delays, morale, recall risk, or future production cost.</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-slate-300">
+            <span className="text-slate-500">Active:</span> {activeInitiatives.length}/3
+          </div>
+        </div>
+
+        {activeInitiatives.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {activeInitiatives.map((initiative) => {
+              const option = STRATEGIC_INITIATIVES.find((entry) => entry.id === initiative.initiativeId)
+              if (!option) return null
+              return (
+                <span key={initiative.id} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-100">
+                  <Clock3 className="size-3.5" />{option.shortLabel}: {initiative.yearsRemaining} yr left
+                </span>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {initiativeCards.map(({ option, cost, active, insufficientCash }) => (
+            <article key={option.id} className={cn('flex flex-col rounded-2xl border p-4 transition', active ? 'border-emerald-300/35 bg-emerald-400/[0.08]' : 'border-white/10 bg-white/[0.03] hover:border-amber-300/35 hover:bg-amber-400/[0.06]')}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">{option.label}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-400">{option.description}</p>
+                </div>
+                {active && <CheckCircle2 className="size-5 shrink-0 text-emerald-300" aria-hidden="true" />}
+              </div>
+              <p className="mt-3 text-[11px] leading-5 text-slate-500">{option.realWorldReason}</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {option.effectsSummary.map((effect) => (
+                  <span key={effect} className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1 text-[10px] font-medium text-slate-300">{effect}</span>
+                ))}
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-3 text-xs">
+                <span className="text-slate-400">{formatCurrency(cost)} ? {option.durationYears} yrs</span>
+                <button type="button" disabled={active || insufficientCash} onClick={() => onLaunchInitiative(option.id)} className="secondary-action min-h-8 px-3 py-1.5 text-xs disabled:opacity-45">
+                  {active ? 'Active' : insufficientCash ? 'Need cash' : 'Launch'}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={PiggyBank} label="Available cash" value={formatCurrency(state.cash)} tooltip="Virtual money you can spend right now on research, production, and advertising." />

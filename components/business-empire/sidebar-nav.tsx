@@ -1,5 +1,6 @@
 'use client'
 
+import { BusinessEmpireLogo } from '@/components/business-empire/business-empire-logo'
 import { NAV_ITEMS, type BusinessEmpireView } from '@/components/business-empire/nav-items'
 import { cn } from '@/lib/utils'
 
@@ -14,8 +15,9 @@ type SidebarNavProps = {
 export function SidebarNav({ companyName, year, active, onNavigate }: SidebarNavProps) {
   return (
     <nav aria-label="Business Empire navigation" className="hidden w-56 shrink-0 lg:block">
-      <div className="mb-4 rounded-xl border border-amber-300/20 bg-amber-400/[0.05] px-3 py-2.5">
-        <p className="truncate text-sm font-semibold text-white">{companyName}</p>
+      <div className="mb-4 rounded-2xl border border-amber-300/20 bg-amber-400/[0.06] p-3">
+        <BusinessEmpireLogo compact />
+        <p className="mt-3 truncate text-sm font-semibold text-white">{companyName}</p>
         <p className="text-xs text-amber-200/80">Financial Year {year}</p>
       </div>
       <ul className="space-y-1">

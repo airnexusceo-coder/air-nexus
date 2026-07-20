@@ -1,10 +1,10 @@
 'use client'
 
 import { useMemo } from 'react'
-import { AlertTriangle, Globe2, Users } from 'lucide-react'
+import { AlertTriangle, Factory, GaugeCircle, Globe2, LineChart, Scale, Users } from 'lucide-react'
 import { ADVERTISING_CHANNELS } from '@/lib/business-empire/advertising'
 import { formatCurrency } from '@/lib/business-empire/format'
-import { getIndustryProfile } from '@/lib/business-empire/industries'
+import { getIndustryProfile, getIndustryRealityProfile } from '@/lib/business-empire/industries'
 import type { GameState } from '@/lib/business-empire/types'
 
 type IndustryMarketPageProps = {
@@ -13,6 +13,7 @@ type IndustryMarketPageProps = {
 
 export function IndustryMarketPage({ state }: IndustryMarketPageProps) {
   const industry = useMemo(() => getIndustryProfile(state.industry), [state.industry])
+  const reality = useMemo(() => getIndustryRealityProfile(state.industry), [state.industry])
   const bestChannels = [...ADVERTISING_CHANNELS]
     .filter((c) => c.id !== 'none')
     .sort((a, b) => industry.advertisingEffectiveness[b.id] - industry.advertisingEffectiveness[a.id])
@@ -31,6 +32,57 @@ export function IndustryMarketPage({ state }: IndustryMarketPageProps) {
         <Stat label="Growth potential" value={`+${industry.growthPotential}%/yr`} />
         <Stat label="Competition level" value={industry.competitionLevel} capitalize />
       </div>
+
+
+      <section className="glass rounded-2xl p-5">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Factory className="size-4 text-amber-300" />Real-world operating model</h2>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <RealityCard icon={GaugeCircle} label="Sales cycle" value={reality.salesCycle} detail="How quickly customers usually decide to buy." capitalize />
+          <RealityCard icon={Scale} label="Capital intensity" value={reality.capitalIntensity} detail="How much cash and fixed investment this industry tends to demand." capitalize />
+          <RealityCard icon={LineChart} label="Margin logic" value="Unit economics" detail={reality.marginStructure} />
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Supply chain</p>
+            <p className="mt-2 text-xs leading-5 text-slate-300">{reality.supplyChain}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Regulation pressure</p>
+            <p className="mt-2 text-xs leading-5 text-slate-300">{reality.regulatoryPressure}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="glass rounded-2xl p-5">
+          <h2 className="text-sm font-semibold text-white">What moves demand</h2>
+          <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-300">
+            {reality.realWorldDrivers.map((driver) => <li key={driver} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">{driver}</li>)}
+          </ul>
+        </div>
+        <div className="glass rounded-2xl p-5">
+          <h2 className="text-sm font-semibold text-white">Strategic levers</h2>
+          <div className="mt-3 space-y-2">
+            {reality.strategicLevers.map((lever) => (
+              <div key={lever.label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                <p className="text-xs font-semibold text-white">{lever.label}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{lever.tradeoff}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="glass rounded-2xl p-5">
+          <h2 className="text-sm font-semibold text-white">Industry KPIs</h2>
+          <div className="mt-3 space-y-2">
+            {reality.kpis.map((kpi) => (
+              <div key={kpi.label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                <p className="text-xs text-slate-500">{kpi.label}</p>
+                <p className="mt-1 text-sm font-semibold text-white">{kpi.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section className="glass rounded-2xl p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-white"><Users className="size-4 text-amber-300" />Customer groups</h2>
@@ -71,6 +123,20 @@ function Stat({ label, value, capitalize }: { label: string; value: string; capi
     <div className="glass rounded-2xl p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
       <p className={`mt-2 text-lg font-bold text-white ${capitalize ? 'capitalize' : ''}`}>{value}</p>
+    </div>
+  )
+}
+
+
+function RealityCard({ icon: Icon, label, value, detail, capitalize }: { icon: typeof GaugeCircle; label: string; value: string; detail: string; capitalize?: boolean }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-center gap-2">
+        <Icon className="size-3.5 text-amber-300/80" aria-hidden="true" />
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      </div>
+      <p className={'mt-2 text-sm font-semibold text-white ' + (capitalize ? 'capitalize' : '')}>{value}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-400">{detail}</p>
     </div>
   )
 }
