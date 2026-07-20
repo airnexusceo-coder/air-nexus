@@ -257,6 +257,7 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     let sequence = ''
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (typeof event.key !== 'string') return
       if (event.key.length !== 1) return
       sequence = (sequence + event.key.toLowerCase()).slice(-10)
       if (sequence.endsWith('nexusadmin')) setAdminAccessOpen(true)
