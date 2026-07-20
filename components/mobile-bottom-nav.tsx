@@ -62,7 +62,7 @@ export function MobileBottomNav({ activeSection, chatOpen, menuOpen, contextOpen
     { label: 'Home', icon: Gauge, active: activeSection === 'Dashboard' && !chatOpen, action: () => onNavigate('Dashboard') },
     { label: 'Tutor', icon: BookOpenCheck, active: activeSection === 'AI Tutor' && !chatOpen, action: () => onNavigate('AI Tutor') },
     { label: 'Chat', icon: MessageSquare, active: chatOpen, action: onOpenChat, primary: true },
-    { label: 'Assignments', icon: ClipboardList, active: activeSection === 'Assignment Workspace' && !chatOpen, action: () => onNavigate('Assignment Workspace') },
+    { label: 'Tasks', icon: ClipboardList, active: activeSection === 'Tasks' && !chatOpen, action: () => onNavigate('Tasks') },
     { label: 'More', icon: Menu, active: menuOpen, action: onOpenMenu },
   ]
 

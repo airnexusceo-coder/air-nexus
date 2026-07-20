@@ -22,7 +22,7 @@ import {
   type NexusRewardsState,
 } from '@/lib/nexus-points'
 import { getMotivationStats, loadMotivationState, recordMotivationActivity, type MotivationCelebration } from '@/lib/motivation'
-import { avatarGradientFor, getCosmetic, type CosmeticCategory } from '@/lib/cosmetics'
+import { DEFAULT_UI_THEME, avatarGradientFor, getCosmetic, type CosmeticCategory, type UiThemeId } from '@/lib/cosmetics'
 import { COURSE_PURCHASE_COST } from '@/lib/courses/vce-catalog'
 import { AI_TOOLS, isAiToolSlug } from '@/lib/ai-tools/catalog'
 import { navItems } from '@/lib/data'
@@ -57,6 +57,7 @@ type StoredUserProfile = LocalUserProfile & {
   nexusPoints: number
   planExpiry: string | null
   autoSpeak: boolean
+  equippedUiTheme: UiThemeId
 }
 
 const PROFILE_STORAGE_KEY = 'airnexus-google-profile'
@@ -92,6 +93,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const [redeemedRewards, setRedeemedRewards] = useState<string[]>([])
   const [equippedAvatar, setEquippedAvatar] = useState<string | null>(null)
   const [equippedBadge, setEquippedBadge] = useState<string | null>(null)
+  const [equippedUiTheme, setEquippedUiTheme] = useState<UiThemeId>(DEFAULT_UI_THEME)
   const [planExpiry, setPlanExpiry] = useState<string | null>(null)
   const [pointsShortfall, setPointsShortfall] = useState(0)
   const [autoSpeak, setAutoSpeak] = useState(false)
@@ -168,6 +170,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       setRewardedActions(stored?.rewardedActions ?? [])
       setEquippedAvatar(stored?.equippedAvatar ?? null)
       setEquippedBadge(stored?.equippedBadge ?? null)
+      setEquippedUiTheme(stored?.equippedUiTheme ?? DEFAULT_UI_THEME)
       setLastDailyLogin(today)
       setNexusPoints(startingPoints + (shouldAwardDaily ? DAILY_LOGIN_REWARD : 0))
       setTransactions([
@@ -195,9 +198,10 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       lastDailyLogin,
       equippedAvatar,
       equippedBadge,
+      equippedUiTheme,
     }
     window.localStorage.setItem(rewardsStorageKey, JSON.stringify(state))
-  }, [equippedAvatar, equippedBadge, lastDailyLogin, nexusPoints, plan, planExpiry, redeemedRewards, rewardedActions, rewardsHydrated, rewardsStorageKey, transactions])
+  }, [equippedAvatar, equippedBadge, equippedUiTheme, lastDailyLogin, nexusPoints, plan, planExpiry, redeemedRewards, rewardedActions, rewardsHydrated, rewardsStorageKey, transactions])
 
   useEffect(() => {
     if (!profileHydrated) return
@@ -209,9 +213,10 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
       nexusPoints,
       planExpiry,
       autoSpeak,
+      equippedUiTheme,
     }
     window.localStorage.setItem(profileStorageKey, JSON.stringify(profile))
-  }, [authUser.email, autoSpeak, nexusPoints, plan, planExpiry, profileHydrated, profileName, profileStorageKey])
+  }, [authUser.email, autoSpeak, equippedUiTheme, nexusPoints, plan, planExpiry, profileHydrated, profileName, profileStorageKey])
   const notify = useCallback((message: string, tone: NoticeTone = 'info') => {
     const id = Date.now()
     setNotices((current) => [...current, { id, message, tone }])
@@ -595,6 +600,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
     const cosmetic = getCosmetic(reward.id)
     if (cosmetic?.category === 'avatar') setEquippedAvatar(reward.id)
     else if (cosmetic?.category === 'badge') setEquippedBadge(reward.id)
+    else if (cosmetic?.category === 'ui') setEquippedUiTheme(cosmetic.uiTheme ?? DEFAULT_UI_THEME)
     notify(reward.name + ' unlocked', 'success')
   }
 
@@ -629,14 +635,15 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
   const equipCosmetic = (category: CosmeticCategory, id: string | null) => {
     if (id && !redeemedRewards.includes(id)) return
     if (category === 'avatar') setEquippedAvatar(id)
-    else setEquippedBadge(id)
+    else if (category === 'badge') setEquippedBadge(id)
+    else setEquippedUiTheme(getCosmetic(id)?.uiTheme ?? DEFAULT_UI_THEME)
   }
 
   const equippedBadgeCosmetic = getCosmetic(equippedBadge)
 
   return (
-    <div className={cn('relative flex h-[var(--app-height,100dvh)] w-full overflow-hidden bg-[linear-gradient(135deg,oklch(0.075_0.012_260),oklch(0.11_0.018_235)_46%,oklch(0.085_0.014_175))] pb-[calc(4rem+env(safe-area-inset-bottom))] text-white lg:h-dvh lg:pb-0', focusMode && 'focus-mode')}>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.025)_1px,transparent_1px)] bg-[size:52px_52px] opacity-35" />
+    <div data-ui-theme={equippedUiTheme} className={cn('air-app-shell relative flex h-[var(--app-height,100dvh)] w-full overflow-hidden bg-[linear-gradient(135deg,oklch(0.075_0.012_260),oklch(0.11_0.018_235)_46%,oklch(0.085_0.014_175))] pb-[calc(4rem+env(safe-area-inset-bottom))] text-white lg:h-dvh lg:pb-0', `air-ui-theme--${equippedUiTheme}`, focusMode && 'focus-mode')}>
+      <div aria-hidden="true" className="air-app-grid pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,.025)_1px,transparent_1px)] bg-[size:52px_52px] opacity-35" />
       <AppSidebar
         active={activeSection}
         activeRoomId={activeRoomId}
@@ -695,6 +702,7 @@ export function AirGPTApp({ authUser, onSignOut }: AirGPTAppProps) {
         redeemedRewards={redeemedRewards}
         equippedAvatar={equippedAvatar}
         equippedBadge={equippedBadge}
+        equippedUiTheme={equippedUiTheme}
         transactions={transactions}
         onSelectFree={selectFreePlan}
         onPayWithCard={purchasePlanWithCard}

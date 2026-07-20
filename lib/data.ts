@@ -5,7 +5,6 @@ import {
   FileText,
   Users,
   BookOpen,
-  ClipboardList,
   CheckSquare,
   Calendar,
   Calculator,
@@ -64,7 +63,6 @@ export const navGroups: NavGroup[] = [
   {
     title: 'Work',
     items: [
-      { label: 'Assignment Workspace', icon: ClipboardList },
       { label: 'Documents', icon: FileText, active: true },
       { label: 'Record Lesson', icon: Mic },
       { label: 'Tasks', icon: CheckSquare },

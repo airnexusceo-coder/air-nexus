@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { formatPlanExpiry, PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
 import type { NexusTransaction } from '@/lib/nexus-points'
-import { avatarGradientFor, COSMETIC_CATALOG, DEFAULT_AVATAR_GRADIENT, type CosmeticCategory } from '@/lib/cosmetics'
+import { avatarGradientFor, COSMETIC_CATALOG, DEFAULT_AVATAR_GRADIENT, DEFAULT_UI_THEME, type CosmeticCategory, type UiThemeId } from '@/lib/cosmetics'
 import { VCE_COURSES } from '@/lib/courses/vce-catalog'
 import { cn } from '@/lib/utils'
 
@@ -26,6 +26,7 @@ type MarketplacePageProps = {
   redeemedRewards: string[]
   equippedAvatar: string | null
   equippedBadge: string | null
+  equippedUiTheme: UiThemeId
   transactions: NexusTransaction[]
   onSelectFree: () => void
   onPayWithCard: (plan: Exclude<NexusPlan, 'Free'>) => void
@@ -69,6 +70,7 @@ export function MarketplacePage({
   redeemedRewards,
   equippedAvatar,
   equippedBadge,
+  equippedUiTheme,
   transactions,
   onSelectFree,
   onPayWithCard,
@@ -80,6 +82,7 @@ export function MarketplacePage({
 }: MarketplacePageProps) {
   const avatarCosmetics = COSMETIC_CATALOG.filter((item) => item.category === 'avatar')
   const badgeCosmetics = COSMETIC_CATALOG.filter((item) => item.category === 'badge')
+  const uiThemeCosmetics = COSMETIC_CATALOG.filter((item) => item.category === 'ui' && item.uiTheme)
   const [coursePurchases, setCoursePurchases] = useState<CoursePurchase[]>([])
 
   useEffect(() => {
@@ -159,6 +162,51 @@ export function MarketplacePage({
                     {isCurrent ? 'Current Plan' : 'Select Free'}
                   </button>
                 )}
+              </article>
+            )
+          })}
+        </div>
+      </section>
+
+      <section aria-labelledby="ui-themes-heading">
+        <div className="glass mb-5 flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div><h3 id="ui-themes-heading" className="text-lg font-semibold">Workspace UI themes</h3><p className="mt-1 text-xs text-slate-500">Standard is included. Premium themes rewrite the live AirGPT workspace after you equip them.</p></div>
+          <div className="flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-white"><Gem className="size-4" /><span className="font-semibold">{nexusPoints.toLocaleString()} Points</span></div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <article className="ui-theme-card glass flex min-h-full flex-col rounded-3xl p-4">
+            <UiThemePreview theme={DEFAULT_UI_THEME} />
+            <div className="mt-4 flex items-center gap-2">
+              <h4 className="text-sm font-semibold"><span className="air-ui-name">Standard UI</span></h4>
+              {equippedUiTheme === DEFAULT_UI_THEME && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-200">Equipped</span>}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">The upgraded free base with interactive controls, soft depth, and clear study focus.</p>
+            <button type="button" disabled={equippedUiTheme === DEFAULT_UI_THEME} onClick={() => onEquip('ui', null)} className="secondary-action mt-4 w-full px-3 text-xs">{equippedUiTheme === DEFAULT_UI_THEME ? 'Equipped' : 'Equip Standard'}</button>
+          </article>
+          {uiThemeCosmetics.map((item) => {
+            const theme = item.uiTheme ?? DEFAULT_UI_THEME
+            const owned = redeemedRewards.includes(item.id)
+            const equipped = equippedUiTheme === theme
+            const affordable = nexusPoints >= item.cost
+            const costliest = item.marketplaceTag === 'Costliest'
+            return (
+              <article key={item.id} className={cn('ui-theme-card glass relative flex min-h-full flex-col rounded-3xl p-4', costliest && 'ui-theme-card--premium')}>
+                {item.marketplaceTag && <span className="absolute right-4 top-4 z-10 rounded-full border border-white/20 bg-black/35 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white backdrop-blur-md">{item.marketplaceTag}</span>}
+                <UiThemePreview theme={theme} />
+                <div className="mt-4 flex items-center gap-2">
+                  <h4 className="text-sm font-semibold"><span className="air-ui-name">{item.name}</span></h4>
+                  {equipped && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-medium text-emerald-200">Equipped</span>}
+                </div>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">{item.description}</p>
+                {!owned && <p className="mt-2 text-xs font-medium text-zinc-300">{item.cost.toLocaleString()} Points</p>}
+                <button
+                  type="button"
+                  disabled={equipped || (!owned && !affordable)}
+                  onClick={() => owned ? onEquip('ui', item.id) : onRedeem(item)}
+                  className="secondary-action mt-auto w-full px-3 text-xs"
+                >
+                  {equipped ? 'Equipped' : owned ? 'Equip UI' : affordable ? 'Redeem UI' : 'Not enough points'}
+                </button>
               </article>
             )
           })}
@@ -283,6 +331,22 @@ export function MarketplacePage({
   )
 }
 
+
+function UiThemePreview({ theme }: { theme: UiThemeId }) {
+  return (
+    <div className={cn('ui-theme-preview', `ui-theme-preview--${theme}`)}>
+      <span className="ui-theme-preview__stars" />
+      <span className="ui-theme-preview__field ui-theme-preview__field--one" />
+      <span className="ui-theme-preview__field ui-theme-preview__field--two" />
+      <span className="ui-theme-preview__trail" />
+      <span className="ui-theme-preview__shell">
+        <span className="ui-theme-preview__logo">A</span>
+        <span className="ui-theme-preview__title"><span className="air-ui-name">Parth</span>, ready?</span>
+        <span className="ui-theme-preview__input"><Sparkles className="size-3.5" /><span /></span>
+      </span>
+    </div>
+  )
+}
 function SummaryItem({ icon: Icon, label, value }: { icon: typeof Crown; label: string; value: string }) {
   return <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><Icon className="size-4" /></span><div><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div></div>
 }

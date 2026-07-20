@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createTask, listTasks } from '@/lib/tasks/tasks'
+import { checkDueSoonTaskNotifications, createTask, listTasks } from '@/lib/tasks/tasks'
 import { handleAirnexusError, readBody, requireAuth } from '@/lib/airnexus/http'
 
 export const runtime = 'nodejs'
@@ -8,6 +8,7 @@ export async function GET() {
   try {
     const auth = await requireAuth()
     const tasks = await listTasks(auth)
+    void checkDueSoonTaskNotifications(auth, tasks)
     return NextResponse.json({ tasks })
   } catch (error) {
     return handleAirnexusError(error)

@@ -901,3 +901,623 @@ body {
    =================================================================== */
 .cc-meter-track { height: 6px; border-radius: 999px; background: rgb(255 255 255 / 12%); overflow: hidden; }
 .cc-meter-fill { height: 100%; border-radius: 999px; background: rgb(255 255 255 / 82%); transition: width 120ms linear; }
+
+
+/* ===================================================================
+   AirGPT marketplace UI themes
+   Standard stays free; paid UI cosmetics apply these variables and
+   theme layers across the live workspace after being equipped.
+   =================================================================== */
+.air-app-shell {
+  --air-accent: #ff7ac8;
+  --air-accent-strong: #ff4fad;
+  --air-accent-soft: rgb(255 122 200 / 18%);
+  --air-composer-bg: rgb(9 12 24 / 72%);
+  --air-composer-border: rgb(255 255 255 / 18%);
+  --air-panel-bg: rgb(12 16 30 / 62%);
+  --air-panel-border: rgb(255 255 255 / 12%);
+  --air-glow: rgb(255 122 200 / 28%);
+  background:
+    linear-gradient(135deg, #080a14 0%, #101827 48%, #071819 100%);
+}
+
+.air-app-grid {
+  transition: opacity 220ms ease, filter 220ms ease;
+}
+
+.air-ui-name {
+  display: inline-block;
+  color: #ff72c8;
+  background: linear-gradient(90deg, #ff2d9a 0%, #ff63c7 22%, #ff8bdd 48%, #f43fb3 74%, #fb7185 100%);
+  background-size: 100% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 30px rgb(255 79 175 / 34%);
+}
+
+.air-app-shell .primary-action {
+  background: linear-gradient(135deg, #ffffff 0%, #ffd3ec 46%, var(--air-accent) 100%);
+  box-shadow: 0 16px 36px -18px var(--air-glow), inset 0 1px rgb(255 255 255 / 52%);
+}
+
+.air-app-shell .secondary-action,
+.air-app-shell .interactive-icon,
+.air-prompt-chip {
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+}
+
+.air-app-shell .secondary-action:hover,
+.air-app-shell .interactive-icon:hover,
+.air-prompt-chip:hover {
+  border-color: rgb(255 122 200 / 34%);
+  box-shadow: 0 14px 34px -24px var(--air-glow);
+}
+
+.air-chat-landing,
+.air-chat-shell {
+  --typing-energy: 0;
+  --typing-left: -30%;
+  --typing-width: 36%;
+  --typing-shift: 0%;
+  --typing-opacity: .18;
+  --typing-lift: 0px;
+  --typing-scale: 1;
+  --typing-ribbon-shift: 0rem;
+  --pointer-backdrop-x: 0px;
+  --pointer-backdrop-y: 0px;
+  --pointer-field-x: 0px;
+  --pointer-field-y: 0px;
+  --pointer-field-inverse-x: 0px;
+  --pointer-field-inverse-y: 0px;
+  --pointer-ribbon-x: 0px;
+  --pointer-ribbon-y: 0px;
+  --pointer-ribbon-inverse-x: 0px;
+  --pointer-ribbon-inverse-y: 0px;
+  isolation: isolate;
+}
+
+.air-theme-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, rgb(255 255 255 / 4%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 3%) 1px, transparent 1px),
+    radial-gradient(ellipse 90% 42% at 50% 102%, rgb(255 122 200 / 12%), transparent 68%),
+    linear-gradient(135deg, #080a14 0%, #111827 52%, #071819 100%);
+  background-size: 54px 54px, 54px 54px, auto, auto;
+  transform: translate3d(var(--pointer-backdrop-x), var(--pointer-backdrop-y), 0);
+  transition: filter 220ms ease, transform 120ms linear, opacity 220ms ease;
+}
+
+.air-chat-landing:hover .air-theme-backdrop,
+.air-chat-shell:hover .air-theme-backdrop {
+  filter: brightness(1.08) saturate(1.08);
+}
+
+.air-theme-stars,
+.air-theme-field,
+.air-theme-ribbon {
+  position: absolute;
+  display: block;
+}
+
+.air-theme-stars {
+  inset: 0;
+  opacity: .52;
+  background-image:
+    radial-gradient(circle at 18% 24%, rgb(255 255 255 / 70%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 62% 18%, rgb(255 255 255 / 58%) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 76% 70%, rgb(255 255 255 / 44%) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 32% 76%, rgb(255 122 200 / 62%) 0 1px, transparent 1.7px);
+  background-size: 220px 180px, 310px 250px, 260px 210px, 360px 300px;
+}
+
+.air-theme-field--one {
+  left: -12%;
+  top: 8%;
+  width: 42rem;
+  height: 22rem;
+  border-radius: 42% 58% 46% 54%;
+  background: linear-gradient(135deg, rgb(255 255 255 / 8%), transparent 70%);
+  opacity: .45;
+  transform: translate3d(var(--pointer-field-x), var(--pointer-field-y), 0) rotate(-12deg);
+}
+
+.air-theme-field--two {
+  right: -10%;
+  bottom: -4%;
+  width: 48rem;
+  height: 24rem;
+  border-radius: 56% 44% 50% 50%;
+  background: linear-gradient(135deg, var(--air-accent-soft), transparent 72%);
+  opacity: .58;
+  transform: translate3d(var(--pointer-field-inverse-x), var(--pointer-field-inverse-y), 0) rotate(-8deg);
+}
+
+.air-theme-ribbon {
+  height: 2px;
+  border-radius: 999px;
+  opacity: .7;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 74%), var(--air-accent), transparent);
+  box-shadow: 0 0 24px var(--air-glow);
+  transform-origin: center;
+}
+
+.air-theme-ribbon--one {
+  left: 10%;
+  right: -18%;
+  bottom: 22%;
+  transform: translate3d(var(--pointer-ribbon-x), var(--pointer-ribbon-y), 0) rotate(-8deg);
+}
+
+.air-theme-ribbon--two {
+  left: -8%;
+  right: 24%;
+  bottom: 13%;
+  opacity: .42;
+  transform: translate3d(var(--pointer-ribbon-inverse-x), var(--pointer-ribbon-inverse-y), 0) rotate(8deg);
+}
+
+.air-chat-landing:hover .air-theme-ribbon--one,
+.air-chat-shell:hover .air-theme-ribbon--one {
+  transform: translate3d(var(--pointer-ribbon-x), calc(var(--pointer-ribbon-y) - 6px), 0) rotate(-7deg);
+}
+
+.air-chat-landing:hover .air-theme-ribbon--two,
+.air-chat-shell:hover .air-theme-ribbon--two {
+  transform: translate3d(var(--pointer-ribbon-inverse-x), calc(var(--pointer-ribbon-y) + 7px), 0) rotate(9deg);
+}
+
+.air-landing-logo {
+  filter: drop-shadow(0 18px 32px rgb(0 0 0 / 38%)) drop-shadow(0 0 24px var(--air-glow));
+  transition: transform 220ms ease, filter 220ms ease;
+}
+
+.air-chat-landing:hover .air-landing-logo {
+  transform: translateY(-3px) scale(1.035);
+}
+
+.air-landing-composer,
+.air-chat-composer {
+  background: var(--air-composer-bg);
+  border-color: var(--air-composer-border);
+  box-shadow: inset 0 1px rgb(255 255 255 / 8%), 0 18px 60px -36px rgb(0 0 0 / 90%);
+}
+
+.air-landing-composer:hover,
+.air-chat-composer:hover,
+.air-landing-composer:focus-within,
+.air-chat-composer:focus-within {
+  transform: translateY(-2px);
+  border-color: rgb(255 122 200 / 40%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 12%), 0 24px 76px -42px var(--air-glow), 0 0 0 1px rgb(255 122 200 / 16%);
+}
+
+.air-typing-wave {
+  display: none;
+}
+
+.air-prompt-chip {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  padding: .5rem .85rem;
+  color: rgb(244 244 245 / 88%);
+  background: rgb(255 255 255 / 6%);
+  font-size: .78rem;
+  font-weight: 600;
+  transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.air-prompt-chip:hover {
+  transform: translateY(-2px);
+  background: rgb(255 255 255 / 10%);
+}
+
+.air-ui-sent .glass,
+.air-ui-sent .glass-input,
+.air-ui-sent .glass-subtle {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--air-panel-bg) 86%, transparent), rgb(4 7 18 / 56%));
+  border-color: color-mix(in srgb, var(--air-panel-border) 80%, var(--air-accent));
+  backdrop-filter: blur(34px) saturate(165%);
+  -webkit-backdrop-filter: blur(34px) saturate(165%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 10%), 0 30px 95px -58px var(--air-glow);
+}
+
+.air-ui-theme--lunar-path {
+  --air-accent: #ff88d0;
+  --air-accent-strong: #ff55b7;
+  --air-accent-soft: rgb(255 136 208 / 17%);
+  --air-composer-bg: rgb(244 248 255 / 82%);
+  --air-composer-border: rgb(255 255 255 / 58%);
+  --air-panel-bg: rgb(15 24 45 / 58%);
+  --air-glow: rgb(180 212 255 / 34%);
+  background: linear-gradient(135deg, #081229 0%, #0f2850 46%, #15233f 100%);
+}
+
+.air-ui-theme--lunar-path .air-theme-backdrop {
+  background:
+    radial-gradient(circle at 16% 12%, rgb(235 244 255 / 88%) 0 3.8rem, rgb(159 196 255 / 18%) 4.2rem, transparent 8rem),
+    linear-gradient(to bottom, rgb(255 255 255 / 4%) 1px, transparent 1px),
+    radial-gradient(ellipse 70% 32% at 20% 75%, rgb(210 229 255 / 20%), transparent 65%),
+    radial-gradient(ellipse 78% 36% at 85% 74%, rgb(180 212 255 / 17%), transparent 66%),
+    linear-gradient(180deg, #06142e 0%, #143262 55%, #0a1832 100%);
+  background-size: auto, 54px 54px, auto, auto, auto;
+}
+
+.air-ui-theme--lunar-path .air-theme-ribbon {
+  background: linear-gradient(90deg, transparent, rgb(229 242 255 / 85%), #ff88d0, transparent);
+}
+
+.air-ui-theme--daybreak {
+  --air-accent: #ff6cbd;
+  --air-accent-strong: #e23f9c;
+  --air-accent-soft: rgb(255 108 189 / 14%);
+  --air-composer-bg: rgb(255 255 255 / 78%);
+  --air-composer-border: rgb(255 255 255 / 82%);
+  --air-panel-bg: rgb(255 255 255 / 62%);
+  --air-panel-border: rgb(255 255 255 / 42%);
+  --air-glow: rgb(63 139 207 / 22%);
+  background: linear-gradient(135deg, #edf8ff 0%, #d8ecfb 52%, #f8fbff 100%);
+}
+
+.air-ui-theme--daybreak .air-theme-backdrop {
+  background:
+    radial-gradient(ellipse 54% 30% at 20% 25%, rgb(255 255 255 / 72%), transparent 70%),
+    radial-gradient(ellipse 58% 34% at 88% 25%, rgb(255 255 255 / 64%), transparent 72%),
+    linear-gradient(120deg, rgb(255 255 255 / 42%) 0%, transparent 38%),
+    linear-gradient(180deg, #e9f7ff 0%, #dceffc 50%, #f8fbff 100%);
+}
+
+.air-ui-theme--daybreak .air-chat-landing h1,
+.air-ui-theme--daybreak .air-chat-landing p {
+  color: #172033;
+}
+
+.air-ui-theme--daybreak .air-prompt-chip,
+.air-ui-theme--daybreak .air-landing-composer,
+.air-ui-theme--daybreak .air-chat-composer {
+  color: #172033;
+  background: rgb(255 255 255 / 72%);
+}
+
+.air-ui-theme--daybreak .air-landing-composer input,
+.air-ui-theme--daybreak .air-chat-composer textarea {
+  color: #172033;
+}
+
+.air-ui-theme--neon-city {
+  --air-accent: #ff8aca;
+  --air-accent-strong: #ff5db5;
+  --air-accent-soft: rgb(0 190 255 / 18%);
+  --air-composer-bg: rgb(2 13 27 / 86%);
+  --air-composer-border: rgb(36 197 255 / 30%);
+  --air-panel-bg: rgb(3 18 36 / 72%);
+  --air-panel-border: rgb(35 184 255 / 18%);
+  --air-glow: rgb(0 205 255 / 34%);
+  background: linear-gradient(135deg, #010813 0%, #041a35 52%, #020713 100%);
+}
+
+.air-ui-theme--neon-city .air-theme-backdrop {
+  background:
+    linear-gradient(to top, rgb(0 185 255 / 30%) 0 2px, transparent 2px 100%),
+    linear-gradient(90deg, transparent 0 13%, rgb(0 190 255 / 25%) 13% 13.5%, transparent 13.5% 19%, rgb(0 190 255 / 18%) 19% 19.4%, transparent 19.4% 100%),
+    radial-gradient(ellipse 54% 28% at 60% 70%, rgb(0 170 255 / 20%), transparent 70%),
+    linear-gradient(180deg, #000914 0%, #041d3b 58%, #020811 100%);
+  background-size: 100% 86px, 420px 100%, auto, auto;
+}
+
+.air-ui-theme--neon-city .air-theme-ribbon {
+  background: linear-gradient(90deg, transparent, #25d8ff, #ff7ac8, transparent);
+}
+
+.air-ui-theme--plasma-core {
+  --air-accent: #ff74bd;
+  --air-accent-strong: #ff3f9f;
+  --air-accent-soft: rgb(255 93 31 / 20%);
+  --air-composer-bg: rgb(8 9 14 / 88%);
+  --air-composer-border: rgb(255 101 41 / 22%);
+  --air-panel-bg: rgb(19 11 14 / 72%);
+  --air-panel-border: rgb(255 101 41 / 18%);
+  --air-glow: rgb(255 92 26 / 36%);
+  background: linear-gradient(135deg, #09070b 0%, #17090d 48%, #280d07 100%);
+}
+
+.air-ui-theme--plasma-core .air-theme-backdrop {
+  background:
+    linear-gradient(to right, rgb(255 90 24 / 9%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 90 24 / 7%) 1px, transparent 1px),
+    radial-gradient(ellipse 48% 24% at 10% 22%, rgb(255 70 24 / 44%), transparent 72%),
+    radial-gradient(ellipse 42% 25% at 92% 58%, rgb(255 126 23 / 52%), transparent 74%),
+    linear-gradient(180deg, #08070b 0%, #15090e 55%, #260b05 100%);
+  background-size: 58px 58px, 58px 58px, auto, auto, auto;
+}
+
+.air-ui-theme--plasma-core .air-theme-ribbon {
+  background: linear-gradient(90deg, transparent, #ff5b1c, #ffd061, transparent);
+}
+
+.air-ui-theme--starlit-focus {
+  --air-accent: #ff88d4;
+  --air-accent-strong: #ff5cbc;
+  --air-accent-soft: rgb(196 212 255 / 18%);
+  --air-composer-bg: rgb(13 18 34 / 78%);
+  --air-composer-border: rgb(198 215 255 / 48%);
+  --air-panel-bg: rgb(9 12 24 / 74%);
+  --air-panel-border: rgb(198 215 255 / 18%);
+  --air-glow: rgb(198 215 255 / 36%);
+  background: linear-gradient(135deg, #02050d 0%, #0b1020 52%, #03060f 100%);
+}
+
+.air-ui-theme--starlit-focus .air-theme-backdrop {
+  background:
+    radial-gradient(ellipse 75% 18% at 50% 57%, rgb(198 215 255 / 18%), transparent 72%),
+    linear-gradient(180deg, #02050d 0%, #0b1020 58%, #02050d 100%);
+}
+
+.air-ui-theme--starlit-focus .air-theme-ribbon {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(214 226 255 / 95%), #ff88d4, transparent);
+  transform: translate3d(var(--pointer-ribbon-x), var(--pointer-ribbon-y), 0) translateX(var(--typing-ribbon-shift)) rotate(-4deg);
+}
+
+.air-ui-theme--starlit-focus .air-typing-wave {
+  position: absolute;
+  inset-block: 10%;
+  left: var(--typing-left);
+  display: block;
+  width: var(--typing-width);
+  border-radius: 999px;
+  opacity: var(--typing-opacity);
+  background: linear-gradient(90deg, transparent, rgb(214 226 255 / 48%), rgb(255 136 212 / 62%), transparent);
+  filter: blur(10px);
+  transform: translateX(var(--typing-shift)) skewX(-18deg);
+  transition: width 140ms ease, transform 140ms ease, opacity 140ms ease, left 140ms ease;
+  will-change: left, width, opacity, transform, filter;
+}
+
+.air-ui-theme--starlit-focus .air-has-input .air-typing-wave {
+  animation: air-typing-wave-live 1.65s ease-in-out infinite alternate;
+}
+
+.air-ui-theme--starlit-focus .air-has-input .air-theme-ribbon--two {
+  animation: air-theme-live-ribbon 1.9s ease-in-out infinite alternate;
+}
+
+.air-ui-theme--starlit-focus .air-landing-composer,
+.air-ui-theme--starlit-focus .air-chat-composer {
+  border-color: rgb(205 220 255 / 48%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 12%), 0 0 0 1px rgb(205 220 255 / 22%), 0 0 48px -8px rgb(205 220 255 / 36%);
+  transform: translateY(var(--typing-lift)) scale(var(--typing-scale));
+}
+
+.air-chat-composer > :not(.air-typing-wave),
+.air-landing-composer > :not(.air-typing-wave) {
+  position: relative;
+  z-index: 1;
+}
+
+.ui-theme-card {
+  min-height: 24rem;
+  transition: transform 190ms ease, border-color 190ms ease, box-shadow 190ms ease, filter 190ms ease;
+}
+
+.ui-theme-card:hover {
+  transform: translateY(-4px);
+  border-color: rgb(255 122 200 / 34%);
+  box-shadow: inset 0 1px rgb(255 255 255 / 10%), 0 28px 70px -48px rgb(255 122 200 / 54%);
+}
+
+.ui-theme-card--premium {
+  border-color: rgb(255 136 212 / 28%);
+}
+
+.ui-theme-preview {
+  position: relative;
+  min-height: 11rem;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 1.25rem;
+  background: #071018;
+  box-shadow: inset 0 1px rgb(255 255 255 / 10%);
+  transition: transform 220ms ease, filter 220ms ease;
+}
+
+.ui-theme-card:hover .ui-theme-preview {
+  transform: scale(1.018);
+  filter: saturate(1.12) brightness(1.08);
+}
+
+.ui-theme-preview__stars,
+.ui-theme-preview__field,
+.ui-theme-preview__trail,
+.ui-theme-preview__shell {
+  position: absolute;
+  display: block;
+}
+
+.ui-theme-preview__stars {
+  inset: 0;
+  opacity: .45;
+  background-image:
+    radial-gradient(circle at 16% 20%, rgb(255 255 255 / 72%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 64% 16%, rgb(255 255 255 / 54%) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 78% 72%, rgb(255 255 255 / 48%) 0 1px, transparent 1.4px);
+  background-size: 95px 75px, 126px 92px, 110px 86px;
+}
+
+.ui-theme-preview__field--one {
+  left: -20%;
+  top: 4%;
+  width: 78%;
+  height: 44%;
+  border-radius: 42% 58% 50% 50%;
+  background: linear-gradient(135deg, rgb(255 255 255 / 15%), transparent 72%);
+}
+
+.ui-theme-preview__field--two {
+  right: -18%;
+  bottom: -10%;
+  width: 80%;
+  height: 48%;
+  border-radius: 58% 42% 48% 52%;
+  background: linear-gradient(135deg, rgb(255 122 200 / 18%), transparent 72%);
+}
+
+.ui-theme-preview__trail {
+  left: -10%;
+  right: -20%;
+  bottom: 28%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 72%), #ff7ac8, transparent);
+  box-shadow: 0 0 18px rgb(255 122 200 / 36%);
+  transform: rotate(-5deg);
+}
+
+.ui-theme-preview__shell {
+  inset: 18% 12%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .52rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1rem;
+  background: rgb(0 0 0 / 18%);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+}
+
+.ui-theme-preview__logo {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: .7rem;
+  color: #0a0f1d;
+  background: rgb(255 255 255 / 90%);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.ui-theme-preview__title {
+  font-size: .78rem;
+  font-weight: 750;
+  color: white;
+}
+
+.ui-theme-preview__input {
+  display: flex;
+  width: min(82%, 13rem);
+  align-items: center;
+  gap: .42rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 999px;
+  padding: .42rem .55rem;
+  color: rgb(255 255 255 / 76%);
+  background: rgb(255 255 255 / 9%);
+}
+
+.ui-theme-preview__input span {
+  display: block;
+  height: .35rem;
+  flex: 1;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 36%);
+}
+
+.ui-theme-preview--standard {
+  background: linear-gradient(135deg, #071018, #111827 52%, #071819);
+}
+.ui-theme-preview--lunar-path {
+  background:
+    radial-gradient(circle at 18% 18%, rgb(236 246 255 / 86%) 0 1.3rem, rgb(192 218 255 / 18%) 1.45rem, transparent 2.8rem),
+    linear-gradient(180deg, #06142e, #143262 58%, #0a1832);
+}
+.ui-theme-preview--daybreak {
+  background:
+    radial-gradient(ellipse 50% 28% at 18% 18%, rgb(255 255 255 / 74%), transparent 70%),
+    radial-gradient(ellipse 58% 34% at 86% 24%, rgb(255 255 255 / 58%), transparent 72%),
+    linear-gradient(180deg, #eaf8ff, #dceffc 56%, #f9fcff);
+}
+.ui-theme-preview--daybreak .ui-theme-preview__title,
+.ui-theme-preview--daybreak .ui-theme-preview__input {
+  color: #162033;
+}
+.ui-theme-preview--daybreak .ui-theme-preview__shell {
+  background: rgb(255 255 255 / 44%);
+}
+.ui-theme-preview--daybreak .ui-theme-preview__input {
+  background: rgb(255 255 255 / 58%);
+}
+.ui-theme-preview--neon-city {
+  background:
+    linear-gradient(90deg, transparent 0 14%, rgb(37 216 255 / 22%) 14% 14.5%, transparent 14.5% 100%),
+    linear-gradient(180deg, #010914, #041d3b 58%, #020811);
+  background-size: 150px 100%, auto;
+}
+.ui-theme-preview--neon-city .ui-theme-preview__trail { background: linear-gradient(90deg, transparent, #25d8ff, #ff7ac8, transparent); }
+.ui-theme-preview--plasma-core {
+  background:
+    linear-gradient(to right, rgb(255 90 24 / 8%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 90 24 / 6%) 1px, transparent 1px),
+    radial-gradient(ellipse 48% 25% at 8% 22%, rgb(255 70 24 / 42%), transparent 72%),
+    radial-gradient(ellipse 42% 25% at 94% 60%, rgb(255 126 23 / 48%), transparent 74%),
+    linear-gradient(180deg, #08070b, #17090d 58%, #280d07);
+  background-size: 22px 22px, 22px 22px, auto, auto, auto;
+}
+.ui-theme-preview--plasma-core .ui-theme-preview__trail { background: linear-gradient(90deg, transparent, #ff5b1c, #ffd061, transparent); }
+.ui-theme-preview--starlit-focus {
+  background:
+    radial-gradient(ellipse 74% 17% at 50% 56%, rgb(198 215 255 / 22%), transparent 72%),
+    linear-gradient(180deg, #02050d, #0b1020 60%, #02050d);
+}
+.ui-theme-preview--starlit-focus .ui-theme-preview__input {
+  border-color: rgb(205 220 255 / 52%);
+  box-shadow: 0 0 22px rgb(205 220 255 / 25%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .air-theme-stars { animation: air-theme-stars-drift 22s linear infinite alternate; }
+  .air-ui-theme--neon-city .air-theme-ribbon--one,
+  .air-ui-theme--starlit-focus .air-theme-ribbon--one { animation: air-theme-ribbon-scan 5.5s ease-in-out infinite alternate; }
+  .ui-theme-card:hover .ui-theme-preview__trail { transform: translateY(-3px) rotate(-4deg); }
+}
+
+@keyframes air-theme-stars-drift {
+  to { transform: translate3d(-1.5rem, 1rem, 0); }
+}
+
+@keyframes air-theme-ribbon-scan {
+  to { translate: 2.5rem -0.7rem; opacity: .88; }
+}
+
+@keyframes air-typing-wave-live {
+  to {
+    filter: blur(15px) brightness(1.18);
+    transform: translateX(var(--typing-shift)) skewX(-10deg) scaleX(1.08);
+  }
+}
+
+@keyframes air-theme-live-ribbon {
+  to { opacity: .86; filter: brightness(1.35); }
+}
+
+@media (max-width: 640px) {
+  .air-theme-field--one,
+  .air-theme-field--two { opacity: .34; }
+  .air-landing-composer { border-radius: 1.4rem; }
+  .ui-theme-card { min-height: 22rem; }
+}
+
+

@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { readSupabaseRestJson, supabaseRestFetch, SupabaseRequestError, type ServerAuthSession } from '@/lib/supabase/server'
+import { createPersonalTaskNotification, hasNotificationForTask } from '@/lib/notifications/notifications'
 
 /**
  * Real, persisted personal study tasks — backed by migration 0010. Replaces
@@ -107,7 +108,11 @@ export async function createTask(
   const rows = await readSupabaseRestJson<TaskRow[]>(response, 'Could not create task')
   const row = rows[0]
   if (!row) throw new SupabaseRequestError('Could not create task.', 502)
-  return toDTO(row)
+  const task = toDTO(row)
+  if (task.priority === 'High') {
+    void createPersonalTaskNotification(auth, 'task_high_priority', 'High priority task', `"${task.title}" was marked high priority.`, task.id)
+  }
+  return task
 }
 
 export async function updateTask(
@@ -131,7 +136,38 @@ export async function updateTask(
   const rows = await readSupabaseRestJson<TaskRow[]>(response, 'Could not update task')
   const row = rows[0]
   if (!row) throw new SupabaseRequestError('Task not found.', 404)
-  return toDTO(row)
+  const task = toDTO(row)
+  if (patch.priority !== undefined && task.priority === 'High') {
+    void createPersonalTaskNotification(auth, 'task_high_priority', 'High priority task', `"${task.title}" was marked high priority.`, task.id)
+  }
+  return task
+}
+
+/**
+ * Best-effort reminder pass for High-priority, not-yet-Done tasks due within
+ * 24 hours — called when the Tasks page loads (see /api/tasks GET) rather
+ * than on a cron, since that is the only real "check-in" moment this app
+ * has. Skips tasks that already have a due-soon notification so reopening
+ * the page repeatedly does not spam duplicates.
+ */
+export async function checkDueSoonTaskNotifications(auth: ServerAuthSession, tasks: TaskDTO[]): Promise<void> {
+  const now = Date.now()
+  const soon = now + 24 * 60 * 60 * 1000
+  const candidates = tasks.filter((task) => task.priority === 'High' && task.status !== 'Done' && task.dueAt && new Date(task.dueAt).getTime() >= now && new Date(task.dueAt).getTime() <= soon)
+  for (const task of candidates) {
+    const alreadyNotified = await hasNotificationForTask(auth, 'task_due_soon', task.id)
+    if (alreadyNotified) continue
+    await createPersonalTaskNotification(auth, 'task_due_soon', 'Task due soon', `"${task.title}" is due ${formatDueSoon(task.dueAt)}.`, task.id)
+  }
+}
+
+function formatDueSoon(dueAt: string | null): string {
+  if (!dueAt) return 'soon'
+  const date = new Date(dueAt)
+  const hours = Math.round((date.getTime() - Date.now()) / (60 * 60 * 1000))
+  if (hours <= 1) return 'within the hour'
+  if (hours < 24) return `in about ${hours} hours`
+  return 'tomorrow'
 }
 
 export async function deleteTask(auth: ServerAuthSession, taskId: string): Promise<void> {

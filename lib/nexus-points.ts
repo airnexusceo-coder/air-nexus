@@ -1,4 +1,5 @@
 import type { NexusPlan } from '@/lib/plans'
+import { DEFAULT_UI_THEME, isUiThemeId, type UiThemeId } from '@/lib/cosmetics'
 
 export type NexusTransaction = {
   id: string
@@ -18,6 +19,7 @@ export type NexusRewardsState = {
   lastDailyLogin: string | null
   equippedAvatar: string | null
   equippedBadge: string | null
+  equippedUiTheme: UiThemeId
 }
 
 export const NEXUS_REWARDS_STORAGE_KEY = 'airnexus-nexus-rewards-v1'
@@ -68,6 +70,7 @@ export function parseRewardsState(value: string | null): NexusRewardsState | nul
       lastDailyLogin: typeof parsed.lastDailyLogin === 'string' ? parsed.lastDailyLogin : null,
       equippedAvatar: typeof parsed.equippedAvatar === 'string' ? parsed.equippedAvatar : null,
       equippedBadge: typeof parsed.equippedBadge === 'string' ? parsed.equippedBadge : null,
+      equippedUiTheme: isUiThemeId(parsed.equippedUiTheme) ? parsed.equippedUiTheme : DEFAULT_UI_THEME,
     }
   } catch {
     return null

@@ -6,7 +6,7 @@ import { createAiAreaLessonPack } from '@/lib/courses/ai-lesson-pack'
 import { createAiAreaQuiz } from '@/lib/courses/ai-area-quiz'
 import { toAreaQuizPreview, type AreaQuiz } from '@/lib/courses/area-quiz-types'
 import type { AiLessonSlide } from '@/lib/courses/lesson-pack-types'
-import type { AreaProgressSummary, AreaQuizGradeResult, CourseAreaSessionDTO } from '@/lib/courses/area-session-types'
+import type { AreaProgressSummary, AreaQuizGradeResult, CourseAreaSessionDTO, CourseQuizAnalytics, StudyAnalyticsSummary } from '@/lib/courses/area-session-types'
 
 /**
  * Real mastery-gated Area of Study study loop — backed by migration 0022.
@@ -162,6 +162,48 @@ export async function submitAreaQuizAttempt(auth: ServerAuthSession, sessionId: 
   if (!patchResponse.ok) throw new SupabaseRequestError('Could not save your quiz result.', patchResponse.status)
 
   return { score, total, passed, quiz: row.quiz, answers: normalisedAnswers }
+}
+
+/** Cross-course rollup used by the Analytics page — real numbers derived from every course_area_sessions row the user has, never invented. */
+export async function getStudyAnalyticsSummary(auth: ServerAuthSession): Promise<StudyAnalyticsSummary> {
+  const response = await supabaseRestFetch(
+    auth.accessToken,
+    `/course_area_sessions?user_id=eq.${encode(auth.user.id)}&select=course_id,area_id,quiz_attempted,quiz_passed,quiz_score,quiz_total`,
+  )
+  const rows = await readSupabaseRestJson<Array<Pick<SessionRow, 'course_id' | 'area_id' | 'quiz_attempted' | 'quiz_passed' | 'quiz_score' | 'quiz_total'>>>(response, 'Could not load study analytics')
+
+  type CourseBucket = { areas: Set<string>; mastered: Set<string>; attempts: number; scoreSum: number; totalSum: number }
+  const byCourse = new Map<string, CourseBucket>()
+  for (const row of rows) {
+    const bucket = byCourse.get(row.course_id) ?? { areas: new Set<string>(), mastered: new Set<string>(), attempts: 0, scoreSum: 0, totalSum: 0 }
+    bucket.areas.add(row.area_id)
+    if (row.quiz_passed) bucket.mastered.add(row.area_id)
+    if (row.quiz_attempted && row.quiz_score !== null && row.quiz_total) {
+      bucket.attempts += 1
+      bucket.scoreSum += row.quiz_score
+      bucket.totalSum += row.quiz_total
+    }
+    byCourse.set(row.course_id, bucket)
+  }
+
+  const byCourseSummary: CourseQuizAnalytics[] = [...byCourse.entries()].map(([courseId, bucket]) => ({
+    courseId,
+    areasStudied: bucket.areas.size,
+    areasMastered: bucket.mastered.size,
+    quizAttempts: bucket.attempts,
+    averageScorePercent: bucket.totalSum > 0 ? Math.round((bucket.scoreSum / bucket.totalSum) * 100) : null,
+  }))
+
+  const scoreSum = [...byCourse.values()].reduce((sum, bucket) => sum + bucket.scoreSum, 0)
+  const totalSum = [...byCourse.values()].reduce((sum, bucket) => sum + bucket.totalSum, 0)
+
+  return {
+    totalAreasStudied: new Set(rows.map((row) => `${row.course_id}:${row.area_id}`)).size,
+    totalAreasMastered: byCourseSummary.reduce((sum, course) => sum + course.areasMastered, 0),
+    totalQuizAttempts: byCourseSummary.reduce((sum, course) => sum + course.quizAttempts, 0),
+    averageScorePercent: totalSum > 0 ? Math.round((scoreSum / totalSum) * 100) : null,
+    byCourse: byCourseSummary,
+  }
 }
 
 export async function listAreaProgress(auth: ServerAuthSession, courseId: string, unit: number): Promise<AreaProgressSummary[]> {

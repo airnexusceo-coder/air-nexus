@@ -1,4 +1,4 @@
-export type NotificationType = 'room_invite' | 'task_assigned' | 'task_completed'
+export type NotificationType = 'room_invite' | 'task_assigned' | 'task_completed' | 'task_high_priority' | 'task_due_soon'
 
 export type NotificationDTO = {
   id: string
@@ -7,6 +7,7 @@ export type NotificationDTO = {
   body: string
   roomId: string | null
   taskId: string | null
+  personalTaskId: string | null
   read: boolean
   createdAt: string
 }

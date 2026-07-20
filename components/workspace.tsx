@@ -7,7 +7,9 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
   ArrowLeft,
@@ -24,7 +26,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Command,
-  ClipboardList,
   FilePlus2,
   Gauge,
   GraduationCap,
@@ -65,7 +66,7 @@ import { useVoiceInput } from '@/lib/voice/use-voice-input'
 import { publicModelName } from '@/lib/ai/model-router'
 import type { NexusPlan } from '@/lib/plans'
 import type { NexusTransaction } from '@/lib/nexus-points'
-import type { CosmeticCategory } from '@/lib/cosmetics'
+import type { CosmeticCategory, UiThemeId } from '@/lib/cosmetics'
 import type { RoomSummary } from '@/lib/rooms/types'
 import type { NoticeTone } from '@/components/airnexus-app'
 import { cn } from '@/lib/utils'
@@ -100,7 +101,6 @@ const CoursesPage = dynamic(() => import('@/components/courses-page').then((modu
 const PeopleHub = dynamic(() => import('@/components/people/people-hub').then((module) => module.PeopleHub), { loading: SectionLoading })
 const AiTutorPage = dynamic(() => import('@/components/ai-tutor-page').then((module) => module.AiTutorPage), { loading: SectionLoading })
 const AiToolsPage = dynamic(() => import('@/components/ai-tools-page').then((module) => module.AiToolsPage), { loading: SectionLoading })
-const AssignmentWorkspacePage = dynamic(() => import('@/components/assignment-workspace-page').then((module) => module.AssignmentWorkspacePage), { loading: SectionLoading })
 const CalculatorsPage = dynamic(() => import('@/components/calculators-page').then((module) => module.CalculatorsPage), { loading: SectionLoading })
 const DocsPage = dynamic(() => import('@/components/docs-page').then((module) => module.DocsPage), { loading: SectionLoading })
 const IntelligentDashboardPage = dynamic(() => import('@/components/intelligent-dashboard-page').then((module) => module.IntelligentDashboardPage), { loading: SectionLoading })
@@ -134,6 +134,7 @@ type WorkspaceProps = {
   redeemedRewards: string[]
   equippedAvatar: string | null
   equippedBadge: string | null
+  equippedUiTheme: UiThemeId
   transactions: NexusTransaction[]
   onSelectFree: () => void
   onPayWithCard: (plan: Exclude<NexusPlan, 'Free'>) => void
@@ -293,6 +294,7 @@ export function Workspace({
   redeemedRewards,
   equippedAvatar,
   equippedBadge,
+  equippedUiTheme,
   transactions,
   onSelectFree,
   onPayWithCard,
@@ -791,6 +793,7 @@ export function Workspace({
         redeemedRewards={redeemedRewards}
         equippedAvatar={equippedAvatar}
         equippedBadge={equippedBadge}
+        equippedUiTheme={equippedUiTheme}
         transactions={transactions}
         onSelectFree={onSelectFree}
         onPayWithCard={onPayWithCard}
@@ -813,6 +816,7 @@ export function Workspace({
           <ChatLanding
             profileName={profileName}
             draft={draft}
+            uiTheme={equippedUiTheme}
             onDraftChange={setDraft}
             isExiting={chatLandingExiting}
             onSubmit={() => { beginChatTransition(); void sendMessage() }}
@@ -822,6 +826,7 @@ export function Workspace({
         ) : (
         <FullPageChat
           draft={draft}
+          uiTheme={equippedUiTheme}
           messages={messages}
           chatHistory={chatHistory}
           activeChatId={activeChatId}
@@ -874,9 +879,71 @@ export function Workspace({
   )
 }
 
+const landingPrompts = [
+  { label: 'Summarize this topic', prompt: 'Summarize this topic clearly for my class: ', icon: BookOpen },
+  { label: "Explain like I'm 12", prompt: "Explain this like I'm 12, with a simple example: ", icon: Brain },
+  { label: 'Create a study plan', prompt: 'Create a realistic study plan for: ', icon: CalendarDays },
+]
+
+function themeMotionStyle(draft: string, uiTheme: UiThemeId): CSSProperties {
+  const typingEnergy = uiTheme === 'starlit-focus' ? Math.min(1, draft.length / 120) : 0
+  return {
+    '--typing-energy': typingEnergy.toFixed(3),
+    '--typing-left': (-30 + typingEnergy * 18).toFixed(2) + '%',
+    '--typing-width': (36 + typingEnergy * 50).toFixed(2) + '%',
+    '--typing-shift': (typingEnergy * 82).toFixed(2) + '%',
+    '--typing-opacity': (0.18 + typingEnergy * 0.62).toFixed(3),
+    '--typing-lift': (typingEnergy * -3).toFixed(2) + 'px',
+    '--typing-scale': (1 + typingEnergy * 0.01).toFixed(3),
+    '--typing-ribbon-shift': (typingEnergy * 5).toFixed(2) + 'rem',
+  } as CSSProperties
+}
+
+function updateThemePointer(event: ReactPointerEvent<HTMLElement>) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  const x = ((event.clientX - rect.left) / Math.max(rect.width, 1) - 0.5) * 2
+  const y = ((event.clientY - rect.top) / Math.max(rect.height, 1) - 0.5) * 2
+  event.currentTarget.style.setProperty('--pointer-backdrop-x', `${(-x * 8).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-backdrop-y', `${(-y * 8).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-field-x', `${(x * 22).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-field-y', `${(y * 16).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-field-inverse-x', `${(-x * 22).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-field-inverse-y', `${(-y * 16).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-ribbon-x', `${(x * 18).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-ribbon-y', `${(y * 10).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-ribbon-inverse-x', `${(-x * 18).toFixed(2)}px`)
+  event.currentTarget.style.setProperty('--pointer-ribbon-inverse-y', `${(-y * 10).toFixed(2)}px`)
+}
+
+function resetThemePointer(event: ReactPointerEvent<HTMLElement>) {
+  event.currentTarget.style.setProperty('--pointer-backdrop-x', '0px')
+  event.currentTarget.style.setProperty('--pointer-backdrop-y', '0px')
+  event.currentTarget.style.setProperty('--pointer-field-x', '0px')
+  event.currentTarget.style.setProperty('--pointer-field-y', '0px')
+  event.currentTarget.style.setProperty('--pointer-field-inverse-x', '0px')
+  event.currentTarget.style.setProperty('--pointer-field-inverse-y', '0px')
+  event.currentTarget.style.setProperty('--pointer-ribbon-x', '0px')
+  event.currentTarget.style.setProperty('--pointer-ribbon-y', '0px')
+  event.currentTarget.style.setProperty('--pointer-ribbon-inverse-x', '0px')
+  event.currentTarget.style.setProperty('--pointer-ribbon-inverse-y', '0px')
+}
+
+function ThemeBackdrop() {
+  return (
+    <div className="air-theme-backdrop" aria-hidden="true">
+      <span className="air-theme-stars" />
+      <span className="air-theme-field air-theme-field--one" />
+      <span className="air-theme-field air-theme-field--two" />
+      <span className="air-theme-ribbon air-theme-ribbon--one" />
+      <span className="air-theme-ribbon air-theme-ribbon--two" />
+    </div>
+  )
+}
+
 function ChatLanding({
   profileName,
   draft,
+  uiTheme,
   onDraftChange,
   isExiting,
   onSubmit,
@@ -885,6 +952,7 @@ function ChatLanding({
 }: {
   profileName: string
   draft: string
+  uiTheme: UiThemeId
   onDraftChange: (value: string) => void
   isExiting: boolean
   onSubmit: () => void
@@ -892,9 +960,16 @@ function ChatLanding({
   onOpenContext: () => void
 }) {
   const firstName = profileName.trim().split(/\s+/)[0] || 'there'
+  const themeStyle = themeMotionStyle(draft, uiTheme)
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col', isExiting && 'animate-landing-exit pointer-events-none')}>
-      <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
+    <div
+      style={themeStyle}
+      onPointerMove={updateThemePointer}
+      onPointerLeave={resetThemePointer}
+      className={cn('air-chat-landing relative flex min-h-0 flex-1 flex-col overflow-hidden', draft && 'air-has-input', isExiting && 'animate-landing-exit pointer-events-none')}
+    >
+      <ThemeBackdrop />
+      <div className="relative z-10 flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
         <button type="button" onClick={onOpenSidebar} aria-label="Open navigation" className="interactive-icon lg:hidden">
           <Menu className="size-5" />
         </button>
@@ -903,35 +978,47 @@ function ChatLanding({
           <PanelRightOpen className="size-5" />
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-16">
-        <div className="w-full max-w-2xl text-center">
-          <ThinkingLogo isThinking={false} className="mx-auto size-12" />
-          <h1 className="mt-6 text-3xl font-semibold tracking-tight text-white sm:text-4xl">{firstName}, ready to learn?</h1>
-          <p className="mt-2 text-sm text-slate-400">Ask a question, paste your notes, or tell AirGPT what you&apos;re studying.</p>
+      <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center px-4 pb-16">
+        <div className="w-full max-w-3xl text-center">
+          <ThinkingLogo isThinking={false} className="air-landing-logo mx-auto size-14" />
+          <h1 className="mt-6 text-3xl font-semibold tracking-tight text-white sm:text-5xl"><span className="air-ui-name">{firstName}</span>, ready to learn?</h1>
+          <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-300/85">Ask a question, paste your notes, or tell AirGPT what you&apos;re studying.</p>
           <form
             onSubmit={(event) => { event.preventDefault(); if (draft.trim()) onSubmit() }}
-            className="glass-input mt-8 flex items-center gap-2 rounded-2xl px-4 py-3.5 text-left"
+            className="air-landing-composer glass-input relative mt-8 flex items-center gap-2 overflow-hidden rounded-[2rem] px-4 py-3.5 text-left"
           >
-            <Sparkles className="size-5 shrink-0 text-zinc-300" />
+            <span className="air-typing-wave" aria-hidden="true" />
+            <Sparkles className="relative z-10 size-5 shrink-0 text-zinc-200" />
             <input
               value={draft}
               onChange={(event) => onDraftChange(event.target.value)}
-              placeholder="Ask AirGPT anything…"
+              placeholder="Ask AirGPT anything..."
               aria-label="Ask AirGPT"
-              className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-500"
+              className="relative z-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-slate-400"
             />
-            <button type="submit" disabled={!draft.trim()} aria-label="Send message" className="send-button">
+            <button type="submit" disabled={!draft.trim()} aria-label="Send message" className="send-button relative z-10">
               <ArrowUp className="size-4" />
             </button>
           </form>
+          <div className="mt-5 flex flex-wrap justify-center gap-2" aria-label="Quick study prompts">
+            {landingPrompts.map((item) => {
+              const Icon = item.icon
+              return (
+                <button key={item.label} type="button" onClick={() => onDraftChange(item.prompt)} className="air-prompt-chip">
+                  <Icon className="size-4" />
+                  <span>{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
     </div>
   )
 }
-
 function FullPageChat({
   draft,
+  uiTheme,
   messages,
   chatHistory,
   activeChatId,
@@ -969,6 +1056,7 @@ function FullPageChat({
   onInsertToDocument,
 }: {
   draft: string
+  uiTheme: UiThemeId
   messages: MainMessage[]
   chatHistory: ChatThread[]
   activeChatId: string
@@ -1007,9 +1095,17 @@ function FullPageChat({
 }) {
   const activeThread = chatHistory.find((thread) => thread.id === activeChatId)
   const lastMessage = messages[messages.length - 1]
+  const themeStyle = themeMotionStyle(draft, uiTheme)
   return (
-    <section className="animate-chat-enter premium-chat-shell flex min-h-0 flex-1 flex-col" aria-label="AirGPT full-page chat">
-      <div className="glass-subtle flex shrink-0 items-center justify-between gap-3 border-x-0 border-t-0 px-3 py-3 sm:px-5">
+    <section
+      style={themeStyle}
+      onPointerMove={updateThemePointer}
+      onPointerLeave={resetThemePointer}
+      className={cn('animate-chat-enter premium-chat-shell air-chat-shell air-ui-sent relative flex min-h-0 flex-1 flex-col overflow-hidden', draft && 'air-has-input')}
+      aria-label="AirGPT full-page chat"
+    >
+      <ThemeBackdrop />
+      <div className="glass-subtle relative z-10 flex shrink-0 items-center justify-between gap-3 border-x-0 border-t-0 px-3 py-3 sm:px-5">
         <button type="button" onClick={onBack} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-white/7 hover:text-white">
           <ArrowLeft className="size-4" />
           <span className="hidden sm:inline">Workspace</span>
@@ -1027,7 +1123,7 @@ function FullPageChat({
 
       <ChatHistoryStrip threads={chatHistory} activeChatId={activeChatId} searchQuery={chatSearchQuery} onSearchChat={onSearchChat} onSelectChat={onSelectChat} />
 
-      <div className="min-h-0 flex flex-1">
+      <div className="relative z-10 min-h-0 flex flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="scrollbar-thin min-h-0 flex-1 scroll-smooth overflow-y-auto px-3 py-7 sm:px-6 sm:py-10">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-7">
@@ -1079,7 +1175,8 @@ function FullPageChat({
           <div className="shrink-0 px-3 pb-4 sm:px-6 sm:pb-6">
             <div className="relative mx-auto w-full max-w-3xl">
               <AttachmentChips attachments={attachments} onRemove={onRemoveAttachment} />
-              <div className="glass-input glass-glow flex items-end gap-2 rounded-[2rem] px-3 py-3 sm:px-4">
+              <div className="air-chat-composer glass-input glass-glow relative flex items-end gap-2 overflow-hidden rounded-[2rem] px-3 py-3 sm:px-4">
+                <span className="air-typing-wave" aria-hidden="true" />
                 <input ref={fileInputRef} type="file" accept={DOCUMENT_ACCEPT} multiple onChange={onFilesAdded} className="sr-only" tabIndex={-1} />
                 <button type="button" onClick={onAttach} aria-label="Attach files" className="interactive-icon mb-0.5">
                   <Paperclip className="size-5" />
@@ -1386,6 +1483,7 @@ function SectionWorkspace({
   redeemedRewards,
   equippedAvatar,
   equippedBadge,
+  equippedUiTheme,
   transactions,
   onSelectFree,
   onPayWithCard,
@@ -1415,6 +1513,7 @@ function SectionWorkspace({
   redeemedRewards: string[]
   equippedAvatar: string | null
   equippedBadge: string | null
+  equippedUiTheme: UiThemeId
   transactions: NexusTransaction[]
   onSelectFree: () => void
   onPayWithCard: (plan: Exclude<NexusPlan, 'Free'>) => void
@@ -1428,27 +1527,6 @@ function SectionWorkspace({
   onPurchaseCourse: (course: { id: string; name: string }) => Promise<boolean>
   onOpenNexusTutorial: () => void
 }) {
-  const [seconds, setSeconds] = useState(25 * 60)
-  const [timerRunning, setTimerRunning] = useState(false)
-
-  useEffect(() => {
-    if (!timerRunning) return
-
-    const id = window.setInterval(() => {
-      setSeconds((current) => {
-        if (current <= 1) {
-          setTimerRunning(false)
-          notify('Panic Mode focus sprint complete', 'success')
-          onEarnNexusPoints(25, 'Completed a 25-minute focus sprint', `focus-sprint-${Date.now()}`)
-          return 0
-        }
-        return current - 1
-      })
-    }, 1000)
-
-    return () => window.clearInterval(id)
-  }, [timerRunning, notify, onEarnNexusPoints])
-
   const icon =
     section === 'Dashboard' ? Gauge :
     section === 'AI Memory' ? Brain :
@@ -1456,7 +1534,6 @@ function SectionWorkspace({
     section === 'AI Tutor' ? GraduationCap :
     section === 'AI Tools' ? Wand2 :
     section === 'Flashcards' ? Layers3 :
-    section === 'Assignment Workspace' ? ClipboardList :
     section === 'Record Lesson' ? Mic :
     section === 'Collaboration Rooms' ? Users :
     section === 'People' ? UserSearch :
@@ -1522,13 +1599,6 @@ function SectionWorkspace({
           <AiToolsPage notify={notify} selectedSlug={activeToolSlug} />
         )}
 
-        {section === 'Assignment Workspace' && (
-          <AssignmentWorkspacePage
-            profileName={profileName}
-            notify={notify}
-          />
-        )}
-
         {section === 'Record Lesson' && (
           <LessonRecorderPage onNavigate={onNavigate} notify={notify} />
         )}
@@ -1542,33 +1612,7 @@ function SectionWorkspace({
         )}
 
         {section === 'Panic Mode' && (
-          <section className="glass mx-auto max-w-xl rounded-[2rem] p-8 text-center">
-            <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-200">
-              <TimerReset className="size-7" />
-            </span>
-            <h2 className="mt-5 text-2xl font-semibold">Distraction-free sprint</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Silence the noise and finish one important thing.
-            </p>
-            <p className="mt-7 font-mono text-6xl font-bold tracking-tight">
-              {String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}
-            </p>
-            <div className="mt-7 flex justify-center gap-3">
-              <button type="button" onClick={() => setTimerRunning((running) => !running)} className="primary-action px-6">
-                {timerRunning ? 'Pause' : 'Start focus'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setTimerRunning(false)
-                  setSeconds(25 * 60)
-                }}
-                className="secondary-action"
-              >
-                Reset
-              </button>
-            </div>
-          </section>
+          <PanicModeSection notify={notify} onEarnNexusPoints={onEarnNexusPoints} />
         )}
         {['Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations'].includes(section) && (
           <WorkspacePages page={section} onNavigate={onNavigate} notify={notify} onEarnNexusPoints={onEarnNexusPoints} motivationUserId={motivationUserId} profileName={profileName} />
@@ -1579,7 +1623,7 @@ function SectionWorkspace({
         )}
 
         {section === 'Marketplace' && (
-          <MarketplacePage currentPlan={plan} nexusPoints={nexusPoints} planExpiry={planExpiry} redeemedRewards={redeemedRewards} equippedAvatar={equippedAvatar} equippedBadge={equippedBadge} transactions={transactions} onSelectFree={onSelectFree} onPayWithCard={onPayWithCard} onPayWithPoints={onPayWithPoints} onRedeem={onRedeemReward} onEquip={onEquipCosmetic} onOpenTutorial={onOpenNexusTutorial} onNavigate={onNavigate} />
+          <MarketplacePage currentPlan={plan} nexusPoints={nexusPoints} planExpiry={planExpiry} redeemedRewards={redeemedRewards} equippedAvatar={equippedAvatar} equippedBadge={equippedBadge} equippedUiTheme={equippedUiTheme} transactions={transactions} onSelectFree={onSelectFree} onPayWithCard={onPayWithCard} onPayWithPoints={onPayWithPoints} onRedeem={onRedeemReward} onEquip={onEquipCosmetic} onOpenTutorial={onOpenNexusTutorial} onNavigate={onNavigate} />
         )}
 
         {section === 'Courses' && (
@@ -1607,7 +1651,7 @@ function SectionWorkspace({
           <SettingsPage />
         )}
 
-        {!['Dashboard', 'AI Memory', 'AI Tutor', 'AI Tools', 'Flashcards', 'Assignment Workspace', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex', 'Market Masters', 'Business Empire'].includes(section) && (
+        {!['Dashboard', 'AI Memory', 'AI Tutor', 'AI Tools', 'Flashcards', 'Record Lesson', 'Collaboration Rooms', 'People', 'Panic Mode', 'Tasks', 'Calendar', 'Analytics', 'Leaderboard', 'Notifications', 'Integrations', 'Marketplace', 'Settings', 'Calculators', 'Courses', 'Apex', 'Market Masters', 'Business Empire'].includes(section) && (
           <section className="glass rounded-3xl p-6">
             <h2 className="text-xl font-semibold">{section} workspace</h2>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
@@ -1625,6 +1669,146 @@ function SectionWorkspace({
         )}
       </div>
     </main>
+  )
+}
+
+type FocusTaskPriority = 'High' | 'Medium' | 'Low'
+type FocusTaskStatus = 'Todo' | 'In Progress' | 'Done'
+type FocusTask = { id: string; title: string; subject: string; priority: FocusTaskPriority; status: FocusTaskStatus; dueAt: string | null }
+
+const focusPriorityRank: Record<FocusTaskPriority, number> = { High: 0, Medium: 1, Low: 2 }
+const focusPriorityBadge: Record<FocusTaskPriority, string> = {
+  High: 'border-rose-400/20 bg-rose-400/10 text-rose-200',
+  Medium: 'border-white/20 bg-white/10 text-white',
+  Low: 'border-white/10 bg-white/5 text-zinc-400',
+}
+
+function pickRecommendedFocusTask(tasks: FocusTask[]): FocusTask | null {
+  const open = tasks.filter((task) => task.status !== 'Done')
+  if (open.length === 0) return null
+  return [...open].sort((a, b) => {
+    const priorityDelta = focusPriorityRank[a.priority] - focusPriorityRank[b.priority]
+    if (priorityDelta !== 0) return priorityDelta
+    if (a.dueAt && b.dueAt) return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime()
+    if (a.dueAt) return -1
+    if (b.dueAt) return 1
+    return 0
+  })[0]
+}
+
+function PanicModeSection({ notify, onEarnNexusPoints }: { notify: (message: string, tone?: NoticeTone) => void; onEarnNexusPoints: (amount: number, description: string, actionId: string) => void }) {
+  const [seconds, setSeconds] = useState(25 * 60)
+  const [timerRunning, setTimerRunning] = useState(false)
+  const [justCompleted, setJustCompleted] = useState(false)
+  const [tasks, setTasks] = useState<FocusTask[]>([])
+  const [selectedTaskId, setSelectedTaskId] = useState('')
+  const [markingDone, setMarkingDone] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/tasks', { credentials: 'include', cache: 'no-store' })
+      .then((response) => response.json() as Promise<{ tasks: FocusTask[] }>)
+      .then((data) => {
+        if (cancelled) return
+        setTasks(data.tasks)
+        const recommended = pickRecommendedFocusTask(data.tasks)
+        if (recommended) setSelectedTaskId(recommended.id)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!timerRunning) return
+
+    const id = window.setInterval(() => {
+      setSeconds((current) => {
+        if (current <= 1) {
+          setTimerRunning(false)
+          setJustCompleted(true)
+          const focusTask = tasks.find((task) => task.id === selectedTaskId)
+          notify(focusTask ? `Focus sprint complete: ${focusTask.title}` : 'Panic Mode focus sprint complete', 'success')
+          onEarnNexusPoints(25, 'Completed a 25-minute focus sprint', `focus-sprint-${Date.now()}`)
+          return 0
+        }
+        return current - 1
+      })
+    }, 1000)
+
+    return () => window.clearInterval(id)
+  }, [timerRunning, notify, onEarnNexusPoints, tasks, selectedTaskId])
+
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null
+  const openTasks = tasks.filter((task) => task.status !== 'Done')
+
+  const markSelectedTaskDone = async () => {
+    if (!selectedTask || markingDone) return
+    setMarkingDone(true)
+    try {
+      const response = await fetch(`/api/tasks/${selectedTask.id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Done' }),
+      })
+      if (!response.ok) throw new Error('save failed')
+      setTasks((current) => current.map((task) => task.id === selectedTask.id ? { ...task, status: 'Done' } : task))
+      onEarnNexusPoints(10, `Completed task: ${selectedTask.title}`, `task-complete-${selectedTask.id}`)
+      notify('Task marked complete', 'success')
+    } catch {
+      notify('Could not mark that task complete.', 'warning')
+    } finally {
+      setMarkingDone(false)
+    }
+  }
+
+  return (
+    <section className="glass mx-auto max-w-xl rounded-[2rem] p-8 text-center">
+      <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-rose-500/15 text-rose-200">
+        <TimerReset className="size-7" />
+      </span>
+      <h2 className="mt-5 text-2xl font-semibold">Distraction-free sprint</h2>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Silence the noise and finish one important thing.
+      </p>
+
+      {openTasks.length > 0 && (
+        <div className="mt-6 text-left">
+          <label className="text-xs font-medium uppercase tracking-wider text-slate-500">Focus task
+            <select value={selectedTaskId} onChange={(event) => setSelectedTaskId(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/55 px-3 py-2.5 text-sm text-white outline-none focus:border-white/40">
+              <option value="" className="bg-slate-900">No specific task</option>
+              {openTasks.map((task) => <option key={task.id} value={task.id} className="bg-slate-900">{task.title} · {task.priority}</option>)}
+            </select>
+          </label>
+          {selectedTask && <span className={cn('mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium', focusPriorityBadge[selectedTask.priority])}>{selectedTask.priority} priority</span>}
+        </div>
+      )}
+
+      <p className="mt-7 font-mono text-6xl font-bold tracking-tight">
+        {String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}
+      </p>
+      <div className="mt-7 flex flex-wrap justify-center gap-3">
+        <button type="button" onClick={() => { setTimerRunning((running) => !running); setJustCompleted(false) }} className="primary-action px-6">
+          {timerRunning ? 'Pause' : 'Start focus'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTimerRunning(false)
+            setSeconds(25 * 60)
+            setJustCompleted(false)
+          }}
+          className="secondary-action"
+        >
+          Reset
+        </button>
+      </div>
+      {justCompleted && selectedTask && selectedTask.status !== 'Done' && (
+        <button type="button" onClick={() => void markSelectedTaskDone()} disabled={markingDone} className="secondary-action mt-4 disabled:cursor-wait disabled:opacity-60">
+          Mark &quot;{selectedTask.title}&quot; done
+        </button>
+      )}
+    </section>
   )
 }
 

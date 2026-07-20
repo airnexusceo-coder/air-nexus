@@ -37,3 +37,20 @@ export type AreaProgressSummary = {
   studiedToday: boolean
   attemptedToday: boolean
 }
+
+export type CourseQuizAnalytics = {
+  courseId: string
+  areasStudied: number
+  areasMastered: number
+  quizAttempts: number
+  averageScorePercent: number | null
+}
+
+/** Cross-course rollup for the Analytics page — real numbers derived from course_area_sessions, never invented. */
+export type StudyAnalyticsSummary = {
+  totalAreasStudied: number
+  totalAreasMastered: number
+  totalQuizAttempts: number
+  averageScorePercent: number | null
+  byCourse: CourseQuizAnalytics[]
+}

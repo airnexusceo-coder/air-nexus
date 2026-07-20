@@ -31,11 +31,12 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Modal } from '@/components/ui/modal'
+import { TaskAssignmentModal } from '@/components/study/task-assignment-modal'
 import { MotivationPage } from '@/components/motivation-page'
 import type { NotificationDTO, NotificationType } from '@/lib/notifications/types'
 import { CHAT_HISTORY_STORAGE_KEY } from '@/lib/chat-history'
 import { FLASHCARD_DECK_STORAGE_KEY, parseStoredFlashcardDeck, saveFlashcardDeck } from '@/lib/ai/study-artifacts'
-import { motivationStorageKey, parseMotivationState, MOTIVATION_UPDATED_EVENT } from '@/lib/motivation'
+import { getMotivationStats, getWeeklyPointsBreakdown, motivationStorageKey, parseMotivationState, MOTIVATION_UPDATED_EVENT, type MotivationStats } from '@/lib/motivation'
 import { NEXUS_REWARDS_STORAGE_KEY, parseRewardsState } from '@/lib/nexus-points'
 import { buildIcsCalendar, guessIcsEventType, parseIcsEvents, type IcsSourceEvent } from '@/lib/calendar/ics'
 
@@ -90,7 +91,7 @@ const statusStyles: Record<TaskStatus, string> = {
 export function WorkspacePages({ page, onNavigate, notify, onEarnNexusPoints, motivationUserId, profileName }: WorkspacePagesProps) {
   if (page === 'Tasks') return <TasksPage notify={notify} onEarnNexusPoints={onEarnNexusPoints} />
   if (page === 'Calendar') return <CalendarPage onNavigate={onNavigate} notify={notify} />
-  if (page === 'Analytics') return <AnalyticsPage />
+  if (page === 'Analytics') return <AnalyticsPage motivationUserId={motivationUserId} />
   if (page === 'Leaderboard') return <MotivationPage userId={motivationUserId} profileName={profileName} notify={notify} />
   if (page === 'Notifications') return <NotificationsPage notify={notify} />
   if (page === 'Integrations') return <IntegrationsPage notify={notify} motivationUserId={motivationUserId} onNavigate={onNavigate} />
@@ -120,7 +121,8 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [breakdownId, setBreakdownId] = useState<string | null>(null)
+  const [newPriority, setNewPriority] = useState<TaskPriority>('Medium')
+  const [assignmentTaskId, setAssignmentTaskId] = useState<string | null>(null)
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -156,12 +158,13 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, priority: newPriority }),
       })
       const data = await response.json().catch(() => ({})) as StudyTask & { error?: string }
       if (!response.ok || !('id' in data)) throw new Error((data as { error?: string }).error ?? 'Could not add task.')
       setTasks((current) => [data, ...current])
       setNewTitle('')
+      setNewPriority('Medium')
       setAdding(false)
       notify('Task added to your study plan', 'success')
     } catch (error) {
@@ -217,6 +220,12 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
             placeholder="What needs to get done?"
             className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm outline-none focus:border-white/40"
           />
+          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-slate-400">
+            <span>Priority</span>
+            <select aria-label="New task priority" value={newPriority} onChange={(event) => setNewPriority(event.target.value as TaskPriority)} className="bg-transparent py-2.5 text-sm text-white outline-none">
+              {(['High', 'Medium', 'Low'] as TaskPriority[]).map((option) => <option key={option} className="bg-slate-900">{option}</option>)}
+            </select>
+          </label>
           <button type="button" disabled={!newTitle.trim() || saving} onClick={() => void addTask()} className="primary-action disabled:cursor-wait disabled:opacity-60">Save task</button>
         </div>
       )}
@@ -252,22 +261,16 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
                   </button>
                   <div className="min-w-0 flex-1">
                     <p className={cn('font-medium text-white', task.status === 'Done' && 'text-slate-500 line-through')}>{task.title}</p>
-                    <p className="mt-1 text-xs text-slate-500">{task.subject} · Due {formatDueDate(task.dueAt)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{task.subject} Â· Due {formatDueDate(task.dueAt)}</p>
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <span className={cn('rounded-full border px-2.5 py-1 text-[11px] font-medium', priorityStyles[task.priority])}>{task.priority}</span>
                   <span className={cn('rounded-full px-2.5 py-1 text-[11px] font-medium', statusStyles[task.status])}>{task.status}</span>
-                  <button type="button" aria-expanded={breakdownId === task.id} onClick={() => setBreakdownId((current) => current === task.id ? null : task.id)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
-                    <Sparkles className="size-3.5" />AI Breakdown
+                  <button type="button" onClick={() => setAssignmentTaskId(task.id)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50">
+                    <Sparkles className="size-3.5" />Assignment workspace
                   </button>
                 </div>
-                {breakdownId === task.id && (
-                  <div className="mt-3 rounded-xl border border-white/15 bg-white/[0.06] p-3 text-xs leading-5 text-slate-300">
-                    <p className="font-medium text-white">A simple three-step plan</p>
-                    <ol className="mt-1 list-inside list-decimal text-slate-400"><li>Gather the required notes and rubric.</li><li>Complete one focused 25-minute draft.</li><li>Review, improve, and submit.</li></ol>
-                  </div>
-                )}
               </article>
             ))}
           </div>
@@ -278,6 +281,13 @@ function TasksPage({ notify, onEarnNexusPoints }: Pick<WorkspacePagesProps, 'not
           )}
         </>
       )}
+
+      <TaskAssignmentModal
+        open={Boolean(assignmentTaskId)}
+        task={tasks.find((task) => task.id === assignmentTaskId) ?? null}
+        onClose={() => setAssignmentTaskId(null)}
+        notify={notify}
+      />
     </div>
   )
 }
@@ -548,7 +558,7 @@ function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavig
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium">{event.title}</p>
-                      <p className="mt-1 text-xs text-slate-500">{event.type} · {event.time}</p>
+                      <p className="mt-1 text-xs text-slate-500">{event.type} Â· {event.time}</p>
                     </div>
                     <button type="button" aria-label={`Remove ${event.title}`} onClick={() => void removeEvent(event.id)} className="interactive-icon shrink-0 text-slate-500 hover:text-rose-300"><X className="size-3.5" /></button>
                   </div>
@@ -563,37 +573,132 @@ function CalendarPage({ onNavigate, notify }: Pick<WorkspacePagesProps, 'onNavig
   )
 }
 
-function AnalyticsPage() {
-  const subjects = [
-    { name: 'Mathematics', value: 84, color: 'bg-white' },
-    { name: 'Physics', value: 76, color: 'bg-zinc-300' },
-    { name: 'English', value: 68, color: 'bg-zinc-500' },
-    { name: 'Biology', value: 91, color: 'bg-emerald-400' },
-  ]
-  const week = [42, 65, 54, 82, 70, 94, 61]
+type CourseAnalytics = { courseId: string; courseName: string; areasStudied: number; areasMastered: number; quizAttempts: number; averageScorePercent: number | null }
+type StudyAnalyticsSummary = { totalAreasStudied: number; totalAreasMastered: number; totalQuizAttempts: number; averageScorePercent: number | null; byCourse: CourseAnalytics[] }
+
+function AnalyticsPage({ motivationUserId }: { motivationUserId: string }) {
+  const [tasks, setTasks] = useState<StudyTask[]>([])
+  const [tasksLoaded, setTasksLoaded] = useState(false)
+  const [courseAnalytics, setCourseAnalytics] = useState<StudyAnalyticsSummary | null>(null)
+  const [stats, setStats] = useState<MotivationStats | null>(null)
+  const [weekly, setWeekly] = useState<Array<{ day: string; points: number }>>([])
+  const [weeklyChangePercent, setWeeklyChangePercent] = useState<number | null>(null)
+  const [aiSessionCount, setAiSessionCount] = useState(0)
+  const [focusSprintCount, setFocusSprintCount] = useState(0)
+
+  useEffect(() => {
+    fetch('/api/tasks', { credentials: 'include', cache: 'no-store' })
+      .then((response) => response.json() as Promise<{ tasks: StudyTask[] }>)
+      .then((data) => setTasks(data.tasks))
+      .catch(() => undefined)
+      .finally(() => setTasksLoaded(true))
+    fetch('/api/courses/analytics-summary', { credentials: 'include', cache: 'no-store' })
+      .then((response) => response.ok ? response.json() as Promise<StudyAnalyticsSummary> : null)
+      .then((data) => { if (data) setCourseAnalytics(data) })
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const refresh = () => {
+      const state = parseMotivationState(window.localStorage.getItem(motivationStorageKey(motivationUserId)))
+      const now = new Date()
+      setStats(getMotivationStats(state, now))
+      setWeekly(getWeeklyPointsBreakdown(state, now))
+      setAiSessionCount(state.events.filter((event) => event.description.toLowerCase().includes('ai study')).length)
+      setFocusSprintCount(state.events.filter((event) => event.description === 'Completed a 25-minute focus sprint').length)
+
+      const weekStart = new Date(now)
+      const day = weekStart.getDay()
+      weekStart.setDate(weekStart.getDate() - (day === 0 ? 6 : day - 1))
+      weekStart.setHours(0, 0, 0, 0)
+      const previousWeekStart = new Date(weekStart)
+      previousWeekStart.setDate(previousWeekStart.getDate() - 7)
+      const previousWeekPoints = state.events.reduce((sum, event) => {
+        const created = new Date(event.createdAt).getTime()
+        return created >= previousWeekStart.getTime() && created < weekStart.getTime() ? sum + event.points : sum
+      }, 0)
+      const currentWeekPoints = state.events.reduce((sum, event) => new Date(event.createdAt).getTime() >= weekStart.getTime() ? sum + event.points : sum, 0)
+      setWeeklyChangePercent(previousWeekPoints > 0 ? Math.round(((currentWeekPoints - previousWeekPoints) / previousWeekPoints) * 100) : null)
+    }
+    refresh()
+    window.addEventListener(MOTIVATION_UPDATED_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener(MOTIVATION_UPDATED_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [motivationUserId])
+
+  const completedTasks = tasks.filter((task) => task.status === 'Done').length
+  const completionRate = tasks.length > 0 ? Math.round((completedTasks / tasks.length) * 100) : null
+
+  const bySubject = tasks.reduce<Record<string, { total: number; done: number }>>((acc, task) => {
+    const bucket = acc[task.subject] ?? { total: 0, done: 0 }
+    bucket.total += 1
+    if (task.status === 'Done') bucket.done += 1
+    acc[task.subject] = bucket
+    return acc
+  }, {})
+  const subjectRows = Object.entries(bySubject).sort((a, b) => b[1].total - a[1].total)
+
+  const maxWeeklyPoints = Math.max(1, ...weekly.map((entry) => entry.points))
+  const focusHours = Math.floor((focusSprintCount * 25) / 60)
+  const focusMinutes = (focusSprintCount * 25) % 60
+  const streakLabel = stats ? `${stats.currentStreak} active day${stats.currentStreak === 1 ? '' : 's'}` : 'unavailable'
+
   return (
     <div className="space-y-6">
-      <PageIntro eyebrow="Your learning pulse" title="Study analytics" description="A clear view of where your focus is going and how consistently you are moving forward." />
+      <PageIntro eyebrow="Your learning pulse" title="Study analytics" description="A clear view of where your focus is going and how consistently you are moving forward - built entirely from your own activity." />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Study hours" value="18.4h" detail="+2.6h this week" icon={Clock3} positive />
-        <MetricCard label="Tasks completed" value="27" detail="84% completion rate" icon={CheckCircle2} positive />
-        <MetricCard label="AI sessions" value="14" detail="3.2 hours saved" icon={Bot} />
-        <MetricCard label="Quiz average" value="86%" detail="Up 4% this month" icon={Target} positive />
+        <MetricCard label="Focus time" value={focusSprintCount > 0 ? `${focusHours}h ${focusMinutes}m` : '0m'} detail={`${focusSprintCount} Panic Mode sprint${focusSprintCount === 1 ? '' : 's'} completed`} icon={Clock3} positive={focusSprintCount > 0} />
+        <MetricCard label="Tasks completed" value={String(completedTasks)} detail={completionRate === null ? 'No tasks yet' : `${completionRate}% completion rate`} icon={CheckCircle2} positive={completionRate !== null && completionRate >= 50} />
+        <MetricCard label="AI study sessions" value={String(aiSessionCount)} detail="Across your AirGPT conversations" icon={Bot} positive={aiSessionCount > 0} />
+        <MetricCard label="Quiz average" value={courseAnalytics?.averageScorePercent != null ? `${courseAnalytics.averageScorePercent}%` : 'N/A'} detail={courseAnalytics && courseAnalytics.totalQuizAttempts > 0 ? `${courseAnalytics.totalQuizAttempts} course quiz${courseAnalytics.totalQuizAttempts === 1 ? '' : 'zes'} attempted` : 'Take a Courses quiz to see this'} icon={Target} positive={(courseAnalytics?.averageScorePercent ?? 0) >= 70} />
       </div>
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         <section className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between"><div><h3 className="font-semibold">Weekly progress</h3><p className="mt-1 text-xs text-slate-500">Focused minutes by day</p></div><span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">+12% vs last week</span></div>
+          <div className="flex items-center justify-between"><div><h3 className="font-semibold">Weekly Nexus Points</h3><p className="mt-1 text-xs text-slate-500">Points earned by day, this week</p></div>{weeklyChangePercent !== null && <span className={cn('rounded-full px-3 py-1 text-xs', weeklyChangePercent >= 0 ? 'bg-emerald-400/10 text-emerald-200' : 'bg-rose-400/10 text-rose-200')}>{weeklyChangePercent >= 0 ? '+' : ''}{weeklyChangePercent}% vs last week</span>}</div>
           <div className="mt-8 flex h-48 items-end justify-between gap-3 border-b border-white/8 px-2">
-            {week.map((height, index) => <div key={index} className="flex h-full flex-1 flex-col items-center justify-end gap-2"><div className="w-full max-w-10 rounded-t-lg bg-gradient-to-t from-zinc-500/60 to-white shadow-lg shadow-black/10 transition hover:brightness-125" style={{ height: height + '%' }} /><span className="text-[10px] text-slate-500">{['M', 'T', 'W', 'T', 'F', 'S', 'S'][index]}</span></div>)}
+            {weekly.map((entry) => <div key={entry.day} className="flex h-full flex-1 flex-col items-center justify-end gap-2"><span className="text-[10px] text-slate-500">{entry.points || ''}</span><div className="w-full max-w-10 rounded-t-lg bg-gradient-to-t from-zinc-500/60 to-white shadow-lg shadow-black/10 transition hover:brightness-125" style={{ height: `${Math.max(4, (entry.points / maxWeeklyPoints) * 100)}%` }} /><span className="text-[10px] text-slate-500">{entry.day.slice(0, 1)}</span></div>)}
           </div>
         </section>
         <section className="glass flex flex-col rounded-2xl p-5">
-          <h3 className="font-semibold">Productivity score</h3>
-          <div className="my-auto flex items-center justify-center py-6"><div className="relative flex size-40 items-center justify-center rounded-full bg-[conic-gradient(oklch(0.92_0.003_255)_0_87%,oklch(1_0_0_/_8%)_87%_100%)]"><div className="flex size-32 flex-col items-center justify-center rounded-full bg-slate-950/90"><span className="text-4xl font-bold">87</span><span className="text-xs text-white">Excellent</span></div></div></div>
-          <p className="text-center text-xs leading-5 text-slate-400">Your strongest focus window is 4–6 PM. Keep protecting that time.</p>
+          <h3 className="font-semibold">Weekly goal progress</h3>
+          <div className="my-auto flex items-center justify-center py-6"><div className="relative flex size-40 items-center justify-center rounded-full" style={{ background: `conic-gradient(oklch(0.92 0.003 255) 0 ${Math.round(stats?.weeklyProgress ?? 0)}%, oklch(1 0 0 / 8%) ${Math.round(stats?.weeklyProgress ?? 0)}% 100%)` }}><div className="flex size-32 flex-col items-center justify-center rounded-full bg-slate-950/90"><span className="text-3xl font-bold">{stats?.weeklyPoints ?? 0}</span><span className="text-xs text-white">Nexus Points</span></div></div></div>
+          <p className="text-center text-xs leading-5 text-slate-400">Your current study streak is {streakLabel}. Keep the chain going.</p>
         </section>
       </div>
-      <section className="glass rounded-2xl p-5"><h3 className="font-semibold">Subject progress</h3><div className="mt-5 grid gap-x-8 gap-y-5 md:grid-cols-2">{subjects.map((subject) => <div key={subject.name}><div className="mb-2 flex justify-between text-sm"><span>{subject.name}</span><span className="font-medium text-slate-300">{subject.value}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white/7"><div className={cn('h-full rounded-full', subject.color)} style={{ width: subject.value + '%' }} /></div></div>)}</div></section>
+      <section className="glass rounded-2xl p-5">
+        <h3 className="font-semibold">Task completion by subject</h3>
+        {subjectRows.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">{tasksLoaded ? 'Add tasks with a subject to see a breakdown here.' : 'Loading your tasks...'}</p>
+        ) : (
+          <div className="mt-5 grid gap-x-8 gap-y-5 md:grid-cols-2">
+            {subjectRows.map(([subject, counts]) => {
+              const percent = Math.round((counts.done / counts.total) * 100)
+              return <div key={subject}><div className="mb-2 flex justify-between text-sm"><span>{subject}</span><span className="font-medium text-slate-300">{counts.done}/{counts.total} tasks - {percent}%</span></div><div className="h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full bg-white" style={{ width: `${percent}%` }} /></div></div>
+            })}
+          </div>
+        )}
+      </section>
+      <section className="glass rounded-2xl p-5">
+        <h3 className="font-semibold">Course mastery</h3>
+        {!courseAnalytics || courseAnalytics.byCourse.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">Start an Area of Study in Courses to see your quiz performance here.</p>
+        ) : (
+          <div className="mt-5 space-y-3">
+            {courseAnalytics.byCourse.map((course) => (
+              <div key={course.courseId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3">
+                <div className="flex items-center gap-2 text-sm text-white"><BookOpen className="size-4 text-zinc-400" />{course.courseName}</div>
+                <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+                  <span className="rounded-full bg-white/5 px-2.5 py-1">{course.areasMastered}/{course.areasStudied} areas mastered</span>
+                  <span className="rounded-full bg-white/5 px-2.5 py-1">{course.averageScorePercent != null ? `${course.averageScorePercent}% avg quiz score` : 'No quiz attempts yet'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   )
 }
@@ -602,11 +707,15 @@ const NOTIFICATION_ICONS: Record<NotificationType, { icon: typeof Bell; color: s
   room_invite: { icon: Users, color: 'bg-white/12 text-white' },
   task_assigned: { icon: CheckCircle2, color: 'bg-white/12 text-white' },
   task_completed: { icon: Check, color: 'bg-emerald-400/12 text-emerald-200' },
+  task_high_priority: { icon: Sparkles, color: 'bg-rose-400/12 text-rose-200' },
+  task_due_soon: { icon: Clock3, color: 'bg-amber-400/12 text-amber-200' },
 }
 const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   room_invite: 'Room invite',
   task_assigned: 'Task assigned',
   task_completed: 'Task completed',
+  task_high_priority: 'High priority task',
+  task_due_soon: 'Task due soon',
 }
 
 function timeAgo(iso: string) {
@@ -660,7 +769,7 @@ function NotificationsPage({ notify }: Pick<WorkspacePagesProps, 'notify'>) {
     <div className="space-y-6">
       <PageIntro eyebrow="Stay in the loop" title="Notifications" description={`${unread} unread update${unread === 1 ? '' : 's'} across your rooms and tasks.`} action={<button type="button" onClick={() => void markAll()} disabled={unread === 0} className="secondary-action"><CheckCheckIcon />Mark all as read</button>} />
       {items == null ? (
-        <p className="text-sm text-slate-500">Loading notifications…</p>
+        <p className="text-sm text-slate-500">Loading notificationsâ€¦</p>
       ) : items.length === 0 ? (
         <EmptyState title="No notifications yet" detail="You'll see updates here when you're added to a room or assigned a task." />
       ) : (
@@ -766,7 +875,7 @@ function IntegrationsPage({ notify, motivationUserId, onNavigate }: Pick<Workspa
       anchor.download = 'airnexus-calendar.ics'
       anchor.click()
       URL.revokeObjectURL(url)
-      notify('Calendar exported — import the .ics file into Google Calendar, Outlook, or Apple Calendar', 'success')
+      notify('Calendar exported â€” import the .ics file into Google Calendar, Outlook, or Apple Calendar', 'success')
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Could not export your calendar.', 'warning')
     } finally {
@@ -886,13 +995,13 @@ function IntegrationsPage({ notify, motivationUserId, onNavigate }: Pick<Workspa
 
   return (
     <div className="space-y-6">
-      <PageIntro eyebrow="Connected workspace" title="Integrations" description="Real connections where AirGPT can offer them without a third-party login you'd have to trust us with — everything else is an honest coming-soon." />
+      <PageIntro eyebrow="Connected workspace" title="Integrations" description="Real connections where AirGPT can offer them without a third-party login you'd have to trust us with â€” everything else is an honest coming-soon." />
       <section className="glass rounded-2xl p-5">
         <div className="flex items-center gap-4">
           <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white"><CalendarDays className="size-5" /></span>
           <div className="min-w-0 flex-1">
             <h3 className="font-semibold">Google Calendar, Outlook &amp; Apple Calendar</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">Two-way sync via the standard .ics calendar format — no account login needed, works with any calendar app.</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Two-way sync via the standard .ics calendar format â€” no account login needed, works with any calendar app.</p>
           </div>
           <span className="flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300"><CheckCircle2 className="size-3" /> Works now</span>
         </div>
@@ -929,7 +1038,7 @@ function IntegrationsPage({ notify, motivationUserId, onNavigate }: Pick<Workspa
         </div>
         <div className="mt-4 flex flex-wrap gap-3">
           {googleStatusLoading ? (
-            <span className="flex items-center gap-2 text-xs text-slate-500"><LoaderCircle className="size-4 animate-spin" />Checking connection…</span>
+            <span className="flex items-center gap-2 text-xs text-slate-500"><LoaderCircle className="size-4 animate-spin" />Checking connectionâ€¦</span>
           ) : googleConnected ? (
             <>
               <button type="button" onClick={() => setGooglePickerOpen(true)} className="primary-action"><FileText className="size-4" />Browse &amp; import files</button>
@@ -962,7 +1071,7 @@ function IntegrationsPage({ notify, motivationUserId, onNavigate }: Pick<Workspa
           <span className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/35"><Lock className="size-3" /> Coming soon</span>
         </article>
       )})}</div>
-      <section className="glass rounded-2xl p-5"><h3 className="font-semibold">Data tools</h3><p className="mt-1 text-xs text-slate-500">Download a real backup of your study progress, Nexus Points, chat history, and flashcards — or restore one on this device.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><button type="button" onClick={exportData} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><Download className="size-5" /></span><span className="flex-1"><span className="block text-sm font-medium">Export data</span><span className="mt-0.5 block text-xs text-slate-500">Download a JSON backup</span></span><ChevronRight className="size-4 text-slate-600" /></button><button type="button" onClick={() => importRef.current?.click()} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8"><span className="flex size-10 items-center justify-center rounded-xl bg-white/8 text-zinc-300"><FileInput className="size-5" /></span><span className="flex-1"><span className="block text-sm font-medium">Restore backup</span><span className="mt-0.5 block text-xs text-slate-500">Choose a previously exported JSON file</span></span><Upload className="size-4 text-slate-600" /></button><input ref={importRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" /></div></section>
+      <section className="glass rounded-2xl p-5"><h3 className="font-semibold">Data tools</h3><p className="mt-1 text-xs text-slate-500">Download a real backup of your study progress, Nexus Points, chat history, and flashcards â€” or restore one on this device.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><button type="button" onClick={exportData} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8"><span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-white"><Download className="size-5" /></span><span className="flex-1"><span className="block text-sm font-medium">Export data</span><span className="mt-0.5 block text-xs text-slate-500">Download a JSON backup</span></span><ChevronRight className="size-4 text-slate-600" /></button><button type="button" onClick={() => importRef.current?.click()} className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/5 p-4 text-left transition hover:bg-white/8"><span className="flex size-10 items-center justify-center rounded-xl bg-white/8 text-zinc-300"><FileInput className="size-5" /></span><span className="flex-1"><span className="block text-sm font-medium">Restore backup</span><span className="mt-0.5 block text-xs text-slate-500">Choose a previously exported JSON file</span></span><Upload className="size-4 text-slate-600" /></button><input ref={importRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" /></div></section>
     </div>
   )
 }
