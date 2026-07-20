@@ -564,6 +564,60 @@
   }
   .premium-message { animation: premium-message-in 260ms cubic-bezier(.2,.75,.25,1) both; }
   .premium-assistant-message { border-color: oklch(0.96 0.01 255 / 8%); }
+  .ai-markdown .ai-math-display {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: .85rem 0;
+    border: 1px solid oklch(0.96 0.01 255 / 12%);
+    border-radius: 1.15rem;
+    padding: .72rem .85rem;
+    background:
+      radial-gradient(circle at 18% 0%, oklch(0.76 0.12 330 / 13%), transparent 55%),
+      linear-gradient(145deg, oklch(0.23 0.018 255 / 58%), oklch(0.12 0.014 255 / 72%));
+    box-shadow: inset 0 1px oklch(1 0 0 / 6%), 0 18px 45px -34px black;
+  }
+  .ai-markdown .ai-math-inline {
+    display: inline-flex;
+    max-width: min(100%, 18rem);
+    margin-inline: .12rem;
+    vertical-align: -.34em;
+  }
+  .ai-math-svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    overflow: visible;
+    flex: 0 0 auto;
+  }
+  .ai-math-svg--inline {
+    height: 1.85em;
+    width: auto;
+  }
+  .ai-math-svg__text,
+  .ai-math-svg__small {
+    fill: oklch(0.95 0.01 255);
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+  .ai-math-svg__text {
+    font-size: 24px;
+  }
+  .ai-math-svg__small {
+    font-size: 16px;
+  }
+  .ai-math-svg--inline .ai-math-svg__text {
+    font-size: 17px;
+  }
+  .ai-math-svg--inline .ai-math-svg__small {
+    font-size: 12px;
+  }
+  .ai-math-svg__bar {
+    stroke: oklch(0.82 0.1 330);
+    stroke-linecap: round;
+    stroke-width: 1.8;
+  }
   .tool-activity-chip {
     display: inline-flex;
     align-items: center;
