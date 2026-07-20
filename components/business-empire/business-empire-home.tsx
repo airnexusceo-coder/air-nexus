@@ -17,6 +17,7 @@ import { PricingPage } from '@/components/business-empire/pricing-page'
 import { AdvertisingPage } from '@/components/business-empire/advertising-page'
 import { CompetitorsPage } from '@/components/business-empire/competitors-page'
 import { ReputationPage } from '@/components/business-empire/reputation-page'
+import { LandFacilitiesPage } from '@/components/business-empire/land-facilities-page'
 import { FundingPage } from '@/components/business-empire/funding-page'
 import { FinancesPage } from '@/components/business-empire/finances-page'
 import { AnnualReportsPage } from '@/components/business-empire/annual-reports-page'
@@ -27,6 +28,7 @@ import type { BusinessEmpireView } from '@/components/business-empire/nav-items'
 import {
   applyForLoan,
   applyUnsoldInventoryAction,
+  buildFacility,
   completeFinancialYear,
   completeLesson,
   createInitialState,
@@ -37,14 +39,17 @@ import {
   launchStrategicInitiative,
   manufactureMoreUnits,
   purchaseResearch,
+  sellFacility,
   updatePreferences,
   updateProductPrice,
+  upgradeFacility,
+  vacateLease,
   verifyLedgerIntegrity,
   type ProductCreationInput,
 } from '@/lib/business-empire/game-state'
 import { clearGameState, hasSavedGame, loadGameState, saveGameState } from '@/lib/business-empire/storage'
 import { formatCurrency, formatSignedCurrency } from '@/lib/business-empire/format'
-import type { AdvertisingChannel, AnnualReport, GamePreferences, GameState, LoanPurpose, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
+import type { AdvertisingChannel, AnnualReport, FacilityOwnership, FacilityType, FacilityUpgradeId, GamePreferences, GameState, LoanPurpose, Region, ResearchLevel, StrategicInitiativeId, UnsoldInventoryAction } from '@/lib/business-empire/types'
 import { cn } from '@/lib/utils'
 
 type NoticeTone = 'success' | 'info' | 'warning'
@@ -203,6 +208,38 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
     return { error: result.error, approved: result.approved }
   }
 
+  const handleBuildFacility = (type: FacilityType, region: Region, ownership: FacilityOwnership) => {
+    const result = buildFacility(gameState, type, region, ownership)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.(`New facility ${ownership === 'owned' ? 'purchased' : 'leased'}.`, 'success')
+    return {}
+  }
+
+  const handleUpgradeFacility = (facilityId: string, upgradeId: FacilityUpgradeId) => {
+    const result = upgradeFacility(gameState, facilityId, upgradeId)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Facility upgrade installed.', 'success')
+    return {}
+  }
+
+  const handleSellFacility = (facilityId: string) => {
+    const result = sellFacility(gameState, facilityId)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Facility sold.', 'info')
+    return {}
+  }
+
+  const handleVacateLease = (facilityId: string) => {
+    const result = vacateLease(gameState, facilityId)
+    if (result.error) return { error: result.error }
+    setGameState(result.state)
+    notify?.('Lease vacated.', 'info')
+    return {}
+  }
+
   const handleConfirmCompleteYear = () => {
     const { state: next, report } = completeFinancialYear(gameState)
     setGameState(next)
@@ -265,6 +302,7 @@ export function BusinessEmpireHome({ userId, notify, onEarnNexusPoints }: Busine
             {view === 'advertising' && <AdvertisingPage state={gameState} onLaunch={handleLaunchAdvertising} />}
             {view === 'competitors' && <CompetitorsPage state={gameState} />}
             {view === 'reputation' && <ReputationPage state={gameState} onInvestInCommunity={handleInvestInCommunity} />}
+            {view === 'land-facilities' && <LandFacilitiesPage state={gameState} onBuild={handleBuildFacility} onUpgrade={handleUpgradeFacility} onSell={handleSellFacility} onVacate={handleVacateLease} />}
             {view === 'funding' && <FundingPage state={gameState} onApplyForLoan={handleApplyForLoan} />}
             {view === 'finances' && <FinancesPage state={gameState} />}
             {view === 'annual-reports' && <AnnualReportsPage state={gameState} />}

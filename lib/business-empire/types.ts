@@ -407,6 +407,9 @@ export type CashTransactionCategory =
   | 'WAGES'
   | 'RENT'
   | 'OPERATING_COSTS'
+  | 'FACILITY_UPKEEP'
+  | 'FACILITY_PURCHASE'
+  | 'FACILITY_SALE'
   | 'SALES_REVENUE'
   | 'TAX'
   | 'REFUND'
@@ -516,6 +519,8 @@ export type AnnualReport = {
   rent: number
   /** Storage + insurance + maintenance, combined into one ledger line but itemized in `factorNotes`. */
   operatingCosts: number
+  /** Rent, property tax, and maintenance across every facility this company owns or rents. Zero if the company has no facilities. */
+  facilityUpkeep: number
   /** Loan principal + interest repaid this year. */
   loanRepayments: number
   taxes: number
@@ -587,6 +592,61 @@ export type StrategicInitiative = {
   investment: number
 }
 
+// --- Phase 2: Land, facilities, and regions --------------------------------------
+
+/** Five fictional regions a company can operate in — each with a genuinely different cost/workforce/access profile, so the location decision is a real trade-off. */
+export type Region = 'northgate' | 'riverside' | 'harborview' | 'eastvale' | 'summit-ridge'
+
+export type RegionAccessLevel = 'low' | 'medium' | 'high'
+export type RegionAbundance = 'limited' | 'moderate' | 'abundant'
+export type RegionEducationLevel = 'basic' | 'skilled' | 'highly-skilled'
+export type RegionRestriction = 'light' | 'moderate' | 'strict'
+export type RegionCapacity = 'limited' | 'moderate' | 'ample'
+
+export type RegionProfile = {
+  id: Region
+  name: string
+  description: string
+  /** Multiplies facility purchase price and rent relative to the industry baseline. */
+  costOfLivingIndex: number
+  /** Multiplies wage expectations for staff based at a facility here. */
+  wageLevel: number
+  propertyTaxRate: number
+  transportAccess: RegionAccessLevel
+  customerAccess: RegionAccessLevel
+  availableWorkforce: RegionAbundance
+  educationLevel: RegionEducationLevel
+  utilityCostIndex: number
+  environmentalRestrictions: RegionRestriction
+  /** 0-1 — yearly chance of a disaster-style disruption event for a facility here. */
+  disasterRisk: number
+  expansionCapacity: RegionCapacity
+  nearbyCompetitors: RegionAbundance
+}
+
+export type FacilityType = 'headquarters' | 'factory' | 'warehouse' | 'retail-store' | 'research-centre' | 'distribution-centre' | 'customer-support-centre' | 'data-centre'
+
+export type FacilityUpgradeId = 'production-capacity' | 'automation' | 'storage-expansion' | 'renewable-energy' | 'safety-systems' | 'security' | 'employee-facilities' | 'faster-shipping' | 'quality-control'
+
+export type FacilityOwnership = 'owned' | 'rented'
+
+export type Facility = {
+  id: string
+  type: FacilityType
+  region: Region
+  ownership: FacilityOwnership
+  /** For an owned facility: its current asset value, which drifts with regional property trends each year. Zero for a rented facility. */
+  currentValue: number
+  /** For a rented facility: the current annual rent, which can rise on lease renewal. Zero for an owned facility. */
+  annualRent: number
+  /** Only set for rented facilities — null means the facility is owned outright. */
+  leaseYearsRemaining: number | null
+  upgrades: FacilityUpgradeId[]
+  builtYear: number
+  underConstruction: boolean
+  constructionYearsRemaining: number
+}
+
 export type GameState = {
   companyName: string
   founderName: string
@@ -613,6 +673,10 @@ export type GameState = {
   /** 0-100 — staff morale, driven by wages relative to industry norms and by company reputation; low morale raises effective wage costs (turnover) and slightly lowers output quality. */
   staffMorale: number
   loans: Loan[]
+  /** Every land/property the company owns or rents. An empty array is the normal starting state — facilities are optional. */
+  facilities: Facility[]
+  /** Regions a competitor has purchased land in, making them unavailable for the player to build new facilities in (existing player facilities there are unaffected). */
+  claimedRegions: Region[]
   /** 1.0 = neutral; nudged up/down by yearly events to represent broader economic conditions. */
   economicIndex: number
   /** A slower-moving named cycle layered on top of `economicIndex` so downturns/booms feel like a real named condition, not silent per-event noise. */
@@ -626,4 +690,4 @@ export type GameState = {
   saveVersion: number
 }
 
-export const CURRENT_SAVE_VERSION = 3
+export const CURRENT_SAVE_VERSION = 4

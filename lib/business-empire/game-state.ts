@@ -2,6 +2,18 @@ import { getIndustryProfile } from '@/lib/business-empire/industries'
 import { getAdvertisingChannel } from '@/lib/business-empire/advertising'
 import { computeResearchCost, generateResearchReport } from '@/lib/business-empire/research'
 import {
+  FACILITY_TYPE_INFO,
+  FACILITY_UPGRADE_INFO,
+  REGION_ORDER,
+  REGION_PROFILES,
+  computeFacilityAnnualRent,
+  computeFacilityProductionDiscount,
+  computeFacilityPurchasePrice,
+  computeFacilityUpkeep,
+  computePropertyValueDrift,
+  computeRegionalWageMultiplier,
+} from '@/lib/business-empire/land'
+import {
   DEGREE_INDUSTRY_REPUTATION_BONUS,
   getDegreeProfile,
   getHardcoreJob,
@@ -52,6 +64,10 @@ import {
   type AnnualReport,
   type CashTransactionCategory,
   type ClaimsHonesty,
+  type Facility,
+  type FacilityOwnership,
+  type FacilityType,
+  type FacilityUpgradeId,
   type GamePreferences,
   type GameState,
   type Loan,
@@ -60,6 +76,7 @@ import {
   type Product,
   type ProductQuality,
   type ProductionMethod,
+  type Region,
   type ReputationReasonCategory,
   type ResearchLevel,
   type StrategicInitiative,
@@ -200,6 +217,8 @@ export function createInitialState(preferences: GamePreferences, rng: () => numb
     reputationCategories: { customer: 0, employee: 0, investor: 0, government: 0, environmental: 0, supplier: 0 },
     staffMorale: 70,
     loans: [],
+    facilities: [],
+    claimedRegions: [],
     economicIndex: 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -246,7 +265,7 @@ export type ProductCreationInput = {
 export function estimateCostPerUnit(state: GameState, draft: Pick<ProductCreationInput, 'quality' | 'productionMethod' | 'packagingQuality' | 'features' | 'rndBudget'>, units: number): number {
   const industry = getIndustryProfile(state.industry)
   const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
-  return computeCostPerUnit(industry, draft, units, difficulty) * getStrategicInitiativeEffects(state).productionCostMultiplier
+  return computeCostPerUnit(industry, draft, units, difficulty) * getStrategicInitiativeEffects(state).productionCostMultiplier * computeFacilityProductionDiscount(state.facilities)
 }
 
 /**
@@ -512,6 +531,95 @@ export function unlockInternationalExpansion(state: GameState, investment: numbe
   return { state: appendTransaction(next, { category: 'OTHER_EXPENSE', amount: -investment, description: 'Investment to launch international expansion' }) }
 }
 
+// --- Land and facilities ---------------------------------------------------------
+
+export type RegionAvailability = { region: Region; claimedByCompetitor: boolean }
+
+/** All five regions, flagged with whether a competitor has already claimed them — claimed regions can't host new player facilities, but existing player facilities there are never affected. */
+export function getRegionAvailability(state: GameState): RegionAvailability[] {
+  return REGION_ORDER.map((region) => ({ region, claimedByCompetitor: state.claimedRegions.includes(region) }))
+}
+
+export type FacilityCostPreview = { purchasePrice: number; annualRent: number }
+
+export function previewFacilityCost(state: GameState, type: FacilityType, region: Region): FacilityCostPreview {
+  const industry = getIndustryProfile(state.industry)
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  return {
+    purchasePrice: computeFacilityPurchasePrice(type, region, industry, difficulty),
+    annualRent: computeFacilityAnnualRent(type, region, industry, difficulty),
+  }
+}
+
+/** Buying pays the full purchase price up front and creates an owned asset; renting pays nothing up front but commits to a 5-year lease at the current annual rent, charged yearly through facility upkeep. */
+export function buildFacility(state: GameState, type: FacilityType, region: Region, ownership: FacilityOwnership): { state: GameState; error?: string; facility?: Facility } {
+  if (state.claimedRegions.includes(region)) return { state, error: `${REGION_PROFILES[region].name} has already been claimed by a competitor — choose another region.` }
+  const { purchasePrice, annualRent } = previewFacilityCost(state, type, region)
+  if (ownership === 'owned' && purchasePrice > state.cash) {
+    return { state, error: `Buying this facility would cost ${Math.round(purchasePrice).toLocaleString()}, more than your available cash.` }
+  }
+
+  const info = FACILITY_TYPE_INFO[type]
+  const facility: Facility = {
+    id: createId('facility'),
+    type,
+    region,
+    ownership,
+    currentValue: ownership === 'owned' ? purchasePrice : 0,
+    annualRent: ownership === 'rented' ? annualRent : 0,
+    leaseYearsRemaining: ownership === 'rented' ? 5 : null,
+    upgrades: [],
+    builtYear: state.year,
+    underConstruction: info.constructionYears > 0,
+    constructionYearsRemaining: info.constructionYears,
+  }
+
+  let next: GameState = { ...state, facilities: [...state.facilities, facility] }
+  if (ownership === 'owned') {
+    next = appendTransaction(next, { category: 'FACILITY_PURCHASE', amount: -purchasePrice, description: `Purchased a ${info.label.toLowerCase()} in ${REGION_PROFILES[region].name}`, relatedId: facility.id })
+  }
+  return { state: next, facility }
+}
+
+export function upgradeFacility(state: GameState, facilityId: string, upgradeId: FacilityUpgradeId): { state: GameState; error?: string } {
+  const facility = state.facilities.find((item) => item.id === facilityId)
+  if (!facility) return { state, error: 'Unknown facility.' }
+  if (facility.upgrades.includes(upgradeId)) return { state, error: 'This upgrade is already installed.' }
+  const industry = getIndustryProfile(state.industry)
+  const difficulty = DIFFICULTY_PROFILES[state.preferences.difficulty]
+  const upgradeInfo = FACILITY_UPGRADE_INFO[upgradeId]
+  const cost = Math.max(500, Math.round((Math.max(20, industry.averagePrice) * upgradeInfo.costFactor * difficulty.costMultiplier) / 50) * 50)
+  if (cost > state.cash) return { state, error: `${upgradeInfo.label} would cost ${cost.toLocaleString()}, more than your available cash.` }
+
+  const updated: Facility = { ...facility, upgrades: [...facility.upgrades, upgradeId] }
+  const next: GameState = { ...state, facilities: state.facilities.map((item) => (item.id === facilityId ? updated : item)) }
+  return { state: appendTransaction(next, { category: 'FACILITY_PURCHASE', amount: -cost, description: `Installed ${upgradeInfo.label.toLowerCase()} at your ${FACILITY_TYPE_INFO[facility.type].label.toLowerCase()} in ${REGION_PROFILES[facility.region].name}`, relatedId: facility.id }) }
+}
+
+/** Selling an owned facility returns 80% of its current value — the other 20% represents real-world transaction and depreciation costs, never a silent number. */
+export function sellFacility(state: GameState, facilityId: string): { state: GameState; error?: string } {
+  const facility = state.facilities.find((item) => item.id === facilityId)
+  if (!facility) return { state, error: 'Unknown facility.' }
+  if (facility.ownership !== 'owned') return { state, error: 'Only owned facilities can be sold — a rented facility should be vacated instead.' }
+  const saleValue = Math.round(facility.currentValue * 0.8)
+  const next: GameState = { ...state, facilities: state.facilities.filter((item) => item.id !== facilityId) }
+  return { state: appendTransaction(next, { category: 'FACILITY_SALE', amount: saleValue, description: `Sold your ${FACILITY_TYPE_INFO[facility.type].label.toLowerCase()} in ${REGION_PROFILES[facility.region].name} (80% of its current value, after transaction and depreciation costs)`, relatedId: facility.id }) }
+}
+
+/** Ending a rented lease early costs the equivalent of one more year's rent as a break fee if years remain on the lease; a lease that has already run its full term ends free. */
+export function vacateLease(state: GameState, facilityId: string): { state: GameState; error?: string } {
+  const facility = state.facilities.find((item) => item.id === facilityId)
+  if (!facility) return { state, error: 'Unknown facility.' }
+  if (facility.ownership !== 'rented') return { state, error: 'Only rented facilities have a lease to vacate — an owned facility should be sold instead.' }
+  const breakFee = facility.leaseYearsRemaining && facility.leaseYearsRemaining > 0 ? facility.annualRent : 0
+  if (breakFee > state.cash) return { state, error: `Breaking this lease early would cost a ${breakFee.toLocaleString()} fee, more than your available cash.` }
+  let next: GameState = { ...state, facilities: state.facilities.filter((item) => item.id !== facilityId) }
+  if (breakFee > 0) {
+    next = appendTransaction(next, { category: 'OTHER_EXPENSE', amount: -breakFee, description: `Early lease-break fee for your ${FACILITY_TYPE_INFO[facility.type].label.toLowerCase()} in ${REGION_PROFILES[facility.region].name}`, relatedId: facility.id })
+  }
+  return { state: next }
+}
+
 export { verifyLedgerIntegrity }
 
 export type YearOutcomeEstimate = {
@@ -519,6 +627,7 @@ export type YearOutcomeEstimate = {
   projectedRevenue: number
   projectedWages: number
   projectedRent: number
+  projectedFacilityUpkeep: number
   estimatedProfitOrLoss: number
 }
 
@@ -542,7 +651,12 @@ export function estimateCurrentYearOutcome(state: GameState, rng: () => number =
 
   const projectedRent = computeRent(industry, activeProducts.length, difficulty)
   const totalUnitsPlanned = activeProducts.reduce((sum, p) => sum + p.unitsManufactured, 0)
-  const projectedWages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, state.staffMorale)
+  const baseProjectedWages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, state.staffMorale)
+  const regionalWageMultiplier = state.facilities.length > 0
+    ? state.facilities.reduce((sum, facility) => sum + computeRegionalWageMultiplier(facility.region, state.reputationCategories.employee), 0) / state.facilities.length
+    : 1
+  const projectedWages = Math.round(baseProjectedWages * regionalWageMultiplier)
+  const projectedFacilityUpkeep = Math.round(state.facilities.reduce((sum, facility) => sum + computeFacilityUpkeep(facility, industry, difficulty), 0))
 
   const isFirstYearForCompany = state.annualReports.length === 0
   const seasonal = computeSeasonalMultiplier(industry, year)
@@ -575,8 +689,8 @@ export function estimateCurrentYearOutcome(state: GameState, rng: () => number =
     projectedRevenue += Math.min(availableStock, demand) * product.price
   }
 
-  const estimatedProfitOrLoss = projectedRevenue - committedExpensesSoFar - projectedWages - projectedRent
-  return { committedExpensesSoFar, projectedRevenue, projectedWages, projectedRent, estimatedProfitOrLoss }
+  const estimatedProfitOrLoss = projectedRevenue - committedExpensesSoFar - projectedWages - projectedRent - projectedFacilityUpkeep
+  return { committedExpensesSoFar, projectedRevenue, projectedWages, projectedRent, projectedFacilityUpkeep, estimatedProfitOrLoss }
 }
 
 /** Read-only estimated demand for one product at a given (possibly hypothetical) price — used by the Pricing page so a player can preview a price change before committing to it. */
@@ -657,7 +771,14 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
 
   const rent = computeRent(industry, activeProducts.length, difficulty)
   const totalUnitsPlanned = activeProducts.reduce((sum, p) => sum + p.unitsManufactured, 0)
-  const wages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, working.staffMorale)
+  const baseWages = computeWages(totalUnitsPlanned, activeProducts.length, difficulty, working.staffMorale)
+  const regionalWageMultiplier = working.facilities.length > 0
+    ? working.facilities.reduce((sum, facility) => sum + computeRegionalWageMultiplier(facility.region, working.reputationCategories.employee), 0) / working.facilities.length
+    : 1
+  const wages = Math.round(baseWages * regionalWageMultiplier)
+  if (working.facilities.length > 0 && Math.abs(regionalWageMultiplier - 1) >= 0.02) {
+    factorNotes.push(`Regional wage levels across your facilities adjusted staff wages by ${regionalWageMultiplier >= 1 ? '+' : ''}${Math.round((regionalWageMultiplier - 1) * 100)}%.`)
+  }
   working = appendTransaction(working, { category: 'RENT', amount: -rent, description: `Year ${year} rent and operating overhead` })
   working = appendTransaction(working, { category: 'WAGES', amount: -wages, description: `Year ${year} staff wages` })
 
@@ -668,6 +789,50 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
       amount: -operating.total,
       description: `Year ${year} operating costs — storage ${operating.storage.toLocaleString()}, insurance ${operating.insurance.toLocaleString()}, maintenance ${operating.maintenance.toLocaleString()}`,
     })
+  }
+
+  // Facility upkeep: rent for rented facilities, property tax + maintenance for owned — charged even while a facility is still under construction.
+  const facilityUpkeepTotal = working.facilities.reduce((sum, facility) => sum + computeFacilityUpkeep(facility, industry, difficulty), 0)
+  if (facilityUpkeepTotal > 0) {
+    working = appendTransaction(working, {
+      category: 'FACILITY_UPKEEP',
+      amount: -Math.round(facilityUpkeepTotal),
+      description: `Year ${year} facility upkeep across ${working.facilities.length} facilit${working.facilities.length === 1 ? 'y' : 'ies'} — rent, property tax, and maintenance`,
+    })
+  }
+
+  // Construction progress, owned-property value drift, and lease-term countdown/renewal.
+  const updatedFacilities: Facility[] = working.facilities.map((facility) => {
+    const constructionYearsRemaining = facility.underConstruction ? Math.max(0, facility.constructionYearsRemaining - 1) : 0
+    const underConstruction = constructionYearsRemaining > 0
+    if (facility.underConstruction && !underConstruction) {
+      factorNotes.push(`Your ${FACILITY_TYPE_INFO[facility.type].label.toLowerCase()} in ${REGION_PROFILES[facility.region].name} finished construction and is now active.`)
+    }
+    const currentValue = facility.ownership === 'owned' ? computePropertyValueDrift(facility.currentValue, facility.region, rng) : facility.currentValue
+
+    if (facility.ownership === 'rented' && facility.leaseYearsRemaining !== null) {
+      const yearsRemaining = facility.leaseYearsRemaining - 1
+      if (yearsRemaining <= 0) {
+        const renewedRent = Math.round(facility.annualRent * 1.05)
+        factorNotes.push(`The lease on your ${FACILITY_TYPE_INFO[facility.type].label.toLowerCase()} in ${REGION_PROFILES[facility.region].name} renewed for another 5 years at a higher rent.`)
+        return { ...facility, underConstruction, constructionYearsRemaining, currentValue, annualRent: renewedRent, leaseYearsRemaining: 5 }
+      }
+      return { ...facility, underConstruction, constructionYearsRemaining, currentValue, leaseYearsRemaining: yearsRemaining }
+    }
+    return { ...facility, underConstruction, constructionYearsRemaining, currentValue }
+  })
+  working = { ...working, facilities: updatedFacilities }
+
+  // Competitors occasionally purchase land, permanently claiming a region for new player facilities (existing facilities there are unaffected) — more likely with more aggressive/predatory competitors in play.
+  const unclaimedRegions = REGION_ORDER.filter((region) => !working.claimedRegions.includes(region))
+  if (unclaimedRegions.length > 0) {
+    const aggressiveCompetitorCount = competitorResult.competitors.filter((c) => c.strategyType === 'aggressive-expander' || c.strategyType === 'corporate-predator').length
+    const claimChance = 0.04 * difficulty.volatility * aggressiveCompetitorCount
+    if (claimChance > 0 && rng() < claimChance) {
+      const claimedRegion = unclaimedRegions[Math.floor(rng() * unclaimedRegions.length)]
+      working = { ...working, claimedRegions: [...working.claimedRegions, claimedRegion] }
+      factorNotes.push(`A competitor purchased land in ${REGION_PROFILES[claimedRegion].name} this year — that region is no longer available for new facilities.`)
+    }
   }
 
   // Loans amortize on a straight-line principal schedule with interest charged on the remaining balance — the schedule is visible on the Funding page, never a surprise deduction.
@@ -836,9 +1001,10 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   const productionCosts = sumLedgerCategoryForYear(working, 'PRODUCTION_COST', year)
   const researchCosts = sumLedgerCategoryForYear(working, 'RESEARCH_COST', year)
   const advertisingCosts = sumLedgerCategoryForYear(working, 'ADVERTISING_COST', year)
+  const facilityUpkeepCosts = sumLedgerCategoryForYear(working, 'FACILITY_UPKEEP', year)
 
   const grossProfit = totalRevenue - totalCogs
-  const preTaxProfit = totalRevenue - productionCosts - researchCosts - advertisingCosts - wages - rent - operating.total - loanRepaymentsTotal
+  const preTaxProfit = totalRevenue - productionCosts - researchCosts - advertisingCosts - wages - rent - operating.total - facilityUpkeepCosts - loanRepaymentsTotal
   const taxes = preTaxProfit > 0 ? Math.round(preTaxProfit * TAX_RATE) : 0
   if (taxes > 0) working = appendTransaction(working, { category: 'TAX', amount: -taxes, description: `Year ${year} tax on profit` })
 
@@ -848,7 +1014,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
   const refunds = sumLedgerCategoryForYear(working, 'REFUND', year)
 
   const netProfit = preTaxProfit - taxes - refunds
-  const totalExpenses = productionCosts + researchCosts + advertisingCosts + wages + rent + operating.total + loanRepaymentsTotal + taxes + refunds
+  const totalExpenses = productionCosts + researchCosts + advertisingCosts + wages + rent + operating.total + facilityUpkeepCosts + loanRepaymentsTotal + taxes + refunds
 
   const newSatisfaction = computeCompanySatisfaction(working.products, working.customerSatisfaction)
   const newStaffMorale = clampScore(computeStaffMorale(working.staffMorale, wages, activeProducts.length, working.brandReputation) + initiativeEffects.moraleBonus)
@@ -930,6 +1096,7 @@ export function completeFinancialYear(state: GameState, rng: () => number = Math
     wages,
     rent,
     operatingCosts: operating.total,
+    facilityUpkeep: facilityUpkeepCosts,
     loanRepayments: loanRepaymentsTotal,
     taxes,
     refunds,

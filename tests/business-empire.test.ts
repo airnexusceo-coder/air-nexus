@@ -31,7 +31,8 @@ import {
   scoreInterviewAnswers,
   UNIVERSITY_ENTRANCE_QUIZ,
 } from '../lib/business-empire/hardcore-career'
-import { migrateLegacySave, migrateV2ToV3 } from '../lib/business-empire/storage'
+import { migrateLegacySave, migrateV2ToV3, migrateV3ToV4 } from '../lib/business-empire/storage'
+import { buildFacility, previewFacilityCost, sellFacility, upgradeFacility } from '../lib/business-empire/game-state'
 import { CURRENT_SAVE_VERSION, DIFFICULTY_PROFILES, type CareerBackground, type GamePreferences, type GameState } from '../lib/business-empire/types'
 
 const rng = () => 0.5
@@ -597,7 +598,7 @@ console.log('Business Empire reputation, Hardcore Mode, and migration tests pass
   assert.ok(migrated, 'a version-2-shaped save migrates successfully rather than being discarded')
   assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
   assert.equal(migrated!.brandReputation, afterYear.brandReputation, 'the reputation score itself is carried over exactly, unchanged by migration')
-  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.equal(migrated!.saveVersion, 3, 'migrateV2ToV3 in isolation produces a v3-versioned save — chaining to the current version is loadGameState\'s job, matching how each migration step composes')
   assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
   assert.ok(migrated!.competitors.every((c) => typeof c.strategyType === 'string'), 'every migrated competitor gets a backfilled strategy archetype')
   assert.deepEqual(
@@ -611,3 +612,89 @@ console.log('Business Empire reputation, Hardcore Mode, and migration tests pass
 }
 
 console.log('Business Empire competitor strategy and reputation category tests passed')
+
+// ============================================================================
+// Land, facilities, and v3 -> v4 migration
+// ============================================================================
+
+// 31. Buying a facility charges exactly its previewed purchase price and creates an owned asset of that value; renting charges nothing up front.
+{
+  const state = freshState()
+  const preview = previewFacilityCost(state, 'retail-store', 'eastvale')
+  const cashBefore = state.cash
+  const bought = buildFacility(state, 'retail-store', 'eastvale', 'owned')
+  assert.equal(bought.error, undefined)
+  assert.equal(Math.round((cashBefore - bought.state.cash) * 100) / 100, preview.purchasePrice, 'buying a facility charges exactly its previewed purchase price')
+  assert.equal(bought.facility!.currentValue, preview.purchasePrice, 'a newly bought facility starts at exactly its purchase price')
+  assert.ok(verifyLedgerIntegrity(bought.state).ok)
+
+  const rented = buildFacility(state, 'retail-store', 'riverside', 'rented')
+  assert.equal(rented.error, undefined)
+  assert.equal(rented.state.cash, state.cash, 'renting a facility charges nothing up front')
+  assert.equal(rented.facility!.leaseYearsRemaining, 5, 'a new lease starts at exactly 5 years')
+}
+
+// 32. A region already claimed by a competitor cannot host a new player facility.
+{
+  const state = freshState()
+  const claimedState: GameState = { ...state, claimedRegions: ['harborview'] }
+  const attempt = buildFacility(claimedState, 'warehouse', 'harborview', 'rented')
+  assert.ok(attempt.error, 'building in a competitor-claimed region is rejected')
+  assert.equal(attempt.state.facilities.length, 0, 'a rejected build never creates a facility')
+}
+
+// 33. Upgrading a facility charges cash and installs exactly the requested upgrade, never a duplicate.
+{
+  const state = freshState()
+  const built = buildFacility(state, 'factory', 'eastvale', 'owned')
+  const cashBefore = built.state.cash
+  const upgraded = upgradeFacility(built.state, built.facility!.id, 'automation')
+  assert.equal(upgraded.error, undefined)
+  assert.ok(cashBefore - upgraded.state.cash > 0, 'installing an upgrade costs cash')
+  assert.deepEqual(upgraded.state.facilities[0].upgrades, ['automation'])
+  const duplicate = upgradeFacility(upgraded.state, built.facility!.id, 'automation')
+  assert.ok(duplicate.error, 'the same upgrade cannot be installed twice')
+}
+
+// 34. Selling an owned facility returns exactly 80% of its current value and removes it from the facilities list.
+{
+  const state = freshState()
+  const built = buildFacility(state, 'warehouse', 'eastvale', 'owned')
+  const cashBeforeSale = built.state.cash
+  const sold = sellFacility(built.state, built.facility!.id)
+  assert.equal(sold.error, undefined)
+  assert.equal(Math.round((sold.state.cash - cashBeforeSale) * 100) / 100, Math.round(built.facility!.currentValue * 0.8), 'selling returns exactly 80% of the facility\'s current value')
+  assert.equal(sold.state.facilities.length, 0, 'a sold facility is removed from the facilities list')
+  assert.ok(verifyLedgerIntegrity(sold.state).ok)
+}
+
+// 35. Facility upkeep is a real, ledger-backed expense that flows into the annual report's totalExpenses — not a silent gap between cash and the reported numbers.
+{
+  const state = freshState()
+  const built = buildFacility(state, 'retail-store', 'eastvale', 'rented').state
+  const { state: afterYear, report } = completeFinancialYear(built, rng)
+  assert.ok(report.facilityUpkeep > 0, 'setup: a rented facility always has nonzero yearly upkeep')
+  assert.equal(Math.round(report.totalExpenses * 100) / 100, Math.round((report.productionCosts + report.researchCosts + report.advertisingCosts + report.wages + report.rent + report.operatingCosts + report.facilityUpkeep + report.loanRepayments + report.taxes + report.refunds) * 100) / 100, 'totalExpenses includes facility upkeep as one of its listed parts')
+  assert.equal(Math.round(report.netProfit * 100) / 100, Math.round((report.totalRevenue - report.totalExpenses) * 100) / 100, 'net profit is still exactly revenue minus total expenses once facility upkeep exists')
+  assert.ok(verifyLedgerIntegrity(afterYear).ok, 'cash still equals the full ledger sum with facility upkeep in play')
+}
+
+// 36. A save from the pre-land-and-facilities format (version 3) migrates into a valid version-4 state with an empty facilities list — existing saves keep working.
+{
+  const state = freshState()
+  const { state: afterYear } = completeFinancialYear(state, rng)
+  const v3Raw: Record<string, unknown> = JSON.parse(JSON.stringify(afterYear))
+  v3Raw.saveVersion = 3
+  delete v3Raw.facilities
+  delete v3Raw.claimedRegions
+
+  const migrated = migrateV3ToV4(v3Raw)
+  assert.ok(migrated, 'a version-3-shaped save migrates successfully rather than being discarded')
+  assert.equal(migrated!.cash, afterYear.cash, 'cash is carried over exactly, unchanged by migration')
+  assert.equal(migrated!.saveVersion, CURRENT_SAVE_VERSION)
+  assert.deepEqual(migrated!.facilities, [], 'a save from before this feature existed starts with no facilities, never a fabricated one')
+  assert.deepEqual(migrated!.claimedRegions, [], 'a save from before this feature existed starts with no claimed regions')
+  assert.ok(verifyLedgerIntegrity(migrated!).ok, 'migration never creates unexplained money')
+}
+
+console.log('Business Empire land and facilities tests passed')

@@ -64,7 +64,7 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     : []
 
   const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
-    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, loanRepayments: 0, factorNotes: [], competitorActions: [] }) as unknown as AnnualReport)
+    ? (parsed.annualReports as Record<string, unknown>[]).map((r) => ({ ...r, operatingCosts: 0, facilityUpkeep: 0, loanRepayments: 0, factorNotes: [], competitorActions: [] }) as unknown as AnnualReport)
     : []
 
   const migrationEntry: ReputationTransaction = {
@@ -108,6 +108,8 @@ export function migrateLegacySave(parsed: Record<string, unknown>): GameState | 
     reputationCategories,
     staffMorale: 70,
     loans: [],
+    facilities: [],
+    claimedRegions: [],
     economicIndex: typeof parsed.economicIndex === 'number' ? parsed.economicIndex : 1,
     economicCyclePhase: 'stable',
     strategicInitiatives: [],
@@ -168,8 +170,12 @@ export function migrateV2ToV3(parsed: Record<string, unknown>): GameState | null
 
   const annualReports: AnnualReport[] = Array.isArray(parsed.annualReports)
     ? (parsed.annualReports as Record<string, unknown>[]).map((r) => {
-        const record = r as { competitorActions?: unknown }
-        return { ...r, competitorActions: Array.isArray(record.competitorActions) ? record.competitorActions : [] } as unknown as AnnualReport
+        const record = r as { competitorActions?: unknown; facilityUpkeep?: unknown }
+        return {
+          ...r,
+          competitorActions: Array.isArray(record.competitorActions) ? record.competitorActions : [],
+          facilityUpkeep: typeof record.facilityUpkeep === 'number' ? record.facilityUpkeep : 0,
+        } as unknown as AnnualReport
       })
     : []
 
@@ -179,6 +185,26 @@ export function migrateV2ToV3(parsed: Record<string, unknown>): GameState | null
     reputationHistory: [...reputationHistory, migrationEntry],
     reputationCategories,
     annualReports,
+    saveVersion: 3,
+    lastSavedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Upgrades a save from the pre-land-and-facilities format (version 3) into
+ * the current shape (version 4). Nothing about cash, products, competitors
+ * or reputation changes — the only new fields are an empty facilities list
+ * and an empty claimed-regions list, since a save from before this feature
+ * existed genuinely owns no property yet.
+ */
+export function migrateV3ToV4(parsed: Record<string, unknown>): GameState | null {
+  if (typeof parsed.cash !== 'number' || !Array.isArray(parsed.cashLedger) || !isRecord(parsed.preferences)) return null
+  if (typeof parsed.companyName !== 'string' || typeof parsed.industry !== 'string' || typeof parsed.year !== 'number') return null
+
+  return {
+    ...(parsed as unknown as GameState),
+    facilities: Array.isArray(parsed.facilities) ? (parsed.facilities as GameState['facilities']) : [],
+    claimedRegions: Array.isArray(parsed.claimedRegions) ? (parsed.claimedRegions as GameState['claimedRegions']) : [],
     saveVersion: CURRENT_SAVE_VERSION,
     lastSavedAt: new Date().toISOString(),
   }
@@ -205,8 +231,11 @@ export function loadGameState(userId: string): LoadResult {
     let candidate: GameState | null = null
     if (parsed.saveVersion === CURRENT_SAVE_VERSION && typeof parsed.cash === 'number' && Array.isArray(parsed.cashLedger) && isRecord(parsed.preferences)) {
       candidate = parsed as GameState
+    } else if (parsed.saveVersion === 3) {
+      candidate = migrateV3ToV4(parsed as Record<string, unknown>)
     } else if (parsed.saveVersion === 2) {
-      candidate = migrateV2ToV3(parsed as Record<string, unknown>)
+      const v3 = migrateV2ToV3(parsed as Record<string, unknown>)
+      candidate = v3 ? migrateV3ToV4(v3 as unknown as Record<string, unknown>) : null
     } else if (parsed.saveVersion === 1 || parsed.saveVersion === undefined) {
       candidate = migrateLegacySave(parsed as Record<string, unknown>)
     }

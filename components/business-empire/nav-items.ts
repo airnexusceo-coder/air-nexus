@@ -8,6 +8,7 @@ import {
   GraduationCap,
   Landmark,
   Layers,
+  MapPinned,
   Megaphone,
   Settings as SettingsIcon,
   Star,
@@ -26,6 +27,7 @@ export type BusinessEmpireView =
   | 'advertising'
   | 'competitors'
   | 'reputation'
+  | 'land-facilities'
   | 'funding'
   | 'finances'
   | 'annual-reports'
@@ -44,6 +46,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'advertising', label: 'Advertising', icon: Megaphone },
   { id: 'competitors', label: 'Competitors', icon: Swords },
   { id: 'reputation', label: 'Reputation', icon: Star },
+  { id: 'land-facilities', label: 'Land & Facilities', icon: MapPinned },
   { id: 'funding', label: 'Funding', icon: Landmark },
   { id: 'finances', label: 'Finances', icon: BarChart3 },
   { id: 'annual-reports', label: 'Annual Reports', icon: Award },

@@ -38,6 +38,7 @@ export function AnnualReportView({ report }: AnnualReportViewProps) {
           <LedgerRow label="Employee wages" value={-report.wages} />
           <LedgerRow label="Rent" value={-report.rent} />
           <LedgerRow label="Storage, insurance & maintenance" value={-report.operatingCosts} />
+          {report.facilityUpkeep > 0 && <LedgerRow label="Facility upkeep (rent, property tax, maintenance)" value={-report.facilityUpkeep} />}
           {report.loanRepayments > 0 && <LedgerRow label="Loan repayments" value={-report.loanRepayments} />}
           <LedgerRow label="Taxes" value={-report.taxes} />
           <LedgerRow label="Refunds & returns" value={-report.refunds} />
