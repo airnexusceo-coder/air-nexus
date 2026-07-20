@@ -1,7 +1,7 @@
 import { GroqApiError, GroqConfigurationError } from '@/lib/ai/groq'
 import { createTutorReplyWithFallback } from '@/lib/ai/text-fallback'
 import { ProviderApiError, ProviderConfigurationError } from '@/lib/ai/providers/types'
-import type { AiLessonCommandTerm, AiLessonSlide, AiLessonSlideKind, AiUnitLessonPack } from '@/lib/courses/lesson-pack-types'
+import type { AiLessonCommandTerm, AiLessonDiagram, AiLessonDiagramEdge, AiLessonDiagramNode, AiLessonSlide, AiLessonSlideKind, AiUnitLessonPack, DiagramLayout } from '@/lib/courses/lesson-pack-types'
 import type { VceCourse, VceCourseChapter, VceCourseLevel } from '@/lib/courses/vce-catalog'
 import { VCE_STUDY_DESIGN_SOURCE } from '@/lib/courses/vce-catalog'
 import { formatCommandTermsForPrompt, inferVcaaCommandTermsFromText, VCAA_COMMAND_TERMS_SOURCE } from '@/lib/courses/vcaa-command-terms'
@@ -83,6 +83,39 @@ function normaliseCommandTerms(value: unknown, fallbackTerms: AiLessonCommandTer
   }).slice(0, 10)
 }
 
+function asDiagramLayout(value: unknown): DiagramLayout {
+  return value === 'flow' || value === 'cycle' || value === 'hierarchy' || value === 'timeline' || value === 'comparison' ? value : 'flow'
+}
+
+/** Bounded, validated parse of an AI-authored diagram — edges are dropped (not the whole diagram) if they reference a node id that doesn't exist, so a minor AI slip never breaks rendering. */
+function normaliseDiagram(value: unknown): AiLessonDiagram | undefined {
+  const record = asRecord(value)
+  if (!record) return undefined
+  const title = asString(record.title)
+  const nodesRaw = Array.isArray(record.nodes) ? record.nodes : []
+  const nodes = nodesRaw.map((item, index): AiLessonDiagramNode | null => {
+    const nodeRecord = asRecord(item)
+    if (!nodeRecord) return null
+    const label = asString(nodeRecord.label)
+    if (!label) return null
+    return { id: asString(nodeRecord.id, `node-${index + 1}`), label, detail: asString(nodeRecord.detail) || undefined }
+  }).filter((node): node is AiLessonDiagramNode => node !== null).slice(0, 8)
+  if (!title || nodes.length < 2) return undefined
+
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  const edgesRaw = Array.isArray(record.edges) ? record.edges : []
+  const edges = edgesRaw.map((item): AiLessonDiagramEdge | null => {
+    const edgeRecord = asRecord(item)
+    if (!edgeRecord) return null
+    const from = asString(edgeRecord.from)
+    const to = asString(edgeRecord.to)
+    if (!from || !to || !nodeIds.has(from) || !nodeIds.has(to)) return null
+    return { from, to, label: asString(edgeRecord.label) || undefined }
+  }).filter((edge): edge is AiLessonDiagramEdge => edge !== null).slice(0, 10)
+
+  return { title, layout: asDiagramLayout(record.layout), nodes, edges }
+}
+
 function normaliseSlides(value: unknown, commandTerms: AiLessonCommandTerm[]): AiLessonSlide[] {
   if (!Array.isArray(value)) return []
   return value.slice(0, MAX_SLIDES).map((item, index): AiLessonSlide | null => {
@@ -104,6 +137,7 @@ function normaliseSlides(value: unknown, commandTerms: AiLessonCommandTerm[]): A
       activity: asString(record.activity) || undefined,
       question: asString(record.question) || undefined,
       answerGuide: asString(record.answerGuide) || undefined,
+      diagram: normaliseDiagram(record.diagram),
     }
   }).filter((slide): slide is AiLessonSlide => slide !== null)
 }
@@ -306,6 +340,32 @@ function richSlideParagraphs(
   ]
 }
 
+/** Deterministic (non-AI) diagrams so "taught with diagrams" holds even when the fallback deck is used — a hierarchy of the area's topics, and a per-point flow diagram, reused across the deck. */
+function fallbackRoadmapDiagram(source: VcaaStudyDesignUnitSource, level: VceCourseLevel): AiLessonDiagram | undefined {
+  const areaLabel = source.unitTitle || level.title
+  const topics = (source.areas[0]?.keyKnowledge ?? []).map((topic) => shortText(topic, 40)).slice(0, 5)
+  if (topics.length < 2) return undefined
+  return {
+    title: `${shortText(areaLabel, 50)}: what you'll learn`,
+    layout: 'hierarchy',
+    nodes: [{ id: 'root', label: shortText(areaLabel, 40) }, ...topics.map((topic, index) => ({ id: `topic-${index}`, label: topic }))],
+    edges: topics.map((_, index) => ({ from: 'root', to: `topic-${index}` })),
+  }
+}
+
+function fallbackConnectDiagram(item: TeachingItem): AiLessonDiagram {
+  return {
+    title: `How this idea connects to the outcome`,
+    layout: 'flow',
+    nodes: [
+      { id: 'idea', label: shortText(item.point, 36) },
+      { id: 'mechanism', label: 'How or why it works' },
+      { id: 'outcome', label: shortText(item.areaTitle, 36) },
+    ],
+    edges: [{ from: 'idea', to: 'mechanism' }, { from: 'mechanism', to: 'outcome' }],
+  }
+}
+
 function fallbackSlides(course: VceCourse, level: VceCourseLevel, source: VcaaStudyDesignUnitSource): AiLessonSlide[] {
   const items = teachingItemsFor(course, level, source)
   const commandTerms = source.commandTerms.length > 0 ? source.commandTerms : inferVcaaCommandTermsFromText(source.text, course.studyDesign.commandTerms)
@@ -332,6 +392,7 @@ function fallbackSlides(course: VceCourse, level: VceCourseLevel, source: VcaaSt
         bullets: source.areas.slice(0, 4).map((area) => area.title),
         commandTerm,
         activity: 'Write one sentence for each area of study: what will you need to know and what will you need to do?',
+        diagram: fallbackRoadmapDiagram(source, level),
       }
     }
 
@@ -424,6 +485,7 @@ function fallbackSlides(course: VceCourse, level: VceCourseLevel, source: VcaaSt
           'A strong response makes the connection visible, not assumed.',
         ],
         commandTerm,
+        diagram: fallbackConnectDiagram(item),
       }
     }
 
@@ -671,7 +733,11 @@ async function loadAreaSourceOrCatalog(course: VceCourse, level: VceCourseLevel,
   return catalogSourceForChapter(course, level, chapter)
 }
 
-function buildAreaPrompt(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, source: VcaaStudyDesignUnitSource) {
+function buildAreaPrompt(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, source: VcaaStudyDesignUnitSource, previousMistakes: string[]) {
+  const reteachNote = previousMistakes.length > 0
+    ? `\n\nThe student studied this Area of Study before and did not yet pass the mastery quiz. They got questions on these specific ideas wrong last time — spend extra time re-teaching each one with a fresh explanation and a different example than before, without just repeating the same wording:\n${previousMistakes.map((mistake) => `- ${mistake}`).join('\n')}`
+    : ''
+
   return `Create a deep-dive VCE teaching lesson pack for ${course.name}, ${level.title}, focused entirely on one Area of Study: "${chapter.title}".
 
 Use the uploaded VCAA study design text as the source of truth. This lesson pack must go deeper into this single Area of Study than a whole-unit overview would — every slide should serve this one area, not the rest of the unit.
@@ -680,7 +746,7 @@ VCAA Area of Study outline parsed from the study design:
 ${sourceOutline(source)}
 
 VCAA command terms to teach in context:
-${formatCommandTermsForPrompt(source.commandTerms)}
+${formatCommandTermsForPrompt(source.commandTerms)}${reteachNote}
 
 Return strict JSON only, no markdown, with this shape:
 {
@@ -700,7 +766,13 @@ Return strict JSON only, no markdown, with this shape:
       "commandTerm": { "term": "Explain", "meaning": "meaning", "responseMove": "response move", "source": "${VCAA_COMMAND_TERMS_SOURCE.url}" },
       "activity": "optional student task",
       "question": "optional VCE-style check question",
-      "answerGuide": "optional answer guide"
+      "answerGuide": "optional answer guide",
+      "diagram": {
+        "title": "short diagram title",
+        "layout": "flow|cycle|hierarchy|timeline|comparison",
+        "nodes": [{ "id": "a", "label": "short label", "detail": "optional one-sentence detail" }],
+        "edges": [{ "from": "a", "to": "b", "label": "optional relationship label" }]
+      }
     }
   ]
 }
@@ -714,17 +786,18 @@ Rules:
 - Cover every key knowledge point for this Area of Study, each taught with explanation, a worked/modelled example, and at least one guided activity or check question.
 - Use VCAA command terms in context. Teach what the command term asks the student to do before asking the student to answer.
 - Sequence the slides as a real lesson: hook, direct teaching, examples, guided practice, independent activity, short VCE-style checks, answer feedback, and a final checkpoint for this Area of Study.
+- Include a "diagram" field on 4-7 slides across the deck, wherever a visual would genuinely help — a process or cycle (e.g. a biological or business cycle), a sequence (e.g. steps, a historical timeline), a hierarchy (e.g. a concept breaking into parts), or a comparison (e.g. two ideas side by side). Omit "diagram" entirely on slides where a visual would not add anything. Every edge must reference a node id that exists in the same diagram's "nodes" list. Use 3-6 nodes per diagram — never just 1.
 - Do not copy long passages from the study design or glossary. Paraphrase into student-friendly teaching.`
 }
 
-export async function createAiAreaLessonPack(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, signal?: AbortSignal): Promise<AiUnitLessonPack> {
+export async function createAiAreaLessonPack(course: VceCourse, level: VceCourseLevel, chapter: VceCourseChapter, previousMistakes: string[] = [], signal?: AbortSignal): Promise<AiUnitLessonPack> {
   const chapterIndex = level.chapters.findIndex((item) => item.id === chapter.id)
   const source = await loadAreaSourceOrCatalog(course, level, chapter, chapterIndex, signal)
   const fallback: AiUnitLessonPack = { ...buildFallbackPack(course, level, source), chapterId: chapter.id, id: `${course.id}-unit-${level.unit}-${chapter.id}-fallback-pack` }
 
   try {
     const result = await createTutorReplyWithFallback({
-      message: buildAreaPrompt(course, level, chapter, source),
+      message: buildAreaPrompt(course, level, chapter, source, previousMistakes),
       documents: [
         { name: source.sourceTitle, text: source.text },
         { name: VCAA_COMMAND_TERMS_SOURCE.label, text: formatCommandTermsForPrompt(source.commandTerms) },

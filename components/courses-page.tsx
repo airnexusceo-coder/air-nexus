@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  BrainCircuit,
+  CalendarClock,
   CheckCircle2,
   ChevronRight,
   CircleDot,
@@ -21,7 +22,9 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Trophy,
   X,
+  XCircle,
 } from 'lucide-react'
 
 import type { NexusPlan } from '@/lib/plans'
@@ -37,7 +40,9 @@ import {
   type VceCourseLesson,
   type VceCourseLevel,
 } from '@/lib/courses/vce-catalog'
-import type { AiUnitLessonPack } from '@/lib/courses/lesson-pack-types'
+import type { AreaProgressSummary, AreaQuizGradeResult, CourseAreaSessionDTO } from '@/lib/courses/area-session-types'
+import type { AreaQuiz, AreaQuizPreview } from '@/lib/courses/area-quiz-types'
+import { DiagramView } from '@/components/study/diagram-view'
 
 type CoursePurchase = { id: string; courseId: string; pointsSpent: number; purchasedAt: string; expiresAt: string }
 
@@ -64,10 +69,10 @@ type ActiveLesson = {
   lesson: VceCourseLesson
 }
 
-type ActiveUnitLessonPack = {
+type ActiveAreaStudy = {
   course: VceCourse
   level: VceCourseLevel
-  pack: AiUnitLessonPack
+  chapter: VceCourseChapter
 }
 
 type ActiveCourseAssessment = {
@@ -123,9 +128,9 @@ export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPur
   const [freeSubjectId, setFreeSubjectId] = useState<string | undefined>()
   const [plusSelection, setPlusSelection] = useState<PlusSelection | undefined>()
   const [activeLesson, setActiveLesson] = useState<ActiveLesson | null>(null)
-  const [activeUnitLessonPack, setActiveUnitLessonPack] = useState<ActiveUnitLessonPack | null>(null)
+  const [activeAreaStudy, setActiveAreaStudy] = useState<ActiveAreaStudy | null>(null)
   const [activeAssessment, setActiveAssessment] = useState<ActiveCourseAssessment | null>(null)
-  const [generatingPackKey, setGeneratingPackKey] = useState<string | null>(null)
+  const [areaProgressByUnit, setAreaProgressByUnit] = useState<Record<string, AreaProgressSummary[]>>({})
   const [purchases, setPurchases] = useState<CoursePurchase[]>([])
   const [purchasingCourseId, setPurchasingCourseId] = useState<string | null>(null)
 
@@ -222,8 +227,6 @@ export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPur
   )
 
   const unlockedUnits = selectedAccess.filter((entry) => entry.access.unlocked).length
-  const firstUnlockedLevel = selectedAccess.find((entry) => entry.access.unlocked)?.level ?? null
-  const headerLessonPackKey = firstUnlockedLevel ? `${selectedCourse.id}:${firstUnlockedLevel.unit}` : null
   const totalLessons = selectedCourse.levels.reduce(
     (unitTotal, level) => unitTotal + level.chapters.reduce((chapterTotal, chapter) => chapterTotal + chapter.lessons.length, 0),
     0,
@@ -292,28 +295,29 @@ export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPur
   const getUnlockedCount = (course: VceCourse) =>
     course.levels.filter((level) => resolveAccessWithPurchase(course, level.unit).unlocked)
       .length
-  const generateUnitLessonPack = async (course: VceCourse, level: VceCourseLevel, chapter?: VceCourseChapter) => {
-    const key = chapter ? `${course.id}:${level.unit}:${chapter.id}` : `${course.id}:${level.unit}`
-    setGeneratingPackKey(key)
-    try {
-      const response = await fetch('/api/courses/lesson-pack', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ courseId: course.id, unit: level.unit, plan, chapterId: chapter?.id }),
-      })
-      const data = await response.json().catch(() => null) as { pack?: AiUnitLessonPack; error?: string } | null
-      if (!response.ok || !data?.pack) {
-        throw new Error(data?.error ?? 'Could not generate this lesson pack.')
-      }
-      setActiveUnitLessonPack({ course, level, pack: data.pack })
-      notify?.(data.pack.generatedBy === 'ai' ? 'AI lesson pack generated.' : 'Study-design lesson pack generated from fallback structure.')
-    } catch (error) {
-      notify?.(error instanceof Error ? error.message : 'Could not generate this lesson pack.')
-    } finally {
-      setGeneratingPackKey(null)
-    }
-  }
+
+  const refreshAreaProgress = useCallback(async () => {
+    const unlockedLevels = selectedAccess.filter((entry) => entry.access.unlocked)
+    const results = await Promise.all(unlockedLevels.map(async (entry) => {
+      const response = await fetch(`/api/courses/area-progress?courseId=${encodeURIComponent(selectedCourse.id)}&unit=${entry.level.unit}`, { credentials: 'include', cache: 'no-store' })
+      if (!response.ok) return null
+      const data = await response.json().catch(() => null) as { progress?: AreaProgressSummary[] } | null
+      return { key: `${selectedCourse.id}:${entry.level.unit}`, progress: data?.progress ?? [] }
+    }))
+    setAreaProgressByUnit((current) => {
+      const next = { ...current }
+      for (const result of results) if (result) next[result.key] = result.progress
+      return next
+    })
+  }, [selectedCourse.id, selectedAccess])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => void refreshAreaProgress(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [refreshAreaProgress])
+
+  const areaProgressFor = (level: VceCourseLevel, chapter: VceCourseChapter) =>
+    areaProgressByUnit[`${selectedCourse.id}:${level.unit}`]?.find((entry) => entry.areaId === chapter.id)
 
   return (
     <section className="flex h-full flex-col gap-5 text-white">
@@ -474,23 +478,6 @@ export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPur
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {firstUnlockedLevel && (
-                  <button
-                    type="button"
-                    disabled={generatingPackKey === headerLessonPackKey}
-                    onClick={() => void generateUnitLessonPack(selectedCourse, firstUnlockedLevel)}
-                    className="inline-flex items-center gap-2 rounded-md border border-cyan-300/35 bg-cyan-300/12 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/18 disabled:cursor-wait disabled:opacity-60"
-                  >
-                    {generatingPackKey === headerLessonPackKey ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <BrainCircuit className="h-4 w-4" />
-                    )}
-                    {generatingPackKey === headerLessonPackKey
-                      ? 'Building lesson...'
-                      : `Build Unit ${firstUnlockedLevel.unit} AI lesson`}
-                  </button>
-                )}
                 {plan === 'Free' && !freeSubjectId && (
                   <button
                     type="button"
@@ -568,10 +555,8 @@ export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPur
                 onOpenLesson={(chapter, lesson) => setActiveLesson({ course: selectedCourse, level, chapter, lesson })}
                 onOpenAreaTest={(chapter) => setActiveAssessment({ course: selectedCourse, level, chapter, scope: 'area' })}
                 onOpenUnitTest={() => setActiveAssessment({ course: selectedCourse, level, scope: 'unit' })}
-                onGenerateUnitLesson={() => void generateUnitLessonPack(selectedCourse, level)}
-                generatingLessonPack={generatingPackKey === `${selectedCourse.id}:${level.unit}`}
-                onGenerateAreaLesson={(chapter) => void generateUnitLessonPack(selectedCourse, level, chapter)}
-                generatingAreaLessonKey={generatingPackKey}
+                onOpenAreaStudy={(chapter) => setActiveAreaStudy({ course: selectedCourse, level, chapter })}
+                areaProgress={(chapter) => areaProgressFor(level, chapter)}
                 onUpgrade={(requiredPlan) =>
                   onRequestUpgrade(`${selectedCourse.name} Unit ${level.unit}`, requiredPlan)
                 }
@@ -591,11 +576,14 @@ export function CoursesPage({ plan, nexusPoints, notify, onRequestUpgrade, onPur
           onClose={() => setActiveAssessment(null)}
         />
       )}
-      {activeUnitLessonPack && (
-        <UnitLessonPackModal
-          key={activeUnitLessonPack.pack.id}
-          activePack={activeUnitLessonPack}
-          onClose={() => setActiveUnitLessonPack(null)}
+      {activeAreaStudy && (
+        <AreaStudySessionModal
+          key={`${activeAreaStudy.course.id}-${activeAreaStudy.level.unit}-${activeAreaStudy.chapter.id}`}
+          plan={plan}
+          activeAreaStudy={activeAreaStudy}
+          notify={notify}
+          onClose={() => setActiveAreaStudy(null)}
+          onProgressChange={() => void refreshAreaProgress()}
         />
       )}
     </section>
@@ -641,10 +629,8 @@ type UnitCardProps = {
   onOpenLesson: (chapter: VceCourseChapter, lesson: VceCourseLesson) => void
   onOpenAreaTest: (chapter: VceCourseChapter) => void
   onOpenUnitTest: () => void
-  onGenerateUnitLesson: () => void
-  generatingLessonPack: boolean
-  onGenerateAreaLesson: (chapter: VceCourseChapter) => void
-  generatingAreaLessonKey: string | null
+  onOpenAreaStudy: (chapter: VceCourseChapter) => void
+  areaProgress: (chapter: VceCourseChapter) => AreaProgressSummary | undefined
 }
 
 function UnitCard({
@@ -661,10 +647,8 @@ function UnitCard({
   onOpenLesson,
   onOpenAreaTest,
   onOpenUnitTest,
-  onGenerateUnitLesson,
-  generatingLessonPack,
-  onGenerateAreaLesson,
-  generatingAreaLessonKey,
+  onOpenAreaStudy,
+  areaProgress,
 }: UnitCardProps) {
   const statusLabel = unlocked ? 'Unlocked' : 'Locked'
   const Icon = unlocked ? CheckCircle2 : LockKeyhole
@@ -716,8 +700,8 @@ function UnitCard({
             locked={!unlocked}
             onOpenLesson={onOpenLesson}
             onOpenAreaTest={onOpenAreaTest}
-            onGenerateAreaLesson={onGenerateAreaLesson}
-            generatingAreaLesson={generatingAreaLessonKey === `${course.id}:${level.unit}:${chapter.id}`}
+            onOpenAreaStudy={onOpenAreaStudy}
+            progress={areaProgress(chapter)}
           />
         ))}
       </div>
@@ -739,15 +723,6 @@ function UnitCard({
             >
               <ListChecks className="h-3.5 w-3.5" />
               Unit test
-            </button>
-            <button
-              type="button"
-              disabled={generatingLessonPack}
-              onClick={onGenerateUnitLesson}
-              className="inline-flex items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-300/16 disabled:cursor-wait disabled:opacity-60"
-            >
-              {generatingLessonPack ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-              {generatingLessonPack ? 'Building...' : 'AI unit lesson'}
             </button>
           </div>
         ) : plan === 'Free' && !hasFreeSubjectChoice ? (
@@ -789,27 +764,43 @@ function ChapterBlock({
   locked,
   onOpenLesson,
   onOpenAreaTest,
-  onGenerateAreaLesson,
-  generatingAreaLesson,
+  onOpenAreaStudy,
+  progress,
 }: {
   chapter: VceCourseChapter
   chapterNumber: number
   locked: boolean
   onOpenLesson: (chapter: VceCourseChapter, lesson: VceCourseLesson) => void
   onOpenAreaTest: (chapter: VceCourseChapter) => void
-  onGenerateAreaLesson: (chapter: VceCourseChapter) => void
-  generatingAreaLesson: boolean
+  onOpenAreaStudy: (chapter: VceCourseChapter) => void
+  progress?: AreaProgressSummary
 }) {
+  const mastered = progress?.mastered ?? false
+  const attemptedToday = progress?.attemptedToday ?? false
+  const studyLabel = mastered
+    ? 'Mastered — study again'
+    : attemptedToday
+      ? "Today's quiz done — review"
+      : progress?.lastStudiedDate
+        ? "Continue today's session"
+        : 'Study this Area of Study'
+
   return (
     <div className={classNames('border-t border-white/10 pt-3', locked && 'opacity-70')}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-black/18 px-2.5 py-1 text-xs font-semibold text-white/50">
           <CircleDot className="h-3.5 w-3.5" />
-          Chapter {chapterNumber}
+          Area of Study {chapterNumber}
         </span>
         <span className="rounded-md border border-white/10 bg-white/[0.035] px-2.5 py-1 text-xs font-semibold text-white/45">
           {chapter.studyDesignFocus}
         </span>
+        {mastered && (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300/30 bg-emerald-300/10 px-2.5 py-1 text-xs font-semibold text-emerald-100">
+            <Trophy className="h-3.5 w-3.5" />
+            Mastered
+          </span>
+        )}
         <button
           type="button"
           disabled={locked}
@@ -820,12 +811,15 @@ function ChapterBlock({
         </button>
         <button
           type="button"
-          disabled={locked || generatingAreaLesson}
-          onClick={() => onGenerateAreaLesson(chapter)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-xs font-semibold text-cyan-50 transition hover:bg-cyan-300/16 disabled:cursor-not-allowed disabled:opacity-45"
+          disabled={locked}
+          onClick={() => onOpenAreaStudy(chapter)}
+          className={classNames(
+            'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-45',
+            mastered ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-50 hover:bg-emerald-300/16' : 'border-cyan-300/30 bg-cyan-300/10 text-cyan-50 hover:bg-cyan-300/16',
+          )}
         >
-          {generatingAreaLesson ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {generatingAreaLesson ? 'Building 50 slides...' : 'Deep-dive lesson (50 slides)'}
+          {attemptedToday && !mastered ? <CalendarClock className="h-3.5 w-3.5" /> : mastered ? <Trophy className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {studyLabel}
         </button>
       </div>
       <h4 className="mt-2 text-sm font-semibold text-white">{chapter.title}</h4>
@@ -1467,12 +1461,63 @@ function LessonStudyModal({ activeLesson, onClose }: { activeLesson: ActiveLesso
     </div>
   )
 }
-function UnitLessonPackModal({ activePack, onClose }: { activePack: ActiveUnitLessonPack; onClose: () => void }) {
+function isFullQuiz(quiz: AreaQuiz | AreaQuizPreview, attempted: boolean): quiz is AreaQuiz {
+  return attempted
+}
+
+function AreaStudySessionModal({
+  activeAreaStudy,
+  plan,
+  notify,
+  onClose,
+  onProgressChange,
+}: {
+  activeAreaStudy: ActiveAreaStudy
+  plan: NexusPlan
+  notify?: NotifyFn
+  onClose: () => void
+  onProgressChange: () => void
+}) {
+  const [session, setSession] = useState<CourseAreaSessionDTO | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [view, setView] = useState<'slides' | 'quiz'>('slides')
   const [slideIndex, setSlideIndex] = useState(0)
   const [answerDrafts, setAnswerDrafts] = useState<Record<string, string>>({})
   const [answerFeedbackBySlide, setAnswerFeedbackBySlide] = useState<Record<string, AiAnswerFeedback | undefined>>({})
   const [checkingSlideId, setCheckingSlideId] = useState<string | null>(null)
-  const slides = activePack.pack.slides
+  const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({})
+  const [submittingQuiz, setSubmittingQuiz] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setLoadError('')
+    void (async () => {
+      try {
+        const response = await fetch('/api/courses/area-session', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ courseId: activeAreaStudy.course.id, unit: activeAreaStudy.level.unit, areaId: activeAreaStudy.chapter.id, plan }),
+        })
+        const data = await response.json().catch(() => null) as { session?: CourseAreaSessionDTO; error?: string } | null
+        if (cancelled) return
+        if (!response.ok || !data?.session) throw new Error(data?.error ?? "Could not load today's study session.")
+        setSession(data.session)
+        if (data.session.quizAttempted) setView('quiz')
+      } catch (error) {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Could not load today's study session.")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeAreaStudy.course.id, activeAreaStudy.level.unit, activeAreaStudy.chapter.id, plan])
+
+  const slides = session?.slides ?? []
   const currentSlide = slides[slideIndex] ?? slides[0]
   const canGoBack = slideIndex > 0
   const canGoForward = slideIndex < slides.length - 1
@@ -1486,13 +1531,13 @@ function UnitLessonPackModal({ activePack, onClose }: { activePack: ActiveUnitLe
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
+      if (view !== 'slides') return
       if (event.key === 'ArrowLeft') setSlideIndex((current) => Math.max(0, current - 1))
       if (event.key === 'ArrowRight') setSlideIndex((current) => Math.min(slides.length - 1, current + 1))
     }
-
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose, slides.length])
+  }, [onClose, slides.length, view])
 
   const checkStudentAnswer = async () => {
     if (!currentSlide?.question || !answerText.trim()) return
@@ -1505,9 +1550,8 @@ function UnitLessonPackModal({ activePack, onClose }: { activePack: ActiveUnitLe
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          courseId: activePack.course.id,
-          unit: activePack.level.unit,
-          slideId: currentSlide.id,
+          courseId: activeAreaStudy.course.id,
+          unit: activeAreaStudy.level.unit,
           question: currentSlide.question,
           answer: answerText,
           answerGuide: currentSlide.answerGuide ?? [currentSlide.body, ...slideParagraphs].join('\n\n'),
@@ -1534,7 +1578,33 @@ function UnitLessonPackModal({ activePack, onClose }: { activePack: ActiveUnitLe
     }
   }
 
-  if (!currentSlide) return null
+  const submitQuiz = async () => {
+    if (!session || session.quiz.questions.length === 0) return
+    const answers = session.quiz.questions.map((_, index) => quizAnswers[index] ?? -1)
+    if (answers.some((answer) => answer < 0)) {
+      notify?.('Answer every question before submitting.')
+      return
+    }
+    setSubmittingQuiz(true)
+    try {
+      const response = await fetch('/api/courses/area-session/submit', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: session.id, answers }),
+      })
+      const data = await response.json().catch(() => null) as { result?: AreaQuizGradeResult; error?: string } | null
+      if (!response.ok || !data?.result) throw new Error(data?.error ?? 'Could not submit your quiz.')
+      const result = data.result
+      setSession((current) => current ? { ...current, quiz: result.quiz, quizAttempted: true, quizScore: result.score, quizTotal: result.total, quizPassed: result.passed, quizAnswers: result.answers } : current)
+      onProgressChange()
+      notify?.(result.passed ? `${activeAreaStudy.chapter.title} mastered!` : `You scored ${result.score}/${result.total} on today's quiz — come back tomorrow to try this Area of Study again.`)
+    } catch (error) {
+      notify?.(error instanceof Error ? error.message : 'Could not submit your quiz.')
+    } finally {
+      setSubmittingQuiz(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/76 px-4 py-6 backdrop-blur-md">
@@ -1542,211 +1612,303 @@ function UnitLessonPackModal({ activePack, onClose }: { activePack: ActiveUnitLe
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-100/70">
-              {activePack.pack.generatedBy === 'ai' ? 'AI VCE lesson pack' : 'VCE lesson pack'}
+              {activeAreaStudy.course.name} / {activeAreaStudy.level.title}
             </p>
-            <h3 className="mt-1 truncate text-base font-semibold text-white">
-              {activePack.course.name} / {activePack.pack.unitTitle}
-            </h3>
+            <h3 className="mt-1 truncate text-base font-semibold text-white">{activeAreaStudy.chapter.title}</h3>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close unit lesson pack"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {session && (
+              <div className="flex overflow-hidden rounded-md border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setView('slides')}
+                  className={classNames('px-3 py-1.5 text-xs font-semibold transition', view === 'slides' ? 'bg-cyan-300/15 text-cyan-100' : 'bg-white/[0.03] text-white/50 hover:text-white')}
+                >
+                  Lesson
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView('quiz')}
+                  className={classNames('px-3 py-1.5 text-xs font-semibold transition', view === 'quiz' ? 'bg-cyan-300/15 text-cyan-100' : 'bg-white/[0.03] text-white/50 hover:text-white')}
+                >
+                  {session.quizAttempted ? "Today's quiz result" : "Today's quiz"}
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close study session"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/10 bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-0 overflow-auto lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="border-b border-white/10 bg-white/[0.025] p-4 lg:border-b-0 lg:border-r">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
-                {slides.length} slides
-              </span>
-              <span className="rounded-md border border-white/10 bg-black/18 px-2.5 py-1 text-xs font-semibold text-white/45">
-                {activePack.pack.generatedBy}
-              </span>
+        {loading ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 p-10 text-center">
+            <LoaderCircle className="h-8 w-8 animate-spin text-cyan-200" />
+            <div>
+              <p className="text-sm font-semibold text-white">Building today&apos;s lesson on {activeAreaStudy.chapter.title}...</p>
+              <p className="mt-1 text-xs text-white/45">This can take up to a minute the first time each day.</p>
             </div>
-            <div className="mt-4 max-h-[56vh] space-y-2 overflow-auto pr-1">
-              {slides.map((slide, index) => (
-                <button
-                  key={slide.id}
-                  type="button"
-                  onClick={() => setSlideIndex(index)}
-                  className={classNames(
-                    'flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left text-sm transition',
-                    slideIndex === index
-                      ? 'border-cyan-300/35 bg-cyan-300/12 text-white'
-                      : 'border-white/10 bg-black/18 text-white/52 hover:border-white/20 hover:text-white',
-                  )}
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/[0.06] text-xs font-semibold">
-                    {index + 1}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate font-semibold">{slide.title}</span>
-                    <span className="mt-0.5 block text-[11px] uppercase tracking-[0.1em] text-white/32">{slide.kind} / {slide.minutes} min</span>
-                  </span>
-                </button>
-              ))}
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-10 text-center">
+            <AlertTriangle className="h-8 w-8 text-amber-300" />
+            <p className="max-w-md text-sm text-white/70">{loadError}</p>
+            <button type="button" onClick={onClose} className="mt-2 rounded-md border border-white/15 bg-white/[0.05] px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/[0.08]">
+              Close
+            </button>
+          </div>
+        ) : !session || !currentSlide ? null : view === 'quiz' ? (
+          <div className="min-h-0 flex-1 overflow-auto p-5 sm:p-7">
+            {session.quizAttempted && (
+              <div
+                className={classNames(
+                  'mb-5 flex flex-wrap items-center gap-3 rounded-lg border p-4',
+                  session.quizPassed ? 'border-emerald-300/30 bg-emerald-300/10' : 'border-amber-300/25 bg-amber-300/10',
+                )}
+              >
+                {session.quizPassed ? <Trophy className="h-6 w-6 shrink-0 text-emerald-200" /> : <CalendarClock className="h-6 w-6 shrink-0 text-amber-200" />}
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    {session.quizPassed ? `Mastered! You scored ${session.quizScore}/${session.quizTotal}.` : `You scored ${session.quizScore}/${session.quizTotal} — not quite 100% yet.`}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-white/60">
+                    {session.quizPassed
+                      ? 'This Area of Study is marked mastered. Pick this area again any time to revise, or move on to another one.'
+                      : "This Area of Study stays active. Come back tomorrow for a fresh lesson and quiz on the same area — you'll need 100% to master it."}
+                  </p>
+                </div>
+              </div>
+            )}
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/40">{session.quiz.title}</p>
+            <div className="mt-4 space-y-4">
+              {session.quiz.questions.map((question, questionIndex) => {
+                const attempted = session.quizAttempted
+                const revealed = isFullQuiz(session.quiz, attempted) ? session.quiz.questions[questionIndex] : null
+                const yourAnswer = attempted ? session.quizAnswers?.[questionIndex] ?? -1 : quizAnswers[questionIndex] ?? -1
+                return (
+                  <div key={question.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-sm font-semibold leading-6 text-white">{questionIndex + 1}. {question.question}</p>
+                    <div className="mt-3 grid gap-2">
+                      {question.options.map((option, optionIndex) => {
+                        const isSelected = yourAnswer === optionIndex
+                        const isCorrect = Boolean(revealed && revealed.correctIndex === optionIndex)
+                        const isWrongSelected = attempted && isSelected && !isCorrect
+                        return (
+                          <button
+                            key={optionIndex}
+                            type="button"
+                            disabled={attempted}
+                            onClick={() => setQuizAnswers((current) => ({ ...current, [questionIndex]: optionIndex }))}
+                            className={classNames(
+                              'flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition',
+                              attempted
+                                ? isCorrect
+                                  ? 'border-emerald-300/40 bg-emerald-300/10 text-emerald-100'
+                                  : isWrongSelected
+                                    ? 'border-rose-300/40 bg-rose-300/10 text-rose-100'
+                                    : 'border-white/10 bg-black/18 text-white/45'
+                                : isSelected
+                                  ? 'border-cyan-300/40 bg-cyan-300/12 text-white'
+                                  : 'border-white/10 bg-black/18 text-white/70 hover:border-white/25',
+                            )}
+                          >
+                            {attempted && isCorrect && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                            {isWrongSelected && <XCircle className="h-4 w-4 shrink-0" />}
+                            <span>{option}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {revealed && <p className="mt-3 text-xs leading-5 text-white/55">{revealed.explanation}</p>}
+                  </div>
+                )
+              })}
             </div>
-            <a
-              href={activePack.pack.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-flex items-center gap-2 rounded-md border border-white/10 bg-black/18 px-3 py-2 text-xs font-semibold text-white/55 transition hover:border-white/20 hover:text-white"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              {activePack.pack.sourceTitle}
-            </a>
-            {activePack.pack.commandTerms.length > 0 && (
-              <div className="mt-4 rounded-lg border border-white/10 bg-black/18 p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-white/38">Command terms</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {activePack.pack.commandTerms.slice(0, 8).map((term) => (
-                    <span key={term.term} className="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] font-semibold text-white/58">
-                      {term.term}
-                    </span>
+            {!session.quizAttempted && (
+              <button
+                type="button"
+                disabled={submittingQuiz}
+                onClick={() => void submitQuiz()}
+                className="mt-5 inline-flex items-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-300/12 px-4 py-2.5 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/18 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {submittingQuiz ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                {submittingQuiz ? 'Submitting...' : "Submit today's quiz"}
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="grid min-h-0 flex-1 gap-0 overflow-auto lg:grid-cols-[280px_minmax(0,1fr)]">
+              <aside className="border-b border-white/10 bg-white/[0.025] p-4 lg:border-b-0 lg:border-r">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
+                    {slides.length} slides
+                  </span>
+                  <span className="rounded-md border border-white/10 bg-black/18 px-2.5 py-1 text-xs font-semibold text-white/45">
+                    {session.generatedBy}
+                  </span>
+                </div>
+                <div className="mt-4 max-h-[56vh] space-y-2 overflow-auto pr-1">
+                  {slides.map((slide, index) => (
+                    <button
+                      key={slide.id}
+                      type="button"
+                      onClick={() => setSlideIndex(index)}
+                      className={classNames(
+                        'flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left text-sm transition',
+                        slideIndex === index
+                          ? 'border-cyan-300/35 bg-cyan-300/12 text-white'
+                          : 'border-white/10 bg-black/18 text-white/52 hover:border-white/20 hover:text-white',
+                      )}
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/[0.06] text-xs font-semibold">
+                        {index + 1}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold">{slide.title}</span>
+                        <span className="mt-0.5 block text-[11px] uppercase tracking-[0.1em] text-white/32">{slide.kind} / {slide.minutes} min</span>
+                      </span>
+                    </button>
                   ))}
                 </div>
-              </div>
-            )}
-          </aside>
+              </aside>
 
-          <section className="min-w-0 p-5 sm:p-7">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100">
-                {currentSlide.kind}
-              </span>
-              <span className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-1 text-xs font-semibold text-white/45">
-                Slide {slideIndex + 1} of {slides.length}
-              </span>
-              <span className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-1 text-xs font-semibold text-white/45">
-                {currentSlide.minutes} min
-              </span>
-            </div>
-            <h2 className="mt-4 text-2xl font-semibold tracking-normal text-white sm:text-4xl">{currentSlide.title}</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-white/68">{currentSlide.body}</p>
-
-            {slideParagraphs.length > 0 && (
-              <div className="mt-6 max-w-4xl space-y-4 rounded-lg border border-white/10 bg-white/[0.028] p-5">
-                {slideParagraphs.map((paragraph, index) => (
-                  <p key={`${currentSlide.id}-paragraph-${index}`} className="text-base leading-8 text-white/78">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            {currentSlide.bullets.length > 0 && (
-              <div className="mt-6 grid gap-3">
-                {currentSlide.bullets.map((bullet) => (
-                  <div key={bullet} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
-                    <p className="text-sm leading-6 text-white/72">{bullet}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {(currentSlide.commandTerm || currentSlide.activity || currentSlide.question || currentSlide.answerGuide) && (
-              <div className="mt-6 grid gap-3 lg:grid-cols-3">
-                {currentSlide.commandTerm && (
-                  <SlideCallout
-                    label={`Command term: ${currentSlide.commandTerm.term}`}
-                    value={`${currentSlide.commandTerm.meaning} Response move: ${currentSlide.commandTerm.responseMove}`}
-                  />
-                )}
-                {currentSlide.activity && <SlideCallout label="Activity" value={currentSlide.activity} />}
-                {currentSlide.question && <SlideCallout label="Question" value={currentSlide.question} />}
-                {currentSlide.answerGuide && <SlideCallout label="Answer guide" value={currentSlide.answerGuide} />}
-              </div>
-            )}
-
-            {hasAnswerCheck && (
-              <div className="mt-6 rounded-lg border border-cyan-300/18 bg-cyan-300/[0.055] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.13em] text-cyan-100/70">AI answer check</p>
-                    <p className="mt-1 text-sm text-white/58">Type your response and the tutor will check it against the slide question.</p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={checkingAnswer || !answerText.trim()}
-                    onClick={() => void checkStudentAnswer()}
-                    className="inline-flex items-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-300/12 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/18 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {checkingAnswer ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                    {checkingAnswer ? 'Checking...' : 'Check answer'}
-                  </button>
+              <section className="min-w-0 p-5 sm:p-7">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100">
+                    {currentSlide.kind}
+                  </span>
+                  <span className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-1 text-xs font-semibold text-white/45">
+                    Slide {slideIndex + 1} of {slides.length}
+                  </span>
+                  <span className="rounded-md border border-white/10 bg-white/[0.035] px-3 py-1 text-xs font-semibold text-white/45">
+                    {currentSlide.minutes} min
+                  </span>
                 </div>
-                <textarea
-                  value={answerText}
-                  onChange={(event) => setAnswerDrafts((current) => ({ ...current, [currentSlide.id]: event.target.value }))}
-                  rows={5}
-                  placeholder="Write your answer here..."
-                  className="mt-4 w-full resize-none rounded-lg border border-white/10 bg-black/30 p-3 text-sm leading-6 text-white outline-none transition placeholder:text-white/32 focus:border-cyan-300/35"
-                />
-                {answerFeedback && (
-                  <div className="mt-3 rounded-lg border border-white/10 bg-black/24 p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={classNames(
-                          'rounded-md border px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em]',
-                          answerFeedback.verdict === 'correct'
-                            ? 'border-emerald-300/30 bg-emerald-300/10 text-emerald-100'
-                            : answerFeedback.verdict === 'incorrect'
-                              ? 'border-rose-300/30 bg-rose-300/10 text-rose-100'
-                              : 'border-amber-300/30 bg-amber-300/10 text-amber-100',
-                        )}
-                      >
-                        {answerFeedback.verdict}
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-white/74">{answerFeedback.feedback}</p>
-                    <p className="mt-2 text-sm leading-6 text-white/58">{answerFeedback.correction}</p>
-                    <p className="mt-2 text-sm font-semibold leading-6 text-cyan-100">{answerFeedback.nextStep}</p>
+                <h2 className="mt-4 text-2xl font-semibold tracking-normal text-white sm:text-4xl">{currentSlide.title}</h2>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-white/68">{currentSlide.body}</p>
+
+                {slideParagraphs.length > 0 && (
+                  <div className="mt-6 max-w-4xl space-y-4 rounded-lg border border-white/10 bg-white/[0.028] p-5">
+                    {slideParagraphs.map((paragraph, index) => (
+                      <p key={`${currentSlide.id}-paragraph-${index}`} className="text-base leading-8 text-white/78">
+                        {paragraph}
+                      </p>
+                    ))}
                   </div>
                 )}
-              </div>
-            )}
-          </section>
-        </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-4 py-3 sm:px-5">
-          <button
-            type="button"
-            disabled={!canGoBack}
-            onClick={() => setSlideIndex((current) => Math.max(0, current - 1))}
-            className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-35"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Previous
-          </button>
-          <div className="flex max-w-[420px] flex-wrap justify-center gap-1.5">
-            {slides.map((slide, index) => (
-              <button
-                key={slide.id}
-                type="button"
-                aria-label={`Go to generated slide ${index + 1}`}
-                onClick={() => setSlideIndex(index)}
-                className={classNames(
-                  'h-2.5 w-2.5 rounded-full transition',
-                  slideIndex === index ? 'bg-cyan-200' : 'bg-white/18 hover:bg-white/35',
+                {currentSlide.diagram && (
+                  <div className="mt-6 max-w-4xl">
+                    <DiagramView diagram={currentSlide.diagram} />
+                  </div>
                 )}
-              />
-            ))}
-          </div>
-          <button
-            type="button"
-            disabled={!canGoForward}
-            onClick={() => setSlideIndex((current) => Math.min(slides.length - 1, current + 1))}
-            className="inline-flex items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/16 disabled:cursor-not-allowed disabled:opacity-35"
-          >
-            Next
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
+
+                {currentSlide.bullets.length > 0 && (
+                  <div className="mt-6 grid gap-3">
+                    {currentSlide.bullets.map((bullet) => (
+                      <div key={bullet} className="rounded-lg border border-white/10 bg-white/[0.035] p-4">
+                        <p className="text-sm leading-6 text-white/72">{bullet}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(currentSlide.commandTerm || currentSlide.activity || currentSlide.question || currentSlide.answerGuide) && (
+                  <div className="mt-6 grid gap-3 lg:grid-cols-3">
+                    {currentSlide.commandTerm && (
+                      <SlideCallout
+                        label={`Command term: ${currentSlide.commandTerm.term}`}
+                        value={`${currentSlide.commandTerm.meaning} Response move: ${currentSlide.commandTerm.responseMove}`}
+                      />
+                    )}
+                    {currentSlide.activity && <SlideCallout label="Activity" value={currentSlide.activity} />}
+                    {currentSlide.question && <SlideCallout label="Question" value={currentSlide.question} />}
+                    {currentSlide.answerGuide && <SlideCallout label="Answer guide" value={currentSlide.answerGuide} />}
+                  </div>
+                )}
+
+                {hasAnswerCheck && (
+                  <div className="mt-6 rounded-lg border border-cyan-300/18 bg-cyan-300/[0.055] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.13em] text-cyan-100/70">AI answer check</p>
+                        <p className="mt-1 text-sm text-white/58">Type your response and the tutor will check it against the slide question.</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={checkingAnswer || !answerText.trim()}
+                        onClick={() => void checkStudentAnswer()}
+                        className="inline-flex items-center gap-2 rounded-md border border-cyan-300/30 bg-cyan-300/12 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/18 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {checkingAnswer ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                        {checkingAnswer ? 'Checking...' : 'Check answer'}
+                      </button>
+                    </div>
+                    <textarea
+                      value={answerText}
+                      onChange={(event) => setAnswerDrafts((current) => ({ ...current, [currentSlide.id]: event.target.value }))}
+                      rows={5}
+                      placeholder="Write your answer here..."
+                      className="mt-4 w-full resize-none rounded-lg border border-white/10 bg-black/30 p-3 text-sm leading-6 text-white outline-none transition placeholder:text-white/32 focus:border-cyan-300/35"
+                    />
+                    {answerFeedback && <AnswerFeedbackPanel feedback={answerFeedback} />}
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-4 py-3 sm:px-5">
+              <button
+                type="button"
+                disabled={!canGoBack}
+                onClick={() => setSlideIndex((current) => Math.max(0, current - 1))}
+                className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Previous
+              </button>
+              <div className="flex max-w-[420px] flex-wrap justify-center gap-1.5">
+                {slides.map((slide, index) => (
+                  <button
+                    key={slide.id}
+                    type="button"
+                    aria-label={`Go to generated slide ${index + 1}`}
+                    onClick={() => setSlideIndex(index)}
+                    className={classNames(
+                      'h-2.5 w-2.5 rounded-full transition',
+                      slideIndex === index ? 'bg-cyan-200' : 'bg-white/18 hover:bg-white/35',
+                    )}
+                  />
+                ))}
+              </div>
+              {canGoForward ? (
+                <button
+                  type="button"
+                  onClick={() => setSlideIndex((current) => Math.min(slides.length - 1, current + 1))}
+                  className="inline-flex items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/16"
+                >
+                  Next
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setView('quiz')}
+                  className="inline-flex items-center gap-2 rounded-md border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-sm font-semibold text-cyan-50 transition hover:bg-cyan-300/16"
+                >
+                  {session.quizAttempted ? "See today's result" : "Take today's quiz"}
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

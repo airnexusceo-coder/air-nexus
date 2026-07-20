@@ -7,6 +7,28 @@ export type AiLessonCommandTerm = {
   source?: string
 }
 
+/** A general-purpose labelled diagram — covers cycle/flow/hierarchy/timeline/comparison teaching diagrams across every VCE subject without needing image generation. */
+export type DiagramLayout = 'flow' | 'cycle' | 'hierarchy' | 'timeline' | 'comparison'
+
+export type AiLessonDiagramNode = {
+  id: string
+  label: string
+  detail?: string
+}
+
+export type AiLessonDiagramEdge = {
+  from: string
+  to: string
+  label?: string
+}
+
+export type AiLessonDiagram = {
+  title: string
+  layout: DiagramLayout
+  nodes: AiLessonDiagramNode[]
+  edges: AiLessonDiagramEdge[]
+}
+
 export type AiLessonSlide = {
   id: string
   kind: AiLessonSlideKind
@@ -19,6 +41,7 @@ export type AiLessonSlide = {
   activity?: string
   question?: string
   answerGuide?: string
+  diagram?: AiLessonDiagram
 }
 
 export type AiUnitLessonPack = {
