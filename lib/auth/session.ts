@@ -61,9 +61,16 @@ export async function signUpWithPassword(input: { username: string; email: strin
   return body.session
 }
 
-/** Builds the link that starts Supabase's hosted Google OAuth flow — a plain navigation (`<a href>`), not a fetch call. */
+/**
+ * Builds the link that starts Supabase's hosted Google OAuth flow — a plain
+ * navigation (`<a href>`), not a fetch call. Deliberately a plain relative
+ * path rather than `apiUrl()`: `apiUrl` resolves to an absolute URL only in
+ * the browser (`window.location.origin` doesn't exist during SSR), so using
+ * it here would render a different `href` on the server than on the client
+ * and trigger a hydration mismatch on every page load.
+ */
 export function googleSignInUrl(nextPath: string) {
-  return apiUrl('/api/auth/google') + '?next=' + encodeURIComponent(nextPath)
+  return '/api/auth/google?next=' + encodeURIComponent(nextPath)
 }
 
 export async function completeGoogleOAuth(input: { accessToken: string; refreshToken: string; expiresIn?: number }) {

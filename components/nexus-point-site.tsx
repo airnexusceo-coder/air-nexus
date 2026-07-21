@@ -238,20 +238,22 @@ const AUTH_FEATURE_PILLS = [
   { label: 'Smart notes', icon: FileText },
 ]
 
-function StarfieldBackground() {
+/** A flat, high-contrast backdrop: a thin grid (no blur, no colour glow) plus a few bare-outline shapes — the Vercel-style "shapes and lines on black" look, not a photographic scene. */
+function MinimalBackdrop() {
   return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        className="absolute inset-0 opacity-[0.35]"
-        style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.9) 1px, transparent 1.4px)', backgroundSize: '3px 3px' }}
-      />
-      <div
-        className="absolute inset-0 opacity-[0.25]"
-        style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.9) 1.4px, transparent 1.8px)', backgroundSize: '9px 9px', backgroundPosition: '4px 4px' }}
-      />
-      <div className="absolute -left-1/4 top-0 size-[560px] rounded-full bg-violet-500/12 blur-[120px]" />
-      <div className="absolute right-0 top-1/3 size-[480px] rounded-full bg-cyan-400/10 blur-[120px]" />
-      <div className="absolute inset-x-0 -bottom-40 h-72 bg-[radial-gradient(ellipse_at_bottom,rgba(96,165,250,0.28),transparent_65%)]" />
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0"
+      style={{
+        backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.07) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.07) 1px, transparent 1px)',
+        backgroundSize: '56px 56px',
+      }}
+    >
+      <div className="absolute -left-12 top-10 size-36 rounded-full border border-white/20" />
+      <div className="absolute right-8 top-1/3 size-20 rotate-45 border border-violet-300/40" />
+      <div className="absolute bottom-16 left-1/4 size-2.5 rounded-full bg-violet-300" />
+      <div className="absolute right-1/3 top-12 h-14 w-px bg-white/15" />
+      <div className="absolute right-1/3 top-12 h-px w-14 bg-white/15" />
     </div>
   )
 }
@@ -348,41 +350,40 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const googleHref = googleSignInUrl(nextPath)
 
   return (
-    <section className="relative mx-auto grid min-h-[calc(100vh-80px)] max-w-[1440px] items-center gap-12 overflow-hidden px-5 py-14 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-12">
-      <StarfieldBackground />
+    <section className="relative mx-auto grid min-h-[calc(100vh-80px)] max-w-[1440px] items-center gap-12 overflow-hidden bg-black px-5 py-14 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-12">
+      <MinimalBackdrop />
 
       <div className="relative z-10 hidden lg:block">
-        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.14em] text-zinc-300"><Sparkles className="size-3.5" />AI-powered learning platform</span>
-        <h2 className="mt-6 text-5xl font-semibold leading-[0.98] tracking-[-0.05em] xl:text-6xl">Learn smarter<br />with AirNexus</h2>
+        <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-500"><span className="size-1.5 bg-violet-300" />AI-powered learning platform</span>
+        <h2 className="mt-6 text-5xl font-semibold leading-[0.98] tracking-[-0.05em] text-white xl:text-6xl">Learn smarter<br />with AirNexus</h2>
         <p className="mt-6 max-w-md text-base leading-8 text-zinc-400">Your AI study companion for notes, quizzes, and personalised study plans.</p>
-        <div className="mt-8 flex flex-wrap gap-3">
+        <div className="mt-8 flex flex-wrap items-center gap-3">
           {AUTH_FEATURE_PILLS.map(({ label, icon: Icon }) => (
-            <span key={label} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-zinc-200"><Icon className="size-4 text-zinc-400" />{label}</span>
+            <span key={label} className="inline-flex items-center gap-2 border border-white/15 px-4 py-2 text-sm text-zinc-300"><Icon className="size-4 text-zinc-500" />{label}</span>
           ))}
         </div>
         <div className="mt-14">
-          <div className="flex items-center gap-1 text-amber-300">{Array.from({ length: 5 }).map((_, index) => <Star key={index} className="size-4 fill-current" />)}</div>
+          <div className="flex items-center gap-1 text-white">{Array.from({ length: 5 }).map((_, index) => <Star key={index} className="size-4" />)}</div>
           <p className="mt-3 max-w-sm text-lg leading-7 text-zinc-300">&ldquo;AirNexus helps me study less and understand more.&rdquo;</p>
           <p className="mt-2 text-xs uppercase tracking-[0.16em] text-zinc-600">— AirNexus students</p>
         </div>
       </div>
 
       <div className="relative z-10 mx-auto w-full max-w-md">
-        <div className="nexus-card relative overflow-hidden p-7 sm:p-9">
-          <div aria-hidden="true" className="absolute -right-24 -top-28 size-56 rounded-full bg-violet-500/10 blur-3xl" />
-          <div className="relative flex flex-col items-center text-center">
-            <button type="button" onClick={revealAdminAccess} aria-label="Air Nexus mark" className="rounded-2xl outline-none transition hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-white/40">
-              <NexusLogo className="size-11" />
+        <div className="relative border border-white/15 bg-black p-7 sm:p-9">
+          <div className="flex flex-col items-center text-center">
+            <button type="button" onClick={revealAdminAccess} aria-label="Air Nexus mark" className="border border-white/15 p-2.5 outline-none transition hover:border-white/40 focus-visible:ring-2 focus-visible:ring-white/40">
+              <NexusLogo className="size-8" />
             </button>
-            <h1 className="mt-5 text-2xl font-semibold">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+            <h1 className="mt-5 text-2xl font-semibold text-white">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
             <p className="mt-1.5 text-sm text-zinc-500">{mode === 'login' ? 'Sign in to continue to AirNexus' : 'Join AirNexus and start learning smarter'}</p>
           </div>
 
-          <form onSubmit={submit} className="relative mt-7">
+          <form onSubmit={submit} className="mt-7">
             {mode === 'signup' && (
               <label className="block text-xs text-zinc-400">
                 Username
-                <input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="nexus-field mt-2" placeholder="e.g. study_wolf23" autoComplete="username" />
+                <input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="mt-2 w-full border border-white/15 bg-transparent px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-white" placeholder="e.g. study_wolf23" autoComplete="username" />
                 <span className="mt-1.5 block text-[10px] text-zinc-600">3-20 characters, letters, numbers, and underscores only — not your real name.</span>
               </label>
             )}
@@ -390,14 +391,14 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
               Email address
               <div className="relative mt-2">
                 <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
-                <input name="email" type="email" required className="nexus-field" style={{ paddingLeft: '2.5rem' }} placeholder="name@example.com" autoComplete="email" />
+                <input name="email" type="email" required className="w-full border border-white/15 bg-transparent py-2.5 pl-10 pr-3.5 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-white" placeholder="name@example.com" autoComplete="email" />
               </div>
             </label>
             <label className="mt-5 block text-xs text-zinc-400">
               Password
               <div className="relative mt-2">
                 <ShieldCheck className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
-                <input name="password" type={showPassword ? 'text' : 'password'} minLength={8} required className="nexus-field" style={{ paddingLeft: '2.5rem', paddingRight: '2.5rem' }} placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+                <input name="password" type={showPassword ? 'text' : 'password'} minLength={8} required className="w-full border border-white/15 bg-transparent py-2.5 pl-10 pr-10 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-white" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
                 <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 transition hover:text-white">
                   {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
@@ -409,32 +410,32 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
               Remember me
             </label>
 
-            <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Continue'}<ArrowRight className="size-4" /></button>
+            <button type="submit" disabled={loading} className="mt-6 inline-flex w-full items-center justify-center gap-2 bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Continue'}<ArrowRight className="size-4" /></button>
           </form>
 
-          {error && <p role="alert" className="relative mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
+          {error && <p role="alert" className="mt-4 border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-300">{error}</p>}
 
-          <div className="relative mt-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
-            <span className="h-px flex-1 bg-white/8" />or continue with<span className="h-px flex-1 bg-white/8" />
+          <div className="mt-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
+            <span className="h-px flex-1 bg-white/15" />or continue with<span className="h-px flex-1 bg-white/15" />
           </div>
 
-          <a href={googleHref} className="nexus-outline relative mt-4 w-full justify-center gap-3 text-sm"><GoogleIcon className="size-4.5" />Continue with Google</a>
+          <a href={googleHref} className="mt-4 inline-flex w-full items-center justify-center gap-3 border border-white/20 bg-transparent px-4 py-2.5 text-sm font-medium text-white transition hover:border-white/40 hover:bg-white/5"><GoogleIcon className="size-4.5" />Continue with Google</a>
 
           {mode === 'login' && adminAccessOpen && (
-            <Link href="/admin/login" className="relative mt-4 flex items-center justify-between rounded-2xl border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100 transition hover:border-violet-200/40 hover:bg-violet-300/15">
+            <Link href="/admin/login" className="mt-4 flex items-center justify-between border border-violet-300/30 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-200 transition hover:border-violet-200/60">
               Owner console
               <ArrowRight className="size-4" />
             </Link>
           )}
-          <p className="relative mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? 'New here? ' : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="font-medium text-white hover:text-zinc-300">{mode === 'login' ? 'Create an account' : 'Sign in'}</Link></p>
+          <p className="mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? 'New here? ' : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="font-medium text-white hover:text-zinc-300">{mode === 'login' ? 'Create an account' : 'Sign in'}</Link></p>
           {mode === 'login' && (
             <button
               type="button"
               aria-label={adminAccessOpen ? 'Open owner console login' : 'Hidden owner access'}
               onClick={() => { if (adminAccessOpen) router.push('/admin/login'); else revealAdminAccess() }}
               className={cn(
-                'absolute bottom-3 right-3 size-4 rounded-full border transition duration-300',
-                adminAccessOpen ? 'border-violet-200/70 bg-violet-200 shadow-[0_0_18px_rgba(221,214,254,.55)]' : 'border-white/5 bg-white/[0.025] opacity-10 hover:opacity-35',
+                'absolute bottom-3 right-3 size-3.5 border transition duration-300',
+                adminAccessOpen ? 'border-violet-300 bg-violet-300' : 'border-white/15 bg-transparent opacity-20 hover:opacity-50',
               )}
             />
           )}
