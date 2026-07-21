@@ -14,6 +14,8 @@ import {
   ChevronDown,
   Code2,
   Database,
+  Eye,
+  EyeOff,
   FileSearch,
   FileText,
   Globe2,
@@ -31,13 +33,14 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Star,
   TrendingUp,
   X,
   Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { PLAN_DETAILS, type NexusPlan } from '@/lib/plans'
-import { clearAuthSession, getAuthSession, signInWithPassword, signUpWithPassword, type AuthSession } from '@/lib/auth/session'
+import { clearAuthSession, getAuthSession, googleSignInUrl, signInWithPassword, signUpWithPassword, type AuthSession } from '@/lib/auth/session'
 import { cn } from '@/lib/utils'
 import { AI_TOOL_CATEGORIES, AI_TOOLS, type AiToolCategory } from '@/lib/ai-tools/catalog'
 import { NexusLogo } from '@/components/brand/nexus-mark'
@@ -78,6 +81,7 @@ const nav = [
 
 export function NexusPointSite({ page, toolSlug }: { page: MarketingPage; toolSlug?: string }) {
   if (page === 'airgpt') return <AirGPTGate />
+  const isAuthPage = page === 'login' || page === 'signup'
 
   return (
     <div className="nexus-site min-h-screen overflow-x-hidden bg-black text-white">
@@ -88,10 +92,10 @@ export function NexusPointSite({ page, toolSlug }: { page: MarketingPage; toolSl
         {page === 'pricing' && <PricingPage />}
         {page === 'resources' && <ResourcesPage />}
         {page === 'company' && <CompanyPage />}
-        {(page === 'login' || page === 'signup') && <AuthPage mode={page} />}
+        {isAuthPage && <AuthPage mode={page as 'login' | 'signup'} />}
         {page === 'tool' && <ToolPage slug={toolSlug ?? ''} />}
       </main>
-      <MarketingFooter />
+      {!isAuthPage && <MarketingFooter />}
     </div>
   )
 }
@@ -228,19 +232,60 @@ function CompanyPage() {
   return <PageShell eyebrow="Company" title="Building intelligence people can actually use." description="Air Nexus creates calm, capable AI products that help people do ambitious work without losing control of the process."><div className="grid gap-5 lg:grid-cols-[1.2fr_.8fr]"><article className="nexus-card p-7 sm:p-10"><h2 className="text-2xl font-semibold">Our mission</h2><p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-400">Make advanced AI feel useful, transparent, and accessible—whether someone is studying for an exam, planning a launch, or building the next great product.</p><div className="mt-8 flex flex-wrap gap-3"><span className="nexus-pill">Human-centred</span><span className="nexus-pill">Secure by default</span><span className="nexus-pill">Built in Australia</span></div></article><div className="grid gap-5 sm:grid-cols-3 lg:grid-cols-1">{[[String(AI_TOOLS.length), 'focused tools'], ['3', 'Flexible plans'], ['24/7', 'AirGPT access']].map(([value, label]) => <div key={label} className="nexus-card p-6"><p className="text-4xl font-semibold nexus-gradient-text">{value}</p><p className="mt-2 text-sm text-zinc-500">{label}</p></div>)}</div></div></PageShell>
 }
 
+const AUTH_FEATURE_PILLS = [
+  { label: 'Study assistant', icon: BrainCircuit },
+  { label: 'Quiz generator', icon: ListChecks },
+  { label: 'Smart notes', icon: FileText },
+]
+
+function StarfieldBackground() {
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div
+        className="absolute inset-0 opacity-[0.35]"
+        style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.9) 1px, transparent 1.4px)', backgroundSize: '3px 3px' }}
+      />
+      <div
+        className="absolute inset-0 opacity-[0.25]"
+        style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.9) 1.4px, transparent 1.8px)', backgroundSize: '9px 9px', backgroundPosition: '4px 4px' }}
+      />
+      <div className="absolute -left-1/4 top-0 size-[560px] rounded-full bg-violet-500/12 blur-[120px]" />
+      <div className="absolute right-0 top-1/3 size-[480px] rounded-full bg-cyan-400/10 blur-[120px]" />
+      <div className="absolute inset-x-0 -bottom-40 h-72 bg-[radial-gradient(ellipse_at_bottom,rgba(96,165,250,0.28),transparent_65%)]" />
+    </div>
+  )
+}
+
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path fill="#4285F4" d="M23.52 12.27c0-.82-.07-1.6-.2-2.36H12v4.47h6.47a5.54 5.54 0 0 1-2.4 3.64v3h3.87c2.27-2.09 3.58-5.17 3.58-8.75z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.87-3a7.4 7.4 0 0 1-11.03-3.89H1.06v3.09A12 12 0 0 0 12 24z" />
+      <path fill="#FBBC05" d="M5.05 14.21A7.2 7.2 0 0 1 4.67 12c0-.77.13-1.51.38-2.21V6.7H1.06A12 12 0 0 0 0 12c0 1.94.46 3.77 1.06 5.3l4-3.09z" />
+      <path fill="#EA4335" d="M12 4.75c1.76 0 3.35.6 4.6 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.06 6.7l4 3.1A7.16 7.16 0 0 1 12 4.75z" />
+    </svg>
+  )
+}
+
 function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [remember, setRemember] = useState(true)
+  const [showPassword, setShowPassword] = useState(false)
   const [nextPath, setNextPath] = useState('/airgpt')
   const [adminAccessOpen, setAdminAccessOpen] = useState(false)
   const [, setAdminTapCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    const destination = safeNextPath(new URLSearchParams(window.location.search).get('next'))
-    const timeoutId = window.setTimeout(() => setNextPath(destination), 0)
+    const params = new URLSearchParams(window.location.search)
+    const destination = safeNextPath(params.get('next'))
+    const oauthError = params.get('error')
+    const timeoutId = window.setTimeout(() => {
+      setNextPath(destination)
+      if (oauthError) setError(oauthError)
+    }, 0)
     void getAuthSession()
       .then((current) => {
         if (!cancelled && current) router.replace(destination)
@@ -300,60 +345,100 @@ function AuthPage({ mode }: { mode: 'login' | 'signup' }) {
     }
   }
 
+  const googleHref = googleSignInUrl(nextPath)
+
   return (
-    <section className="relative mx-auto flex min-h-[calc(100vh-160px)] max-w-[1440px] items-center justify-center px-5 py-16">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(255,255,255,.08),transparent_38%)]" />
-      <div className="nexus-card relative w-full max-w-md overflow-hidden p-7 sm:p-9">
-        <div aria-hidden="true" className="absolute -right-24 -top-28 size-56 rounded-full bg-violet-500/10 blur-3xl" />
-        <button type="button" onClick={revealAdminAccess} aria-label="Air Nexus mark" className="relative rounded-2xl text-left outline-none transition hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-white/40">
-          <NexusLogo className="size-11" />
-        </button>
-        <p className="relative mt-6 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-300">{mode === 'login' ? 'Secure sign in' : 'Join Air Nexus'}</p>
-        <h1 className="relative mt-2 text-3xl font-semibold">{mode === 'login' ? 'Continue to AirGPT' : 'Create your account'}</h1>
-        <p className="relative mt-2 text-sm leading-6 text-zinc-500">Supabase Auth protects your workspace and memory. AirNexus only uses server-verified account IDs.</p>
+    <section className="relative mx-auto grid min-h-[calc(100vh-80px)] max-w-[1440px] items-center gap-12 overflow-hidden px-5 py-14 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-12">
+      <StarfieldBackground />
 
-        <form onSubmit={submit} className="relative mt-6">
-          {mode === 'signup' && (
-            <label className="block text-xs text-zinc-400">
-              Username
-              <input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="nexus-field mt-2" placeholder="e.g. study_wolf23" autoComplete="username" />
-              <span className="mt-1.5 block text-[10px] text-zinc-600">3-20 characters, letters, numbers, and underscores only ? not your real name.</span>
-            </label>
-          )}
-          <label className={mode === 'signup' ? 'mt-5 block text-xs text-zinc-400' : 'block text-xs text-zinc-400'}>
-            Email
-            <input name="email" type="email" required className="nexus-field mt-2" placeholder="name@example.com" autoComplete="email" />
-          </label>
-          <label className="mt-5 block text-xs text-zinc-400">
-            Password
-            <input name="password" type="password" minLength={8} required className="nexus-field mt-2" placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
-          </label>
-          <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Sign in'}<ArrowRight className="size-4" /></button>
-        </form>
+      <div className="relative z-10 hidden lg:block">
+        <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.14em] text-zinc-300"><Sparkles className="size-3.5" />AI-powered learning platform</span>
+        <h2 className="mt-6 text-5xl font-semibold leading-[0.98] tracking-[-0.05em] xl:text-6xl">Learn smarter<br />with AirNexus</h2>
+        <p className="mt-6 max-w-md text-base leading-8 text-zinc-400">Your AI study companion for notes, quizzes, and personalised study plans.</p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          {AUTH_FEATURE_PILLS.map(({ label, icon: Icon }) => (
+            <span key={label} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm text-zinc-200"><Icon className="size-4 text-zinc-400" />{label}</span>
+          ))}
+        </div>
+        <div className="mt-14">
+          <div className="flex items-center gap-1 text-amber-300">{Array.from({ length: 5 }).map((_, index) => <Star key={index} className="size-4 fill-current" />)}</div>
+          <p className="mt-3 max-w-sm text-lg leading-7 text-zinc-300">&ldquo;AirNexus helps me study less and understand more.&rdquo;</p>
+          <p className="mt-2 text-xs uppercase tracking-[0.16em] text-zinc-600">— AirNexus students</p>
+        </div>
+      </div>
 
-        <label className="relative mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/8 bg-white/[0.025] p-3 text-xs text-zinc-400">
-          <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-white" />
-          <span><span className="block font-medium text-zinc-200">Remember me</span><span className="mt-0.5 block text-[10px] text-zinc-600">Keep this Supabase session on this device.</span></span>
-        </label>
-        {error && <p role="alert" className="relative mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
-        {mode === 'login' && adminAccessOpen && (
-          <Link href="/admin/login" className="relative mt-4 flex items-center justify-between rounded-2xl border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100 transition hover:border-violet-200/40 hover:bg-violet-300/15">
-            Owner console
-            <ArrowRight className="size-4" />
-          </Link>
-        )}
-        <p className="relative mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? "New to Air Nexus? " : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="text-white hover:text-zinc-300">{mode === 'login' ? 'Sign up' : 'Login'}</Link></p>
-        {mode === 'login' && (
-          <button
-            type="button"
-            aria-label={adminAccessOpen ? 'Open owner console login' : 'Hidden owner access'}
-            onClick={() => { if (adminAccessOpen) router.push('/admin/login'); else revealAdminAccess() }}
-            className={cn(
-              'absolute bottom-3 right-3 size-4 rounded-full border transition duration-300',
-              adminAccessOpen ? 'border-violet-200/70 bg-violet-200 shadow-[0_0_18px_rgba(221,214,254,.55)]' : 'border-white/5 bg-white/[0.025] opacity-10 hover:opacity-35',
+      <div className="relative z-10 mx-auto w-full max-w-md">
+        <div className="nexus-card relative overflow-hidden p-7 sm:p-9">
+          <div aria-hidden="true" className="absolute -right-24 -top-28 size-56 rounded-full bg-violet-500/10 blur-3xl" />
+          <div className="relative flex flex-col items-center text-center">
+            <button type="button" onClick={revealAdminAccess} aria-label="Air Nexus mark" className="rounded-2xl outline-none transition hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-white/40">
+              <NexusLogo className="size-11" />
+            </button>
+            <h1 className="mt-5 text-2xl font-semibold">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+            <p className="mt-1.5 text-sm text-zinc-500">{mode === 'login' ? 'Sign in to continue to AirNexus' : 'Join AirNexus and start learning smarter'}</p>
+          </div>
+
+          <form onSubmit={submit} className="relative mt-7">
+            {mode === 'signup' && (
+              <label className="block text-xs text-zinc-400">
+                Username
+                <input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" className="nexus-field mt-2" placeholder="e.g. study_wolf23" autoComplete="username" />
+                <span className="mt-1.5 block text-[10px] text-zinc-600">3-20 characters, letters, numbers, and underscores only — not your real name.</span>
+              </label>
             )}
-          />
-        )}
+            <label className={cn('block text-xs text-zinc-400', mode === 'signup' && 'mt-5')}>
+              Email address
+              <div className="relative mt-2">
+                <Mail className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+                <input name="email" type="email" required className="nexus-field" style={{ paddingLeft: '2.5rem' }} placeholder="name@example.com" autoComplete="email" />
+              </div>
+            </label>
+            <label className="mt-5 block text-xs text-zinc-400">
+              Password
+              <div className="relative mt-2">
+                <ShieldCheck className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+                <input name="password" type={showPassword ? 'text' : 'password'} minLength={8} required className="nexus-field" style={{ paddingLeft: '2.5rem', paddingRight: '2.5rem' }} placeholder="At least 8 characters" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+                <button type="button" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 transition hover:text-white">
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </label>
+
+            <label className="mt-4 flex cursor-pointer items-center gap-2.5 text-xs text-zinc-400">
+              <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="size-4 accent-white" />
+              Remember me
+            </label>
+
+            <button type="submit" disabled={loading} className="nexus-cta mt-6 w-full">{loading ? 'Signing in...' : mode === 'signup' ? 'Create account' : 'Continue'}<ArrowRight className="size-4" /></button>
+          </form>
+
+          {error && <p role="alert" className="relative mt-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-xs text-red-200">{error}</p>}
+
+          <div className="relative mt-6 flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
+            <span className="h-px flex-1 bg-white/8" />or continue with<span className="h-px flex-1 bg-white/8" />
+          </div>
+
+          <a href={googleHref} className="nexus-outline relative mt-4 w-full justify-center gap-3 text-sm"><GoogleIcon className="size-4.5" />Continue with Google</a>
+
+          {mode === 'login' && adminAccessOpen && (
+            <Link href="/admin/login" className="relative mt-4 flex items-center justify-between rounded-2xl border border-violet-300/20 bg-violet-400/10 px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-violet-100 transition hover:border-violet-200/40 hover:bg-violet-300/15">
+              Owner console
+              <ArrowRight className="size-4" />
+            </Link>
+          )}
+          <p className="relative mt-6 text-center text-xs text-zinc-500">{mode === 'login' ? 'New here? ' : 'Already have an account? '}<Link href={(mode === 'login' ? '/signup' : '/login') + (nextPath !== '/airgpt' ? '?next=' + encodeURIComponent(nextPath) : '')} className="font-medium text-white hover:text-zinc-300">{mode === 'login' ? 'Create an account' : 'Sign in'}</Link></p>
+          {mode === 'login' && (
+            <button
+              type="button"
+              aria-label={adminAccessOpen ? 'Open owner console login' : 'Hidden owner access'}
+              onClick={() => { if (adminAccessOpen) router.push('/admin/login'); else revealAdminAccess() }}
+              className={cn(
+                'absolute bottom-3 right-3 size-4 rounded-full border transition duration-300',
+                adminAccessOpen ? 'border-violet-200/70 bg-violet-200 shadow-[0_0_18px_rgba(221,214,254,.55)]' : 'border-white/5 bg-white/[0.025] opacity-10 hover:opacity-35',
+              )}
+            />
+          )}
+        </div>
       </div>
     </section>
   )

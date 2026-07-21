@@ -120,6 +120,14 @@ export function sessionFromSupabaseUser(value: unknown): AuthSession | null {
   }
 }
 
+/** Builds the URL that starts Supabase's hosted OAuth flow for a given provider — Supabase holds the provider's client ID/secret (configured in the Supabase dashboard) and handles the whole provider-side exchange; it only ever hands our app a finished session at `redirectTo`. */
+export function buildSupabaseOAuthUrl(provider: 'google', redirectTo: string) {
+  const url = new URL(`${getSupabaseUrl()}/auth/v1/authorize`)
+  url.searchParams.set('provider', provider)
+  url.searchParams.set('redirect_to', redirectTo)
+  return url.toString()
+}
+
 export async function signInWithSupabasePassword(email: string, password: string) {
   const response = await supabaseFetch('/auth/v1/token?grant_type=password', {
     method: 'POST',

@@ -61,6 +61,23 @@ export async function signUpWithPassword(input: { username: string; email: strin
   return body.session
 }
 
+/** Builds the link that starts Supabase's hosted Google OAuth flow — a plain navigation (`<a href>`), not a fetch call. */
+export function googleSignInUrl(nextPath: string) {
+  return apiUrl('/api/auth/google') + '?next=' + encodeURIComponent(nextPath)
+}
+
+export async function completeGoogleOAuth(input: { accessToken: string; refreshToken: string; expiresIn?: number }) {
+  const response = await fetch(apiUrl('/api/auth/oauth-callback'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ access_token: input.accessToken, refresh_token: input.refreshToken, expires_in: input.expiresIn }),
+  })
+  const body = await readAuthResponse(response)
+  if (!isAuthSession(body.session)) throw new Error('The server did not return a valid session.')
+  return body.session
+}
+
 export async function clearAuthSession() {
   if (typeof window === 'undefined') return
   await fetch(apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => null)
